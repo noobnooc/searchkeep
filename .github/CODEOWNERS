@@ -1,0 +1,24 @@
+# Code owners must review every change. The last matching pattern wins.
+# Maintainers: the owners listed here plus repository admins.
+# The paths below are listed explicitly because they always need careful human review
+# (see docs/charter.md and ADR 0007), even if the default owner changes.
+
+*                                   @noobnooc
+
+# Governance
+/docs/charter.md                    @noobnooc
+/docs/adr/                          @noobnooc
+/AGENTS.md                          @noobnooc
+
+# Deployment configuration and database migrations
+/apps/cloudflare/wrangler.jsonc     @noobnooc
+/packages/store-d1/migrations/      @noobnooc
+
+# Authentication and readiness checks
+/packages/core/src/auth/            @noobnooc
+/apps/cloudflare/src/auth*          @noobnooc
+/apps/cloudflare/src/auth/          @noobnooc
+
+# Automation
+/.github/                           @noobnooc
+/.claude/skills/                    @noobnooc

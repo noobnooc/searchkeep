@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Deploy guide and troubleshooting
+    url: https://github.com/noobnooc/searchkeep/blob/main/docs/deploy.md
+    about: Step-by-step deployment, readiness states and common errors.
+  - name: Documentation
+    url: https://searchkeep.dev
+    about: Product overview and documentation.
+  - name: Report a security vulnerability
+    url: https://github.com/noobnooc/searchkeep/security/advisories/new
+    about: Please report security problems privately, never in a public issue.

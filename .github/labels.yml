@@ -1,0 +1,65 @@
+# Label set for noobnooc/searchkeep. Synced by .github/workflows/labels.yml.
+# Labels missing from this file are left untouched, never deleted.
+# Descriptions must be 100 characters or fewer. Colors are hex without "#".
+
+# Type
+- name: type:bug
+  color: d73a4a
+  description: Something does not work as documented.
+- name: type:feature
+  color: a2eeef
+  description: New capability or improvement within the charter.
+- name: type:docs
+  color: 0075ca
+  description: Documentation only.
+- name: type:chore
+  color: cfd3d7
+  description: Maintenance, refactoring, dependencies or tooling.
+- name: type:security
+  color: b60205
+  description: Security hardening. Report vulnerabilities privately (SECURITY.md).
+
+# Priority
+- name: priority:p0
+  color: b60205
+  description: Broken for users now, security or data loss. Drop everything.
+- name: priority:p1
+  color: d93f0b
+  description: Important. Next up.
+- name: priority:p2
+  color: fbca04
+  description: Normal priority.
+- name: priority:p3
+  color: c2e0c6
+  description: Nice to have.
+
+# Status
+- name: status:triage
+  color: ededed
+  description: New. Waiting for triage and a maintainer decision.
+- name: status:needs-info
+  color: d4c5f9
+  description: Waiting for more information from the reporter.
+- name: status:agent-ready
+  color: 0e8a16
+  description: Approved by a maintainer for an agent to implement. Only maintainers add this.
+- name: status:agent-in-progress
+  color: 1d76db
+  description: Claimed by an agent run. See the latest agent-state comment.
+- name: status:needs-human
+  color: e99695
+  description: An agent needs a maintainer decision. Answer in this issue.
+- name: status:blocked
+  color: 000000
+  description: Blocked on something external.
+
+# Other
+- name: agent-proposal
+  color: 5319e7
+  description: Proposed by an agent. Needs maintainer approval (status:agent-ready).
+- name: out-of-scope
+  color: 8b949e
+  description: Conflicts with the charter. A maintainer decides whether to close.
+- name: agent-log
+  color: bfdadc
+  description: Monthly log of automated maintenance runs.
