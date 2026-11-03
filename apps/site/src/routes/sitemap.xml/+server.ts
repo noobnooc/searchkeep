@@ -10,7 +10,7 @@ export function GET() {
     <lastmod>${SITE.lastUpdated}</lastmod>
     <changefreq>${p.changefreq}</changefreq>
     <priority>${p.priority.toFixed(1)}</priority>
-  </url>`
+  </url>`,
   ).join('\n');
 
   const xml = `<?xml version="1.0" encoding="UTF-8"?>

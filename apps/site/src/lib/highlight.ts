@@ -5,8 +5,7 @@
 
 export type Lang = 'bash' | 'json' | 'jsonc' | 'ts' | 'text' | 'http' | 'regex';
 
-const escape = (s: string) =>
-  s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+const escape = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
 interface Rule {
   cls: string;

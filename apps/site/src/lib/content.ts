@@ -42,8 +42,7 @@ const source: ToolParam = {
 const brand: ToolParam = {
   name: 'brand',
   type: '"all" | "brand" | "non_brand"',
-  description:
-    'Split queries by the brand regex (`BRAND_REGEX` or the site’s `brandRegex`). Defaults to `all`.',
+  description: 'Split queries by the brand regex (`BRAND_REGEX` or the site’s `brandRegex`). Defaults to `all`.',
 };
 const limit = (def: number): ToolParam => ({
   name: 'limit',
@@ -293,8 +292,7 @@ export const SECRETS: Secret[] = [
   {
     name: 'CLOUDFLARE_API_TOKEN',
     required: 'yes',
-    description:
-      'API token with Account Analytics Read, Zone Analytics Read and Access: Apps and Policies Read. Read-only.',
+    description: 'API token with Account Analytics Read, Zone Analytics Read and Access: Apps and Policies Read. Read-only.',
   },
   {
     name: 'SITES',
@@ -315,14 +313,12 @@ export const SECRETS: Secret[] = [
   {
     name: 'BING_API_KEY',
     required: 'for Bing',
-    description:
-      'Bing Webmaster Tools API key. It can also submit URLs and remove sites, so treat it like a password.',
+    description: 'Bing Webmaster Tools API key. It can also submit URLs and remove sites, so treat it like a password.',
   },
   {
     name: 'BRAND_REGEX',
     required: 'optional',
-    description:
-      'Default brand regex (JavaScript regex source, matched case-insensitively). A site’s `brandRegex` overrides it.',
+    description: 'Default brand regex (JavaScript regex source, matched case-insensitively). A site’s `brandRegex` overrides it.',
     example: 'acme|acme\\s?corp',
   },
   {
@@ -336,10 +332,22 @@ export const SECRETS: Secret[] = [
 export const SITE_FIELDS: { name: string; required: boolean; description: string }[] = [
   { name: 'id', required: true, description: 'Short stable identifier used in tool calls and URLs. Lowercase letters, digits and dashes.' },
   { name: 'domain', required: true, description: 'Bare hostname, e.g. `acme.com`.' },
-  { name: 'gscProperty', required: false, description: 'Search Console property: `sc-domain:acme.com` for a domain property, or `https://acme.com/` for a URL-prefix property.' },
-  { name: 'bingSiteUrl', required: false, description: 'Site URL exactly as registered in Bing Webmaster Tools, e.g. `https://acme.com/`.' },
+  {
+    name: 'gscProperty',
+    required: false,
+    description: 'Search Console property: `sc-domain:acme.com` for a domain property, or `https://acme.com/` for a URL-prefix property.',
+  },
+  {
+    name: 'bingSiteUrl',
+    required: false,
+    description: 'Site URL exactly as registered in Bing Webmaster Tools, e.g. `https://acme.com/`.',
+  },
   { name: 'cloudflareZoneId', required: false, description: 'Zone ID of the proxied zone. Enables AI crawler data.' },
-  { name: 'webAnalyticsSiteTag', required: false, description: 'Cloudflare Web Analytics site tag. Enables page views, AI referrers and Web Vitals.' },
+  {
+    name: 'webAnalyticsSiteTag',
+    required: false,
+    description: 'Cloudflare Web Analytics site tag. Enables page views, AI referrers and Web Vitals.',
+  },
   { name: 'brandRegex', required: false, description: 'Brand regex for this site; overrides `BRAND_REGEX`.' },
 ];
 
@@ -368,8 +376,7 @@ export const READINESS: ReadinessState[] = [
   {
     id: 'no_access',
     label: 'Not protected by Access',
-    condition:
-      'The request has no valid `Cf-Access-Jwt-Assertion`, or `ACCESS_TEAM_DOMAIN` / `ACCESS_AUD` are not set.',
+    condition: 'The request has no valid `Cf-Access-Jwt-Assertion`, or `ACCESS_TEAM_DOMAIN` / `ACCESS_AUD` are not set.',
     dashboard: 'Only the public `/setup` guide.',
     api: '`/api` returns 403. `/mcp` returns an error that explains what to do.',
     cron: 'Does not sync.',

@@ -6,9 +6,7 @@ const plain = (s: string) => s.replace(/\s+/g, ' ').trim();
 
 export function llmsTxt(): string {
   const sections = DOCS.map(
-    (s) =>
-      `## ${s.title}\n\n` +
-      s.pages.map((p) => `- [${p.title}](${absolute(p.path)}): ${p.description}`).join('\n')
+    (s) => `## ${s.title}\n\n` + s.pages.map((p) => `- [${p.title}](${absolute(p.path)}): ${p.description}`).join('\n'),
   ).join('\n\n');
 
   return `# ${SITE.name}
@@ -35,21 +33,20 @@ ${sections}
 export function llmsFullTxt(): string {
   const tools = TOOLS.map((t) => {
     const params = t.params.length
-      ? t.params
-          .map((p) => `  - \`${p.name}\` (${p.type}${p.required ? ', required' : ''}): ${plain(p.description)}`)
-          .join('\n')
+      ? t.params.map((p) => `  - \`${p.name}\` (${p.type}${p.required ? ', required' : ''}): ${plain(p.description)}`).join('\n')
       : '  - No parameters.';
     return `### ${t.name}${t.readOnly ? '' : ' (write, off by default)'}\n\n${plain(t.description)}\n\nParameters:\n${params}`;
   }).join('\n\n');
 
   const secrets = SECRETS.map(
-    (s) => `| \`${s.name}\` | ${s.required} | ${plain(s.description)}${s.example ? ` Example: \`${s.example}\`.` : ''} |`
+    (s) => `| \`${s.name}\` | ${s.required} | ${plain(s.description)}${s.example ? ` Example: \`${s.example}\`.` : ''} |`,
   ).join('\n');
 
   const fields = SITE_FIELDS.map((f) => `| \`${f.name}\` | ${f.required ? 'yes' : 'no'} | ${plain(f.description)} |`).join('\n');
 
   const readiness = READINESS.map(
-    (r, i) => `${i + 1}. \`${r.id}\` (${r.label}): ${plain(r.condition)} Dashboard: ${plain(r.dashboard)} MCP and /api: ${plain(r.api)} Cron: ${r.cron}`
+    (r, i) =>
+      `${i + 1}. \`${r.id}\` (${r.label}): ${plain(r.condition)} Dashboard: ${plain(r.dashboard)} MCP and /api: ${plain(r.api)} Cron: ${r.cron}`,
   ).join('\n');
 
   const faqs = FAQS.map((f) => `### ${f.q}\n\n${f.a}`).join('\n\n');
