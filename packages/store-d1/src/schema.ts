@@ -113,7 +113,10 @@ export const webAnalytics = sqliteTable(
     visits: integer('visits').notNull(),
     pageViews: integer('page_views').notNull(),
   },
-  (t) => [primaryKey({ columns: [t.siteId, t.date, t.pageId, t.refererHost] }), index('web_analytics_referer').on(t.siteId, t.refererHost, t.date)],
+  (t) => [
+    primaryKey({ columns: [t.siteId, t.date, t.pageId, t.refererHost] }),
+    index('web_analytics_referer').on(t.siteId, t.refererHost, t.date),
+  ],
 );
 
 export const webVitals = sqliteTable(

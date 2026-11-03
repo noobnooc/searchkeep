@@ -38,13 +38,18 @@ export async function inspectUrl(ctx: OpsContext, p: { site?: string; url: strin
   if (!ctx.clients.gsc || !site.gscProperty) throw new SearchkeepError('not_configured', 'Search Console is not configured for this site.');
   const url = /^https?:\/\//i.test(p.url) ? p.url : pageToUrl(p.url.startsWith('/') ? p.url : `/${p.url}`, site.domain);
   const result = await ctx.clients.gsc.inspectUrl(site.gscProperty, url);
-  return { site: site.id, ...result, notes: ['Live call to the Search Console URL Inspection API (about 2,000 calls per property per day).'] };
+  return {
+    site: site.id,
+    ...result,
+    notes: ['Live call to the Search Console URL Inspection API (about 2,000 calls per property per day).'],
+  };
 }
 
 export async function listSitemaps(ctx: OpsContext, p: { site?: string; live?: boolean }) {
   const site = findSite(ctx.config, p.site);
   if (p.live) {
-    if (!ctx.clients.gsc || !site.gscProperty) throw new SearchkeepError('not_configured', 'Search Console is not configured for this site.');
+    if (!ctx.clients.gsc || !site.gscProperty)
+      throw new SearchkeepError('not_configured', 'Search Console is not configured for this site.');
     const maps = await ctx.clients.gsc.listSitemaps(site.gscProperty);
     await ctx.store.replaceSitemaps(site.id, 'gsc', maps);
     return { site: site.id, live: true, sitemaps: maps };
@@ -54,7 +59,10 @@ export async function listSitemaps(ctx: OpsContext, p: { site?: string; live?: b
 
 export async function submitSitemap(ctx: OpsContext, p: { site?: string; sitemapUrl: string }) {
   if (!ctx.config.enableWrites) {
-    throw new SearchkeepError('writes_disabled', 'Writes are disabled. Set the ENABLE_WRITES secret to "true" and give the service account Full permission in Search Console.');
+    throw new SearchkeepError(
+      'writes_disabled',
+      'Writes are disabled. Set the ENABLE_WRITES secret to "true" and give the service account Full permission in Search Console.',
+    );
   }
   const site = findSite(ctx.config, p.site);
   if (!ctx.clients.gsc || !site.gscProperty) throw new SearchkeepError('not_configured', 'Search Console is not configured for this site.');
@@ -78,9 +86,15 @@ export async function setupStatus(ctx: OpsContext, p: { readiness: ReadinessRepo
   const { config } = ctx;
   const checks: SetupCheck[] = [];
   const add = (c: SetupCheck) => checks.push(c);
-  for (const c of p.readiness.checks) add({ id: `readiness.${c.id}`, label: c.label, status: c.ok ? 'ok' : 'error', ...(c.detail ? { detail: c.detail } : {}) });
+  for (const c of p.readiness.checks)
+    add({ id: `readiness.${c.id}`, label: c.label, status: c.ok ? 'ok' : 'error', ...(c.detail ? { detail: c.detail } : {}) });
   for (const e of config.errors) add({ id: 'config', label: 'Configuration', status: 'error', detail: e });
-  add({ id: 'config.sites', label: 'SITES has at least one site', status: config.sites.length > 0 ? 'ok' : 'error', ...(config.sites.length ? {} : { detail: 'Set the SITES secret (JSON array).' }) });
+  add({
+    id: 'config.sites',
+    label: 'SITES has at least one site',
+    status: config.sites.length > 0 ? 'ok' : 'error',
+    ...(config.sites.length ? {} : { detail: 'Set the SITES secret (JSON array).' }),
+  });
   add({ id: 'config.cloudflare_account', label: 'CLOUDFLARE_ACCOUNT_ID is set', status: config.cloudflare.accountId ? 'ok' : 'error' });
   add({ id: 'config.cloudflare_token', label: 'CLOUDFLARE_API_TOKEN is set', status: config.cloudflare.apiToken ? 'ok' : 'error' });
   const anyGsc = config.sites.some((s) => s.gscProperty);
@@ -97,7 +111,12 @@ export async function setupStatus(ctx: OpsContext, p: { readiness: ReadinessRepo
     status: !anyBing ? 'skipped' : config.bing.apiKey ? 'ok' : 'error',
     ...(!anyBing ? { detail: 'No site has bingSiteUrl.' } : {}),
   });
-  add({ id: 'config.writes', label: 'Writes to external systems', status: 'ok', detail: config.enableWrites ? 'Enabled (submit_sitemap allowed).' : 'Disabled (read-only, default).' });
+  add({
+    id: 'config.writes',
+    label: 'Writes to external systems',
+    status: 'ok',
+    detail: config.enableWrites ? 'Enabled (submit_sitemap allowed).' : 'Disabled (read-only, default).',
+  });
 
   if (p.probe !== false) {
     const probe = async (id: string, label: string, fn: () => Promise<SetupCheck['status'] | [SetupCheck['status'], string]>) => {
@@ -120,7 +139,11 @@ export async function setupStatus(ctx: OpsContext, p: { readiness: ReadinessRepo
       await probe('probe.gsc', 'Service account can read each GSC property', async () => {
         const props = await gsc.listProperties();
         const missing = config.sites.filter((s) => s.gscProperty && !props.some((x) => x.siteUrl === s.gscProperty));
-        if (missing.length) return ['error', `Not visible to the service account: ${missing.map((s) => s.gscProperty).join(', ')}. Add ${config.gsc.clientEmail} as a Restricted user in Search Console.`];
+        if (missing.length)
+          return [
+            'error',
+            `Not visible to the service account: ${missing.map((s) => s.gscProperty).join(', ')}. Add ${config.gsc.clientEmail} as a Restricted user in Search Console.`,
+          ];
         return 'ok';
       });
     }
@@ -140,8 +163,18 @@ export async function setupStatus(ctx: OpsContext, p: { readiness: ReadinessRepo
   add({
     id: 'sync.last_run',
     label: 'Most recent sync',
-    status: !last ? 'warn' : last.status === 'ok' || last.status === 'skipped' ? 'ok' : last.status === 'partial' ? 'warn' : last.status === 'running' ? 'warn' : 'error',
-    detail: last ? `${last.status} at ${last.finishedAt ?? last.startedAt}; ${last.rowsWritten} rows written${last.message ? `; ${last.message}` : ''}` : 'No sync has run yet. Trigger one from the dashboard or with POST /api/sync.',
+    status: !last
+      ? 'warn'
+      : last.status === 'ok' || last.status === 'skipped'
+        ? 'ok'
+        : last.status === 'partial'
+          ? 'warn'
+          : last.status === 'running'
+            ? 'warn'
+            : 'error',
+    detail: last
+      ? `${last.status} at ${last.finishedAt ?? last.startedAt}; ${last.rowsWritten} rows written${last.message ? `; ${last.message}` : ''}`
+      : 'No sync has run yet. Trigger one from the dashboard or with POST /api/sync.',
   });
   const errors = checks.filter((c) => c.status === 'error').length;
   return {
@@ -151,7 +184,14 @@ export async function setupStatus(ctx: OpsContext, p: { readiness: ReadinessRepo
     checks,
     sites: config.sites.map((s) => ({ id: s.id, domain: s.domain, sources: sourcesOf(ctx, s) })),
     coverage: await ctx.store.coverage(),
-    recentSyncs: runs.map((r) => ({ startedAt: r.startedAt, finishedAt: r.finishedAt, trigger: r.trigger, status: r.status, rowsWritten: r.rowsWritten, message: r.message })),
+    recentSyncs: runs.map((r) => ({
+      startedAt: r.startedAt,
+      finishedAt: r.finishedAt,
+      trigger: r.trigger,
+      status: r.status,
+      rowsWritten: r.rowsWritten,
+      message: r.message,
+    })),
   };
 }
 
@@ -166,11 +206,32 @@ export async function overview(ctx: OpsContext, p: CommonParams) {
       const [cur, before, daily] = await Promise.all([
         ctx.store.queryPerformance({ ...base, range: r.range, dimensions: [], limit: 1 }),
         ctx.store.queryPerformance({ ...base, range: prev, dimensions: [], limit: 1 }),
-        ctx.store.queryPerformance({ ...base, range: { start: prev.start, end: r.range.end }, dimensions: [source === 'bing' ? 'week' : 'date'], orderBy: 'date', order: 'asc', limit: 800 }),
+        ctx.store.queryPerformance({
+          ...base,
+          range: { start: prev.start, end: r.range.end },
+          dimensions: [source === 'bing' ? 'week' : 'date'],
+          orderBy: 'date',
+          order: 'asc',
+          limit: 800,
+        }),
       ]);
       return { source, current: cur[0] ?? metrics(0, 0, null), previous: before[0] ?? metrics(0, 0, null), series: daily };
     }),
   );
-  const crawlers = await aiCrawlers(ctx, { ...(p.site ? { site: p.site } : {}), start: r.range.start, end: r.range.end, groupBy: ['crawler'], limit: 10 });
-  return { site: r.site.id, range: r.range, previousRange: prev, brand: r.brand, search: perSource, crawlers: { total: crawlers.totalRequests, top: crawlers.rows }, notes: r.notes };
+  const crawlers = await aiCrawlers(ctx, {
+    ...(p.site ? { site: p.site } : {}),
+    start: r.range.start,
+    end: r.range.end,
+    groupBy: ['crawler'],
+    limit: 10,
+  });
+  return {
+    site: r.site.id,
+    range: r.range,
+    previousRange: prev,
+    brand: r.brand,
+    search: perSource,
+    crawlers: { total: crawlers.totalRequests, top: crawlers.rows },
+    notes: r.notes,
+  };
 }

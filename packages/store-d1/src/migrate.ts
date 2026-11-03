@@ -40,15 +40,17 @@ export async function applyMigrations(db: D1Database, migrations = MIGRATIONS): 
   return applied;
 }
 
-let ensured: Promise<unknown> | null = null;
+const ensured = new WeakMap<D1Database, Promise<unknown>>();
 
-/** Runs `applyMigrations` once per isolate. */
+/** Runs `applyMigrations` once per isolate and database binding. */
 export function ensureMigrated(db: D1Database): Promise<unknown> {
-  if (!ensured) {
-    ensured = applyMigrations(db).catch((err) => {
-      ensured = null;
+  let p = ensured.get(db);
+  if (!p) {
+    p = applyMigrations(db).catch((err) => {
+      ensured.delete(db);
       throw err;
     });
+    ensured.set(db, p);
   }
-  return ensured;
+  return p;
 }

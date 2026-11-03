@@ -10,7 +10,9 @@ async function pemKey() {
   const der = new Uint8Array((await crypto.subtle.exportKey('pkcs8', pair.privateKey)) as ArrayBuffer);
   let bin = '';
   for (const b of der) bin += String.fromCharCode(b);
-  const b64 = btoa(bin).match(/.{1,64}/g)!.join('\\n');
+  const b64 = btoa(bin)
+    .match(/.{1,64}/g)!
+    .join('\\n');
   return { pem: `-----BEGIN PRIVATE KEY-----\\n${b64}\\n-----END PRIVATE KEY-----\\n`, publicKey: pair.publicKey };
 }
 
@@ -20,8 +22,16 @@ describe('gsc', () => {
     const jwt = await signServiceAccountJwt('sa@p.iam.gserviceaccount.com', pem, 'scope-x', 1000);
     const [h, c, s] = jwt.split('.');
     const claims = JSON.parse(atob(c!.replace(/-/g, '+').replace(/_/g, '/')));
-    expect(claims).toMatchObject({ iss: 'sa@p.iam.gserviceaccount.com', scope: 'scope-x', aud: 'https://oauth2.googleapis.com/token', iat: 1000, exp: 4600 });
-    const sig = Uint8Array.from(atob(s!.replace(/-/g, '+').replace(/_/g, '/') + '='.repeat((4 - (s!.length % 4)) % 4)), (ch) => ch.charCodeAt(0));
+    expect(claims).toMatchObject({
+      iss: 'sa@p.iam.gserviceaccount.com',
+      scope: 'scope-x',
+      aud: 'https://oauth2.googleapis.com/token',
+      iat: 1000,
+      exp: 4600,
+    });
+    const sig = Uint8Array.from(atob(s!.replace(/-/g, '+').replace(/_/g, '/') + '='.repeat((4 - (s!.length % 4)) % 4)), (ch) =>
+      ch.charCodeAt(0),
+    );
     expect(await crypto.subtle.verify('RSASSA-PKCS1-v1_5', publicKey, sig, new TextEncoder().encode(`${h}.${c}`))).toBe(true);
   });
 
@@ -40,7 +50,13 @@ describe('gsc', () => {
       return new Response(JSON.stringify({ siteEntry: [{ siteUrl: 'sc-domain:acme.com', permissionLevel: 'siteRestrictedUser' }] }));
     }) as typeof fetch;
     const gsc = createGscClient({ clientEmail: 'sa@x', privateKey: pem, fetch: fetchMock });
-    const rows = await gsc.searchAnalytics({ property: 'sc-domain:acme.com', startDate: '2026-10-01', endDate: '2026-10-01', dimensions: ['date'], rowLimit: 10 });
+    const rows = await gsc.searchAnalytics({
+      property: 'sc-domain:acme.com',
+      startDate: '2026-10-01',
+      endDate: '2026-10-01',
+      dimensions: ['date'],
+      rowLimit: 10,
+    });
     expect(rows).toHaveLength(1);
     expect(await gsc.listProperties()).toHaveLength(1);
     expect(calls.filter((c) => c.includes('oauth2'))).toHaveLength(1);
@@ -48,7 +64,11 @@ describe('gsc', () => {
   });
 
   it('refuses to submit sitemaps unless writes are enabled', async () => {
-    const gsc = createGscClient({ clientEmail: 'sa@x', privateKey: 'x', fetch: (async () => new Response('{}')) as unknown as typeof fetch });
+    const gsc = createGscClient({
+      clientEmail: 'sa@x',
+      privateKey: 'x',
+      fetch: (async () => new Response('{}')) as unknown as typeof fetch,
+    });
     await expect(gsc.submitSitemap('sc-domain:acme.com', 'https://acme.com/sitemap.xml')).rejects.toThrow(/writes are disabled/);
   });
 });

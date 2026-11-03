@@ -76,5 +76,9 @@ export function parseAiCitationsCsv(text: string, opts: { domain: string; defaul
     }
     out.push({ date, page: normalizePage(url, opts.domain), surface: opts.surface ?? 'bing_copilot', citations: Math.round(n) });
   }
-  return { rows: out, skipped, columns: { page: rows[0]![pageIdx]!, citations: rows[0]![citeIdx]!, date: dateIdx >= 0 ? rows[0]![dateIdx]! : null } };
+  return {
+    rows: out,
+    skipped,
+    columns: { page: rows[0]![pageIdx]!, citations: rows[0]![citeIdx]!, date: dateIdx >= 0 ? rows[0]![dateIdx]! : null },
+  };
 }

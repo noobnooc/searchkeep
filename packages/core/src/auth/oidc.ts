@@ -57,7 +57,9 @@ function decodeJson(part: string): Record<string, unknown> {
   return JSON.parse(new TextDecoder().decode(b64urlToBytes(part))) as Record<string, unknown>;
 }
 
-function algorithmFor(alg: string): { import: RsaHashedImportParams | EcKeyImportParams; verify: AlgorithmIdentifier | EcdsaParams } | null {
+function algorithmFor(
+  alg: string,
+): { import: RsaHashedImportParams | EcKeyImportParams; verify: AlgorithmIdentifier | EcdsaParams } | null {
   switch (alg) {
     case 'RS256':
       return { import: { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' }, verify: { name: 'RSASSA-PKCS1-v1_5' } };

@@ -77,7 +77,7 @@ export async function resolve(ctx: AnalysisContext, p: CommonParams, defaults: {
   if (brand !== 'all') {
     await classifyBrandQueries(ctx.store, ctx.config, site);
     if (!(site.brandRegex ?? ctx.config.brandRegex)) {
-      notes.push('No brand regex is configured (BRAND_REGEX or the site\'s brandRegex), so every query counts as non-brand.');
+      notes.push("No brand regex is configured (BRAND_REGEX or the site's brandRegex), so every query counts as non-brand.");
     }
   }
   return { site, source, range, brand, limit: clampLimit(p.limit, defaults.limit ?? 50), notes };
@@ -101,5 +101,4 @@ export function pct(n: number): number {
   return round(n * 100, 1);
 }
 
-export const ANONYMIZED_NOTE =
-  'Google hides anonymized (rare) queries, so totals grouped by query are lower than site totals.';
+export const ANONYMIZED_NOTE = 'Google hides anonymized (rare) queries, so totals grouped by query are lower than site totals.';

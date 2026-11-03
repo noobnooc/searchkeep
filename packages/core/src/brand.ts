@@ -18,4 +18,3 @@ export async function classifyBrandQueries(store: Store, config: SearchkeepConfi
     if (batch.length < 2000) return;
   }
 }
-

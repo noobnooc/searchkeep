@@ -38,7 +38,11 @@ export async function requestJson<T>(
     try {
       res = await f(url, {
         method: opts.method ?? (opts.body === undefined ? 'GET' : 'POST'),
-        headers: { accept: 'application/json', ...(opts.body !== undefined ? { 'content-type': 'application/json' } : {}), ...opts.headers },
+        headers: {
+          accept: 'application/json',
+          ...(opts.body !== undefined ? { 'content-type': 'application/json' } : {}),
+          ...opts.headers,
+        },
         ...(opts.body !== undefined ? { body: typeof opts.body === 'string' ? opts.body : JSON.stringify(opts.body) } : {}),
       });
     } catch (err) {
@@ -64,7 +68,10 @@ function defaultDescribe(status: number, body: string): string {
   try {
     const j = JSON.parse(body) as Record<string, unknown>;
     const e = j.error as Record<string, unknown> | string | undefined;
-    const msg = typeof e === 'string' ? e : (e?.message as string | undefined) ?? (j.message as string | undefined) ?? (j.Message as string | undefined);
+    const msg =
+      typeof e === 'string'
+        ? e
+        : ((e?.message as string | undefined) ?? (j.message as string | undefined) ?? (j.Message as string | undefined));
     if (msg) return `HTTP ${status}: ${String(msg).slice(0, 300)}`;
   } catch {
     // not JSON

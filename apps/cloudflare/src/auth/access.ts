@@ -54,12 +54,21 @@ export async function authenticate(request: Request, config: SearchkeepConfig): 
 }
 
 /** Reads the Access app (by AUD) and its policies through the Cloudflare API. Cached for a few minutes. */
-export async function inspectAccess(config: SearchkeepConfig, opts: { refresh?: boolean; fetch?: typeof fetch } = {}): Promise<AccessInspection> {
+export async function inspectAccess(
+  config: SearchkeepConfig,
+  opts: { refresh?: boolean; fetch?: typeof fetch } = {},
+): Promise<AccessInspection> {
   const accountId = config.cloudflare.accountId;
   const token = config.cloudflare.apiToken;
   const aud = config.access.aud;
   if (!accountId || !token || !aud) {
-    return { appFound: false, managedOAuthEnabled: false, broadPolicyReasons: [], error: 'Set CLOUDFLARE_ACCOUNT_ID and CLOUDFLARE_API_TOKEN (with Access: Apps and Policies Read) so Searchkeep can verify the Access setup.' };
+    return {
+      appFound: false,
+      managedOAuthEnabled: false,
+      broadPolicyReasons: [],
+      error:
+        'Set CLOUDFLARE_ACCOUNT_ID and CLOUDFLARE_API_TOKEN (with Access: Apps and Policies Read) so Searchkeep can verify the Access setup.',
+    };
   }
   const key = `${accountId}|${aud}|${token.slice(-6)}`;
   if (!opts.refresh && inspectionCache && inspectionCache.key === key && Date.now() - inspectionCache.at < INSPECTION_TTL_MS) {
@@ -70,7 +79,12 @@ export async function inspectAccess(config: SearchkeepConfig, opts: { refresh?: 
   try {
     const found = await cf.findAccessAppByAud(accountId, aud);
     if (!found) {
-      value = { appFound: false, managedOAuthEnabled: false, broadPolicyReasons: [], error: 'No Access application has the AUD in ACCESS_AUD.' };
+      value = {
+        appFound: false,
+        managedOAuthEnabled: false,
+        broadPolicyReasons: [],
+        error: 'No Access application has the AUD in ACCESS_AUD.',
+      };
     } else {
       const app = found.oauth_configuration === undefined || !found.policies ? await cf.getAccessApp(accountId, found.id) : found;
       let policies: AccessPolicy[] = [];
@@ -80,10 +94,19 @@ export async function inspectAccess(config: SearchkeepConfig, opts: { refresh?: 
         else policies.push(await cf.getReusablePolicy(accountId, p.id));
       }
       if (attached.length === 0) policies = await cf.listAccessAppPolicies(accountId, app.id).catch(() => []);
-      value = { appFound: true, managedOAuthEnabled: managedOAuthEnabled(app), broadPolicyReasons: broadPolicyReasons(policies, PUBLIC_EMAIL_DOMAINS) };
+      value = {
+        appFound: true,
+        managedOAuthEnabled: managedOAuthEnabled(app),
+        broadPolicyReasons: broadPolicyReasons(policies, PUBLIC_EMAIL_DOMAINS),
+      };
     }
   } catch (err) {
-    value = { appFound: false, managedOAuthEnabled: false, broadPolicyReasons: [], error: `Could not read the Access application: ${safeMessage(err)}` };
+    value = {
+      appFound: false,
+      managedOAuthEnabled: false,
+      broadPolicyReasons: [],
+      error: `Could not read the Access application: ${safeMessage(err)}`,
+    };
   }
   // Do not cache transient failures for long.
   inspectionCache = { key, at: value.error ? Date.now() - INSPECTION_TTL_MS + 30_000 : Date.now(), value };

@@ -16,7 +16,12 @@ function deps(extra: Record<string, string> = {}) {
   const config = loadConfig({ SITES: JSON.stringify([{ id: 'acme', domain: 'acme.com' }]), ...extra });
   return {
     ctx: { store, config, clients: {} },
-    readiness: async () => evaluateReadiness({ configured: true, identityOk: true, inspection: { appFound: true, managedOAuthEnabled: true, broadPolicyReasons: [] } }),
+    readiness: async () =>
+      evaluateReadiness({
+        configured: true,
+        identityOk: true,
+        inspection: { appFound: true, managedOAuthEnabled: true, broadPolicyReasons: [] },
+      }),
   };
 }
 
@@ -34,7 +39,12 @@ async function rpc(body: unknown, d = deps()) {
 
 describe('mcp', () => {
   it('initializes statelessly', async () => {
-    const { status, json } = await rpc({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 't', version: '1' } } });
+    const { status, json } = await rpc({
+      jsonrpc: '2.0',
+      id: 1,
+      method: 'initialize',
+      params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 't', version: '1' } },
+    });
     expect(status).toBe(200);
     expect(json.result.serverInfo.name).toBe('searchkeep');
   });
@@ -61,7 +71,12 @@ describe('mcp', () => {
   });
 
   it('validates arguments', async () => {
-    const { json } = await rpc({ jsonrpc: '2.0', id: 6, method: 'tools/call', params: { name: 'query_performance', arguments: { start: 'yesterday' } } });
+    const { json } = await rpc({
+      jsonrpc: '2.0',
+      id: 6,
+      method: 'tools/call',
+      params: { name: 'query_performance', arguments: { start: 'yesterday' } },
+    });
     expect(json.result?.isError ?? Boolean(json.error)).toBe(true);
   });
 });

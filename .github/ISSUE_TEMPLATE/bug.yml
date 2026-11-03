@@ -1,7 +1,7 @@
 name: Bug report
 description: Something in Searchkeep does not work as documented.
-title: "Bug: "
-labels: ["type:bug", "status:triage"]
+title: 'Bug: '
+labels: ['type:bug', 'status:triage']
 body:
   - type: markdown
     attributes:
@@ -47,7 +47,7 @@ body:
     attributes:
       label: Version or commit
       description: The CHANGELOG version or the commit SHA your fork is on, and when you last synced.
-      placeholder: "0.1.0, or abc1234 (synced 2026-11-03)"
+      placeholder: '0.1.0, or abc1234 (synced 2026-11-03)'
     validations:
       required: true
   - type: input
@@ -55,12 +55,12 @@ body:
     attributes:
       label: Readiness state
       description: From `setup_status` or the dashboard status page.
-      placeholder: "ready / no_access / oauth_disabled / policy_too_broad"
+      placeholder: 'ready / no_access / oauth_disabled / policy_too_broad'
   - type: input
     id: client
     attributes:
       label: MCP client (if relevant)
-      placeholder: "Claude Code 2.x, Cursor 1.x, claude.ai ..."
+      placeholder: 'Claude Code 2.x, Cursor 1.x, claude.ai ...'
   - type: textarea
     id: logs
     attributes:

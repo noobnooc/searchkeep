@@ -16,7 +16,10 @@ function wrangler(args, { allowFailure = false } = {}) {
 
 const migrate = ['d1', 'migrations', 'apply', 'DB', '--remote'];
 let migrated = wrangler(migrate, { allowFailure: true });
-if (!migrated) console.warn('\n[searchkeep] Remote migration skipped (no D1 permission or database not created yet). Continuing; the Worker migrates on startup.\n');
+if (!migrated)
+  console.warn(
+    '\n[searchkeep] Remote migration skipped (no D1 permission or database not created yet). Continuing; the Worker migrates on startup.\n',
+  );
 wrangler(['deploy']);
 if (!migrated) {
   migrated = wrangler(migrate, { allowFailure: true });

@@ -9,11 +9,17 @@ import { freshD1 } from './helpers.js';
 function previousReleaseMigrations(): Array<{ name: string; sql: string }> {
   try {
     const tag = execFileSync('git', ['describe', '--tags', '--abbrev=0'], { stdio: 'pipe' }).toString().trim();
-    const list = execFileSync('git', ['ls-tree', '--name-only', `${tag}`, 'migrations/'], { stdio: 'pipe' }).toString().trim().split('\n');
+    const list = execFileSync('git', ['ls-tree', '--name-only', `${tag}`, 'migrations/'], { stdio: 'pipe' })
+      .toString()
+      .trim()
+      .split('\n');
     return list
       .filter((f) => f.endsWith('.sql'))
       .sort()
-      .map((f) => ({ name: f.replace(/^migrations\//, ''), sql: execFileSync('git', ['show', `${tag}:packages/store-d1/${f}`], { stdio: 'pipe' }).toString() }));
+      .map((f) => ({
+        name: f.replace(/^migrations\//, ''),
+        sql: execFileSync('git', ['show', `${tag}:packages/store-d1/${f}`], { stdio: 'pipe' }).toString(),
+      }));
   } catch {
     return [];
   }
@@ -44,7 +50,11 @@ describe('migrations', () => {
   it('is compatible with wrangler-applied migrations', async () => {
     const db = await freshD1(false);
     // Simulate `wrangler d1 migrations apply`: same table, same names.
-    await db.prepare('CREATE TABLE d1_migrations (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE, applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL)').run();
+    await db
+      .prepare(
+        'CREATE TABLE d1_migrations (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE, applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL)',
+      )
+      .run();
     await applyMigrations(db);
     expect(await applyMigrations(db)).toEqual([]);
   });

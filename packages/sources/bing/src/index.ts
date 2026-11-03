@@ -4,7 +4,16 @@
  * Bing AI Performance (Copilot citations) has no API yet — it is imported from
  * its CSV export instead (see the dashboard).
  */
-import { requestJson, SourceError, toIsoDate, type BingClient, type BingCrawlIssue, type BingPageStat, type BingQueryStat, type BingTrafficStat } from '@searchkeep/core';
+import {
+  requestJson,
+  SourceError,
+  toIsoDate,
+  type BingClient,
+  type BingCrawlIssue,
+  type BingPageStat,
+  type BingQueryStat,
+  type BingTrafficStat,
+} from '@searchkeep/core';
 
 const API = 'https://ssl.bing.com/webmaster/api.svc/json';
 
@@ -86,7 +95,15 @@ export function createBingClient(opts: BingClientOptions): BingClient {
       return rows.flatMap((r) => {
         const date = parseBingDate(r.Date);
         if (!date || typeof r.Query !== 'string') return [];
-        return [{ date, query: r.Query, clicks: num(r.Clicks), impressions: num(r.Impressions), avgImpressionPosition: pos(r.AvgImpressionPosition) }];
+        return [
+          {
+            date,
+            query: r.Query,
+            clicks: num(r.Clicks),
+            impressions: num(r.Impressions),
+            avgImpressionPosition: pos(r.AvgImpressionPosition),
+          },
+        ];
       });
     },
 
@@ -95,7 +112,15 @@ export function createBingClient(opts: BingClientOptions): BingClient {
       return rows.flatMap((r) => {
         const date = parseBingDate(r.Date);
         if (!date || typeof r.Query !== 'string') return [];
-        return [{ date, page: r.Query, clicks: num(r.Clicks), impressions: num(r.Impressions), avgImpressionPosition: pos(r.AvgImpressionPosition) }];
+        return [
+          {
+            date,
+            page: r.Query,
+            clicks: num(r.Clicks),
+            impressions: num(r.Impressions),
+            avgImpressionPosition: pos(r.AvgImpressionPosition),
+          },
+        ];
       });
     },
 
@@ -111,7 +136,11 @@ export function createBingClient(opts: BingClientOptions): BingClient {
       const rows = await call<Record<string, unknown>>('GetCrawlIssues', { siteUrl });
       return rows.flatMap((r) =>
         typeof r.Url === 'string'
-          ? crawlIssueNames(r.Issues).map((issue) => ({ url: r.Url as string, issue, httpCode: r.HttpCode == null ? null : num(r.HttpCode) }))
+          ? crawlIssueNames(r.Issues).map((issue) => ({
+              url: r.Url as string,
+              issue,
+              httpCode: r.HttpCode == null ? null : num(r.HttpCode),
+            }))
           : [],
       );
     },

@@ -53,11 +53,20 @@ async function importPrivateKey(pem: string): Promise<CryptoKey> {
   try {
     return await crypto.subtle.importKey('pkcs8', der, { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' }, false, ['sign']);
   } catch {
-    throw new SourceError('gsc', 0, 'GSC_PRIVATE_KEY could not be imported (expected the PKCS#8 "private_key" from the service-account JSON)');
+    throw new SourceError(
+      'gsc',
+      0,
+      'GSC_PRIVATE_KEY could not be imported (expected the PKCS#8 "private_key" from the service-account JSON)',
+    );
   }
 }
 
-export async function signServiceAccountJwt(clientEmail: string, privateKey: string, scope: string, nowSec = Math.floor(Date.now() / 1000)): Promise<string> {
+export async function signServiceAccountJwt(
+  clientEmail: string,
+  privateKey: string,
+  scope: string,
+  nowSec = Math.floor(Date.now() / 1000),
+): Promise<string> {
   const header = b64url(JSON.stringify({ alg: 'RS256', typ: 'JWT' }));
   const claims = b64url(JSON.stringify({ iss: clientEmail, scope, aud: TOKEN_URL, iat: nowSec, exp: nowSec + 3600 }));
   const key = await importPrivateKey(privateKey);

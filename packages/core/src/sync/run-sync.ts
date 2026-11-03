@@ -110,7 +110,12 @@ export async function runSync(ctx: SyncContext): Promise<SyncRunRecord> {
         await unit.skip();
         await store.deleteMeta(INFLIGHT_KEY);
         inflight = null;
-        record(unit, 'error', 0, `Skipped ${unit.key} after ${MAX_INTERRUPTED_ATTEMPTS} interrupted attempts (likely the Worker CPU limit; lower GSC_ROWS_PER_DAY).`);
+        record(
+          unit,
+          'error',
+          0,
+          `Skipped ${unit.key} after ${MAX_INTERRUPTED_ATTEMPTS} interrupted attempts (likely the Worker CPU limit; lower GSC_ROWS_PER_DAY).`,
+        );
         continue;
       }
       const attempts = inflight && inflight.key === unit.key ? inflight.attempts + 1 : 1;
@@ -145,7 +150,15 @@ export async function runSync(ctx: SyncContext): Promise<SyncRunRecord> {
     await store.setMeta(writesKey, String(writesToday));
     const details = [...results.values()];
     const status: SyncRunRecord['status'] =
-      details.length === 0 ? 'skipped' : details.some((d) => d.status === 'error') ? (details.some((d) => d.status === 'ok') ? 'partial' : 'error') : stoppedFor ? 'partial' : 'ok';
+      details.length === 0
+        ? 'skipped'
+        : details.some((d) => d.status === 'error')
+          ? details.some((d) => d.status === 'ok')
+            ? 'partial'
+            : 'error'
+          : stoppedFor
+            ? 'partial'
+            : 'ok';
     const message = details.length === 0 ? 'Nothing due.' : stoppedFor ? `Stopped early: ${stoppedFor}; continues next run.` : null;
     const patch: Partial<SyncRunRecord> = { finishedAt: new Date().toISOString(), status, rowsWritten, message, details };
     await store.finishSyncRun(runId, patch);
@@ -153,7 +166,13 @@ export async function runSync(ctx: SyncContext): Promise<SyncRunRecord> {
     return { id: runId, startedAt: now.toISOString(), trigger: ctx.trigger, ...patch, status, rowsWritten } as SyncRunRecord;
   } catch (err) {
     const message = safeMessage(err);
-    await store.finishSyncRun(runId, { finishedAt: new Date().toISOString(), status: 'error', rowsWritten, message, details: [...results.values()] });
+    await store.finishSyncRun(runId, {
+      finishedAt: new Date().toISOString(),
+      status: 'error',
+      rowsWritten,
+      message,
+      details: [...results.values()],
+    });
     throw err;
   }
 }
@@ -189,18 +208,46 @@ async function planUnits(ctx: SyncContext, today: IsoDate): Promise<Unit[]> {
           'gsc',
           totals.map((r) => ({ date: r.keys[0]!, kind: 'total', clicks: r.clicks, impressions: r.impressions, position: r.position })),
         );
-        const breakdowns = await gsc.searchAnalytics({ property, startDate: date, endDate: date, dimensions: ['date', 'country', 'device'], rowLimit: 25_000 });
+        const breakdowns = await gsc.searchAnalytics({
+          property,
+          startDate: date,
+          endDate: date,
+          dimensions: ['date', 'country', 'device'],
+          rowLimit: 25_000,
+        });
         written += await store.writeBreakdowns(
           site.id,
           'gsc',
-          breakdowns.map((r) => ({ date: r.keys[0]!, country: r.keys[1]!, device: r.keys[2]!, clicks: r.clicks, impressions: r.impressions, position: r.position })),
+          breakdowns.map((r) => ({
+            date: r.keys[0]!,
+            country: r.keys[1]!,
+            device: r.keys[2]!,
+            clicks: r.clicks,
+            impressions: r.impressions,
+            position: r.position,
+          })),
         );
         const facts: SearchFactInput[] = [];
         for (let startRow = 0; startRow < rowsPerDay; startRow += 25_000) {
           const rowLimit = Math.min(25_000, rowsPerDay - startRow);
-          const rows = await gsc.searchAnalytics({ property, startDate: date, endDate: date, dimensions: ['date', 'query', 'page'], rowLimit, startRow });
+          const rows = await gsc.searchAnalytics({
+            property,
+            startDate: date,
+            endDate: date,
+            dimensions: ['date', 'query', 'page'],
+            rowLimit,
+            startRow,
+          });
           for (const r of rows) {
-            facts.push({ date: r.keys[0]!, kind: 'query_page', query: r.keys[1]!, page: normalizePage(r.keys[2]!, site.domain), clicks: r.clicks, impressions: r.impressions, position: r.position });
+            facts.push({
+              date: r.keys[0]!,
+              kind: 'query_page',
+              query: r.keys[1]!,
+              page: normalizePage(r.keys[2]!, site.domain),
+              clicks: r.clicks,
+              impressions: r.impressions,
+              position: r.position,
+            });
           }
           if (rows.length < rowLimit) break;
         }
@@ -302,7 +349,11 @@ async function planUnits(ctx: SyncContext, today: IsoDate): Promise<Unit[]> {
           name: 'bing.traffic',
           run: async () => {
             const rows = await bing.getRankAndTrafficStats(siteUrl);
-            return store.writeSearchFacts(site.id, 'bing', rows.map((r) => ({ date: r.date, kind: 'total', clicks: r.clicks, impressions: r.impressions })));
+            return store.writeSearchFacts(
+              site.id,
+              'bing',
+              rows.map((r) => ({ date: r.date, kind: 'total', clicks: r.clicks, impressions: r.impressions })),
+            );
           },
         },
         {
@@ -312,7 +363,14 @@ async function planUnits(ctx: SyncContext, today: IsoDate): Promise<Unit[]> {
             return store.writeSearchFacts(
               site.id,
               'bing',
-              rows.map((r) => ({ date: r.date, kind: 'query', query: r.query, clicks: r.clicks, impressions: r.impressions, position: r.avgImpressionPosition })),
+              rows.map((r) => ({
+                date: r.date,
+                kind: 'query',
+                query: r.query,
+                clicks: r.clicks,
+                impressions: r.impressions,
+                position: r.avgImpressionPosition,
+              })),
             );
           },
         },
@@ -323,7 +381,14 @@ async function planUnits(ctx: SyncContext, today: IsoDate): Promise<Unit[]> {
             return store.writeSearchFacts(
               site.id,
               'bing',
-              rows.map((r) => ({ date: r.date, kind: 'page', page: normalizePage(r.page, site.domain), clicks: r.clicks, impressions: r.impressions, position: r.avgImpressionPosition })),
+              rows.map((r) => ({
+                date: r.date,
+                kind: 'page',
+                page: normalizePage(r.page, site.domain),
+                clicks: r.clicks,
+                impressions: r.impressions,
+                position: r.avgImpressionPosition,
+              })),
             );
           },
         },
@@ -331,7 +396,11 @@ async function planUnits(ctx: SyncContext, today: IsoDate): Promise<Unit[]> {
           name: 'bing.crawl_issues',
           run: async () => {
             const rows = await bing.getCrawlIssues(siteUrl);
-            return store.replaceCrawlIssues(site.id, 'bing', rows.map((r) => ({ url: r.url, issue: r.issue, httpCode: r.httpCode, detectedAt: today })));
+            return store.replaceCrawlIssues(
+              site.id,
+              'bing',
+              rows.map((r) => ({ url: r.url, issue: r.issue, httpCode: r.httpCode, detectedAt: today })),
+            );
           },
         },
       ];
@@ -385,7 +454,16 @@ async function planUnits(ctx: SyncContext, today: IsoDate): Promise<Unit[]> {
                 const k = `${sig.name}|${path}|${r.status}`;
                 const prev = merged.get(k);
                 if (prev) prev.requests += r.requests;
-                else merged.set(k, { date, crawler: sig.name, operator: sig.operator, purpose: sig.purpose, path, status: r.status, requests: r.requests });
+                else
+                  merged.set(k, {
+                    date,
+                    crawler: sig.name,
+                    operator: sig.operator,
+                    purpose: sig.purpose,
+                    path,
+                    status: r.status,
+                    requests: r.requests,
+                  });
               }
               const n = await store.writeCrawlerRequests(site.id, [...merged.values()]);
               await store.setMeta(key, date);
@@ -415,12 +493,25 @@ async function planUnits(ctx: SyncContext, today: IsoDate): Promise<Unit[]> {
               const rum = await cf.webAnalytics(accountId, tag, date);
               let n = await store.writeWebAnalytics(
                 site.id,
-                rum.map((r) => ({ date, path: normalizePage(r.path, site.domain, r.host), refererHost: r.refererHost.toLowerCase(), visits: r.visits, pageViews: r.pageViews })),
+                rum.map((r) => ({
+                  date,
+                  path: normalizePage(r.path, site.domain, r.host),
+                  refererHost: r.refererHost.toLowerCase(),
+                  visits: r.visits,
+                  pageViews: r.pageViews,
+                })),
               );
               const vitals = await cf.webVitals(accountId, tag, date);
               n += await store.writeWebVitals(
                 site.id,
-                vitals.map((v) => ({ date, path: normalizePage(v.path, site.domain, v.host), lcpP75: v.lcpP75, inpP75: v.inpP75, clsP75: v.clsP75, samples: v.samples })),
+                vitals.map((v) => ({
+                  date,
+                  path: normalizePage(v.path, site.domain, v.host),
+                  lcpP75: v.lcpP75,
+                  inpP75: v.inpP75,
+                  clsP75: v.clsP75,
+                  samples: v.samples,
+                })),
               );
               await store.setMeta(key, date);
               return n;

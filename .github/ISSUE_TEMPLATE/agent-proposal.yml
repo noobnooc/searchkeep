@@ -1,7 +1,7 @@
 name: Agent proposal
 description: A change proposed by an automated agent (or a contributor using the same format). Needs maintainer approval.
-title: "Proposal: "
-labels: ["agent-proposal", "status:triage"]
+title: 'Proposal: '
+labels: ['agent-proposal', 'status:triage']
 body:
   - type: markdown
     attributes:

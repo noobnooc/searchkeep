@@ -42,7 +42,13 @@ describe('OidcVerifier', () => {
     clearJwksCache();
     const iss = await issuer();
     const fetchMock = (async () => new Response(JSON.stringify(iss.jwks))) as unknown as typeof fetch;
-    const v = new OidcVerifier({ issuer: ISS, jwksUrl: `${ISS}/cdn-cgi/access/certs`, audience: 'aud1', fetch: fetchMock, now: () => now * 1000 });
+    const v = new OidcVerifier({
+      issuer: ISS,
+      jwksUrl: `${ISS}/cdn-cgi/access/certs`,
+      audience: 'aud1',
+      fetch: fetchMock,
+      now: () => now * 1000,
+    });
     return { v, sign: iss.sign };
   };
 
@@ -54,8 +60,14 @@ describe('OidcVerifier', () => {
 
   it('rejects wrong audience, issuer, expiry and tampering', async () => {
     const { v, sign } = await make();
-    expect(await v.verify(await sign({ iss: ISS, aud: ['other'], exp: now + 60 }))).toMatchObject({ ok: false, reason: 'audience mismatch' });
-    expect(await v.verify(await sign({ iss: 'https://evil.cloudflareaccess.com', aud: ['aud1'], exp: now + 60 }))).toMatchObject({ ok: false, reason: 'issuer mismatch' });
+    expect(await v.verify(await sign({ iss: ISS, aud: ['other'], exp: now + 60 }))).toMatchObject({
+      ok: false,
+      reason: 'audience mismatch',
+    });
+    expect(await v.verify(await sign({ iss: 'https://evil.cloudflareaccess.com', aud: ['aud1'], exp: now + 60 }))).toMatchObject({
+      ok: false,
+      reason: 'issuer mismatch',
+    });
     expect(await v.verify(await sign({ iss: ISS, aud: ['aud1'], exp: now - 3600 }))).toMatchObject({ ok: false, reason: 'token expired' });
     const t = await sign({ iss: ISS, aud: ['aud1'], exp: now + 60 });
     const [h, , s] = t.split('.');
@@ -67,7 +79,10 @@ describe('OidcVerifier', () => {
   it('rejects tokens signed by an unknown key', async () => {
     const { v } = await make();
     const other = await issuer();
-    expect(await v.verify(await other.sign({ iss: ISS, aud: ['aud1'], exp: now + 60 }, 'k2'))).toMatchObject({ ok: false, reason: 'signing key not found in JWKS' });
+    expect(await v.verify(await other.sign({ iss: ISS, aud: ['aud1'], exp: now + 60 }, 'k2'))).toMatchObject({
+      ok: false,
+      reason: 'signing key not found in JWKS',
+    });
   });
 
   it('rejects alg=none', async () => {
@@ -82,9 +97,13 @@ describe('readiness', () => {
   it('walks through the four states', () => {
     expect(evaluateReadiness({ configured: false, identityOk: false, inspection: null }).state).toBe('no_access');
     expect(evaluateReadiness({ configured: true, identityOk: false, inspection: insp }).state).toBe('no_access');
-    expect(evaluateReadiness({ configured: true, identityOk: true, inspection: { ...insp, managedOAuthEnabled: false } }).state).toBe('oauth_disabled');
+    expect(evaluateReadiness({ configured: true, identityOk: true, inspection: { ...insp, managedOAuthEnabled: false } }).state).toBe(
+      'oauth_disabled',
+    );
     expect(evaluateReadiness({ configured: true, identityOk: true, inspection: null }).state).toBe('oauth_disabled');
-    expect(evaluateReadiness({ configured: true, identityOk: true, inspection: { ...insp, broadPolicyReasons: ['Everyone'] } }).state).toBe('policy_too_broad');
+    expect(evaluateReadiness({ configured: true, identityOk: true, inspection: { ...insp, broadPolicyReasons: ['Everyone'] } }).state).toBe(
+      'policy_too_broad',
+    );
     expect(evaluateReadiness({ configured: true, identityOk: true, inspection: insp }).state).toBe('ready');
   });
 });
@@ -117,21 +136,29 @@ describe('helpers', () => {
     expect(addMonths('2026-03-31', -1)).toBe('2026-02-28');
   });
   it('classifies AI crawlers', () => {
-    expect(classifyCrawler('Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko; compatible; ClaudeBot/1.0; +claudebot@anthropic.com)')?.name).toBe('ClaudeBot');
+    expect(
+      classifyCrawler('Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko; compatible; ClaudeBot/1.0; +claudebot@anthropic.com)')?.name,
+    ).toBe('ClaudeBot');
     expect(classifyCrawler('Mozilla/5.0 (compatible; ChatGPT-User/1.0)')?.purpose).toBe('user');
     expect(classifyCrawler('Mozilla/5.0 (Macintosh)')).toBeNull();
   });
   it('redacts secrets from messages', () => {
-    expect(safeMessage(new Error('GET https://x/?apikey=abc123 failed, Bearer eyJhbGciOi.x.y'))).toBe('GET https://x/?apikey=[redacted] failed, Bearer [redacted]');
+    expect(safeMessage(new Error('GET https://x/?apikey=abc123 failed, Bearer eyJhbGciOi.x.y'))).toBe(
+      'GET https://x/?apikey=[redacted] failed, Bearer [redacted]',
+    );
   });
   it('parses AI citation CSV exports', () => {
-    const csv = '﻿Page URL,Citations,Date\r\n"https://acme.com/a?x=1","1,204",2026-10-01\r\nhttps://acme.com/b,3,2026-10-02\r\n,5,2026-10-02\r\n';
+    const csv =
+      '﻿Page URL,Citations,Date\r\n"https://acme.com/a?x=1","1,204",2026-10-01\r\nhttps://acme.com/b,3,2026-10-02\r\n,5,2026-10-02\r\n';
     const res = parseAiCitationsCsv(csv, { domain: 'acme.com', defaultDate: '2026-10-31' });
     expect(res.rows).toEqual([
       { date: '2026-10-01', page: '/a', surface: 'bing_copilot', citations: 1204 },
       { date: '2026-10-02', page: '/b', surface: 'bing_copilot', citations: 3 },
     ]);
     expect(res.skipped).toBe(1);
-    expect(parseAiCitationsCsv('URL;Cited\n/x;2', { domain: 'acme.com', defaultDate: '2026-10-31' }).rows[0]).toMatchObject({ date: '2026-10-31', page: '/x' });
+    expect(parseAiCitationsCsv('URL;Cited\n/x;2', { domain: 'acme.com', defaultDate: '2026-10-31' }).rows[0]).toMatchObject({
+      date: '2026-10-31',
+      page: '/x',
+    });
   });
 });

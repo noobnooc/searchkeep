@@ -103,7 +103,9 @@ export function evaluateReadiness(input: {
     ...(oauthOk
       ? {}
       : {
-          detail: insp?.error ?? (insp?.appFound === false ? 'Access application not found for ACCESS_AUD.' : 'Enable Managed OAuth on the Access application.'),
+          detail:
+            insp?.error ??
+            (insp?.appFound === false ? 'Access application not found for ACCESS_AUD.' : 'Enable Managed OAuth on the Access application.'),
         }),
   });
   if (!oauthOk) return { state: 'oauth_disabled', checks, checkedAt };

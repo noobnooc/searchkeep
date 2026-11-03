@@ -7,7 +7,9 @@ import { fileURLToPath } from 'node:url';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const dir = join(root, 'migrations');
-const files = readdirSync(dir).filter((f) => f.endsWith('.sql')).sort();
+const files = readdirSync(dir)
+  .filter((f) => f.endsWith('.sql'))
+  .sort();
 const body = files
   .map((name) => `  { name: ${JSON.stringify(name)}, sql: ${JSON.stringify(readFileSync(join(dir, name), 'utf8'))} },`)
   .join('\n');

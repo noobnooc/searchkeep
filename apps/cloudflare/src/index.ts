@@ -64,10 +64,15 @@ type C = Context<{ Bindings: Env; Variables: Vars }>;
 export function buildClients(config: SearchkeepConfig): SourceClients {
   const clients: SourceClients = {};
   if (config.gsc.clientEmail && config.gsc.privateKey) {
-    clients.gsc = createGscClient({ clientEmail: config.gsc.clientEmail, privateKey: config.gsc.privateKey, allowWrites: config.enableWrites });
+    clients.gsc = createGscClient({
+      clientEmail: config.gsc.clientEmail,
+      privateKey: config.gsc.privateKey,
+      allowWrites: config.enableWrites,
+    });
   }
   if (config.bing.apiKey) clients.bing = createBingClient({ apiKey: config.bing.apiKey });
-  if (config.cloudflare.apiToken) clients.cloudflare = createCloudflareClient({ apiToken: config.cloudflare.apiToken, accountId: config.cloudflare.accountId });
+  if (config.cloudflare.apiToken)
+    clients.cloudflare = createCloudflareClient({ apiToken: config.cloudflare.apiToken, accountId: config.cloudflare.accountId });
   return clients;
 }
 
@@ -78,16 +83,26 @@ function isLocalDev(env: Env, request: Request): boolean {
 }
 
 const DEV_READINESS = (): ReadinessReport =>
-  evaluateReadiness({ configured: true, identityOk: true, inspection: { appFound: true, managedOAuthEnabled: true, broadPolicyReasons: [] } });
+  evaluateReadiness({
+    configured: true,
+    identityOk: true,
+    inspection: { appFound: true, managedOAuthEnabled: true, broadPolicyReasons: [] },
+  });
 
-/** Remembers in D1 whether the deployment has reached `ready`; cron syncs only while set. */
-let readyFlagCache: boolean | null = null;
-async function recordReadiness(store: D1Store, report: ReadinessReport): Promise<void> {
+/**
+ * Remembers in D1 whether the deployment has reached `ready`; cron syncs only
+ * while it is set. The in-memory copy expires quickly because cron (possibly in
+ * another isolate) may clear the flag.
+ */
+const readyFlagCache = new WeakMap<D1Database, { ready: boolean; at: number }>();
+async function recordReadiness(db: D1Database, store: D1Store, report: ReadinessReport): Promise<void> {
   const ready = report.state === 'ready';
-  if (readyFlagCache === ready) return;
-  if (ready) await store.setMeta(READY_FLAG_KEY, report.checkedAt);
-  else await store.deleteMeta(READY_FLAG_KEY);
-  readyFlagCache = ready;
+  const cached = readyFlagCache.get(db);
+  if (cached && cached.ready === ready && Date.now() - cached.at < 60_000) return;
+  const current = (await store.getMeta(READY_FLAG_KEY)) !== null;
+  if (ready && !current) await store.setMeta(READY_FLAG_KEY, report.checkedAt);
+  if (!ready && current) await store.deleteMeta(READY_FLAG_KEY);
+  readyFlagCache.set(db, { ready, at: Date.now() });
 }
 
 async function readiness(c: C, refresh = false): Promise<ReadinessReport> {
@@ -95,7 +110,7 @@ async function readiness(c: C, refresh = false): Promise<ReadinessReport> {
   const report = await readinessFor(c.get('auth'), c.get('config'), { refresh });
   // Only authenticated requests may change the flag: an anonymous request to a
   // bypass URL must not be able to switch sync off.
-  if (c.get('auth').ok) await recordReadiness(c.get('store'), report);
+  if (c.get('auth').ok) await recordReadiness(c.env.DB, c.get('store'), report);
   return report;
 }
 
@@ -106,7 +121,14 @@ function opsContext(c: C): OpsContext {
 
 function errorResponse(c: C, err: unknown) {
   if (err instanceof SearchkeepError) {
-    const status = err.code === 'not_found' ? 404 : err.code === 'forbidden' || err.code === 'writes_disabled' ? 403 : err.code === 'upstream' ? 502 : 400;
+    const status =
+      err.code === 'not_found'
+        ? 404
+        : err.code === 'forbidden' || err.code === 'writes_disabled'
+          ? 403
+          : err.code === 'upstream'
+            ? 502
+            : 400;
     return c.json({ error: err.message, code: err.code }, status);
   }
   console.error('request failed', safeMessage(err));
@@ -164,7 +186,10 @@ app.use('*', async (c, next) => {
   c.set('config', config);
   const dev = isLocalDev(c.env, c.req.raw);
   c.set('dev', dev);
-  c.set('auth', dev ? { ok: true, identity: { email: 'dev@localhost', subject: 'dev', provider: 'dev' } } : await authenticate(c.req.raw, config));
+  c.set(
+    'auth',
+    dev ? { ok: true, identity: { email: 'dev@localhost', subject: 'dev', provider: 'dev' } } : await authenticate(c.req.raw, config),
+  );
   c.header('x-robots-tag', 'noindex, nofollow');
   c.header('referrer-policy', 'no-referrer');
   c.header('x-content-type-options', 'nosniff');
@@ -189,7 +214,16 @@ app.all('/mcp', async (c) => {
 
 app.use('/api/*', async (c, next) => {
   const auth = c.get('auth');
-  if (!auth.ok) return c.json({ error: 'Searchkeep is locked: Cloudflare Access is not protecting this request.', code: 'locked', state: 'no_access', setup: '/setup' }, 403);
+  if (!auth.ok)
+    return c.json(
+      {
+        error: 'Searchkeep is locked: Cloudflare Access is not protecting this request.',
+        code: 'locked',
+        state: 'no_access',
+        setup: '/setup',
+      },
+      403,
+    );
   await ensureMigrated(c.env.DB);
   c.set('store', new D1Store(c.env.DB));
   await next();
@@ -198,14 +232,23 @@ app.use('/api/*', async (c, next) => {
 app.get('/api/status', async (c) => {
   const report = await readiness(c, c.req.query('refresh') === '1');
   const auth = c.get('auth');
-  return c.json({ ...report, identity: auth.ok ? { email: auth.identity.email } : null, configErrors: c.get('config').errors, dev: c.get('dev') });
+  return c.json({
+    ...report,
+    identity: auth.ok ? { email: auth.identity.email } : null,
+    configErrors: c.get('config').errors,
+    dev: c.get('dev'),
+  });
 });
 
 // Everything below requires `ready`.
 app.use('/api/*', async (c, next) => {
   if (new URL(c.req.url).pathname === '/api/status') return next();
   const report = await readiness(c);
-  if (report.state !== 'ready') return c.json({ error: lockedMessage(report.state, new URL(c.req.url).origin), code: 'locked', state: report.state, checks: report.checks }, 403);
+  if (report.state !== 'ready')
+    return c.json(
+      { error: lockedMessage(report.state, new URL(c.req.url).origin), code: 'locked', state: report.state, checks: report.checks },
+      403,
+    );
   await next();
 });
 
@@ -217,8 +260,14 @@ const handle = (fn: (c: C) => Promise<unknown>) => async (c: C) => {
   }
 };
 
-app.get('/api/sites', handle((c) => listSites(opsContext(c))));
-app.get('/api/overview', handle((c) => overview(opsContext(c), q(c).common())));
+app.get(
+  '/api/sites',
+  handle((c) => listSites(opsContext(c))),
+);
+app.get(
+  '/api/overview',
+  handle((c) => overview(opsContext(c), q(c).common())),
+);
 app.get(
   '/api/performance',
   handle((c) => {
@@ -242,49 +291,80 @@ app.get(
   '/api/compare',
   handle((c) => {
     const x = q(c);
-    return comparePeriods(opsContext(c), x.strip({ ...x.common(), dimension: x.get('dimension') as 'query' | 'page' | undefined, compareStart: x.get('compareStart'), compareEnd: x.get('compareEnd') }));
+    return comparePeriods(
+      opsContext(c),
+      x.strip({
+        ...x.common(),
+        dimension: x.get('dimension') as 'query' | 'page' | undefined,
+        compareStart: x.get('compareStart'),
+        compareEnd: x.get('compareEnd'),
+      }),
+    );
   }),
 );
 app.get(
   '/api/quick-wins',
   handle((c) => {
     const x = q(c);
-    return findQuickWins(opsContext(c), x.strip({ ...x.common(), minPosition: x.num('minPosition'), maxPosition: x.num('maxPosition'), minImpressions: x.num('minImpressions') }));
+    return findQuickWins(
+      opsContext(c),
+      x.strip({
+        ...x.common(),
+        minPosition: x.num('minPosition'),
+        maxPosition: x.num('maxPosition'),
+        minImpressions: x.num('minImpressions'),
+      }),
+    );
   }),
 );
 app.get(
   '/api/cannibalization',
   handle((c) => {
     const x = q(c);
-    return findCannibalization(opsContext(c), x.strip({ ...x.common(), minImpressions: x.num('minImpressions'), minShare: x.num('minShare') }));
+    return findCannibalization(
+      opsContext(c),
+      x.strip({ ...x.common(), minImpressions: x.num('minImpressions'), minShare: x.num('minShare') }),
+    );
   }),
 );
 app.get(
   '/api/ctr-anomalies',
   handle((c) => {
     const x = q(c);
-    return findCtrAnomalies(opsContext(c), x.strip({ ...x.common(), minImpressions: x.num('minImpressions'), threshold: x.num('threshold') }));
+    return findCtrAnomalies(
+      opsContext(c),
+      x.strip({ ...x.common(), minImpressions: x.num('minImpressions'), threshold: x.num('threshold') }),
+    );
   }),
 );
 app.get(
   '/api/content-decay',
   handle((c) => {
     const x = q(c);
-    return findContentDecay(opsContext(c), x.strip({ ...x.common(), weeks: x.num('weeks'), minWeeklyClicks: x.num('minWeeklyClicks'), minDecline: x.num('minDecline') }));
+    return findContentDecay(
+      opsContext(c),
+      x.strip({ ...x.common(), weeks: x.num('weeks'), minWeeklyClicks: x.num('minWeeklyClicks'), minDecline: x.num('minDecline') }),
+    );
   }),
 );
 app.get(
   '/api/geo-funnel',
   handle((c) => {
     const x = q(c);
-    return geoFunnel(opsContext(c), x.strip({ ...x.common(), pageContains: x.get('pageContains'), sortBy: x.get('sortBy') as 'crawled' | undefined }));
+    return geoFunnel(
+      opsContext(c),
+      x.strip({ ...x.common(), pageContains: x.get('pageContains'), sortBy: x.get('sortBy') as 'crawled' | undefined }),
+    );
   }),
 );
 app.get(
   '/api/ai-crawlers',
   handle((c) => {
     const x = q(c);
-    return aiCrawlers(opsContext(c), x.strip({ ...x.common(), groupBy: x.list<CrawlerGroup>('groupBy'), crawler: x.get('crawler'), pathContains: x.get('pathContains') }));
+    return aiCrawlers(
+      opsContext(c),
+      x.strip({ ...x.common(), groupBy: x.list<CrawlerGroup>('groupBy'), crawler: x.get('crawler'), pathContains: x.get('pathContains') }),
+    );
   }),
 );
 app.get(
@@ -303,7 +383,11 @@ app.get(
     const end = x.get('end') ?? toIsoDate(new Date(Date.now() - 86_400_000));
     const days = x.num('days') ?? 28;
     const start = x.get('start') ?? toIsoDate(new Date(Date.parse(`${end}T00:00:00Z`) - (days - 1) * 86_400_000));
-    return { site: site.id, range: { start, end }, pages: await ctx.store.queryWebVitals(site.id, { start, end }, Math.min(x.num('limit') ?? 50, 500)) };
+    return {
+      site: site.id,
+      range: { start, end },
+      pages: await ctx.store.queryWebVitals(site.id, { start, end }, Math.min(x.num('limit') ?? 50, 500)),
+    };
   }),
 );
 app.get(
@@ -329,13 +413,26 @@ app.post(
     return inspectUrl(opsContext(c), { url: body.url, ...(body.site ? { site: body.site } : {}) });
   }),
 );
-app.get('/api/setup-status', handle(async (c) => setupStatus(opsContext(c), { readiness: await readiness(c), probe: c.req.query('probe') !== '0' })));
-app.get('/api/sync-runs', handle(async (c) => ({ runs: await c.get('store').listSyncRuns(Math.min(Number(c.req.query('limit') ?? 20) || 20, 100)) })));
+app.get(
+  '/api/setup-status',
+  handle(async (c) => setupStatus(opsContext(c), { readiness: await readiness(c), probe: c.req.query('probe') !== '0' })),
+);
+app.get(
+  '/api/sync-runs',
+  handle(async (c) => ({ runs: await c.get('store').listSyncRuns(Math.min(Number(c.req.query('limit') ?? 20) || 20, 100)) })),
+);
 app.post(
   '/api/sync',
   handle(async (c) => {
     const ctx = opsContext(c);
-    return runSync({ store: ctx.store, config: ctx.config, clients: ctx.clients, trigger: 'manual', timeBudgetMs: 25_000, log: (m) => console.log(m) });
+    return runSync({
+      store: ctx.store,
+      config: ctx.config,
+      clients: ctx.clients,
+      trigger: 'manual',
+      timeBudgetMs: 25_000,
+      log: (m) => console.log(m),
+    });
   }),
 );
 app.post(
@@ -348,7 +445,11 @@ app.post(
     if (text.length > 5_000_000) throw new SearchkeepError('bad_request', 'CSV is larger than 5 MB.');
     let parsed;
     try {
-      parsed = parseAiCitationsCsv(text, { domain: site.domain, defaultDate: x.get('date') ?? toIsoDate(new Date()), surface: x.get('surface') ?? 'bing_copilot' });
+      parsed = parseAiCitationsCsv(text, {
+        domain: site.domain,
+        defaultDate: x.get('date') ?? toIsoDate(new Date()),
+        surface: x.get('surface') ?? 'bing_copilot',
+      });
     } catch (err) {
       throw new SearchkeepError('bad_request', (err as Error).message);
     }
@@ -389,17 +490,30 @@ export async function scheduledSync(env: Env, now = new Date()): Promise<string>
   const store = new D1Store(env.DB);
   const config = loadConfig(env as unknown as Record<string, unknown>);
   if (!(await store.getMeta(READY_FLAG_KEY))) {
-    return 'skipped: deployment has not reached the ready state (open the dashboard through Access once)';
+    return 'not ready: the deployment has not reached the ready state yet (open the dashboard through Access once)';
   }
   // Re-check through the API: if Access was turned off or loosened, lock again.
   const inspection = await inspectAccess(config);
-  const report = evaluateReadiness({ configured: Boolean(config.access.teamDomain && config.access.aud), identityOk: true, inspection, now });
+  const report = evaluateReadiness({
+    configured: Boolean(config.access.teamDomain && config.access.aud),
+    identityOk: true,
+    inspection,
+    now,
+  });
   if (report.state !== 'ready') {
     await store.deleteMeta(READY_FLAG_KEY);
-    readyFlagCache = false;
-    return `skipped and locked: ${report.state}`;
+    readyFlagCache.delete(env.DB);
+    return `locked: ${report.state}`;
   }
-  const run = await runSync({ store, config, clients: buildClients(config), trigger: 'cron', now, timeBudgetMs: 120_000, log: (m) => console.log(m) });
+  const run = await runSync({
+    store,
+    config,
+    clients: buildClients(config),
+    trigger: 'cron',
+    now,
+    timeBudgetMs: 120_000,
+    log: (m) => console.log(m),
+  });
   return `${run.status}: ${run.rowsWritten} rows${run.message ? ` (${run.message})` : ''}`;
 }
 

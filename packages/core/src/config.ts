@@ -82,7 +82,10 @@ export function parseSites(raw: string | null, errors: string[]): SiteConfig[] {
     const id =
       typeof o.id === 'string' && o.id.trim() !== ''
         ? o.id.trim()
-        : domain.replace(/^www\./, '').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+        : domain
+            .replace(/^www\./, '')
+            .replace(/[^a-z0-9]+/g, '-')
+            .replace(/^-|-$/g, '');
     if (!SITE_ID_RE.test(id)) {
       errors.push(`SITES[${i}].id "${id}" must use lowercase letters, digits and dashes.`);
       return;
@@ -168,7 +171,10 @@ export function findSite(config: SearchkeepConfig, siteId?: string): SiteConfig 
   if (config.sites.length === 0) throw new SearchkeepError('not_configured', 'No sites configured. Set the SITES secret.');
   if (!siteId) {
     if (config.sites.length === 1) return config.sites[0]!;
-    throw new SearchkeepError('bad_request', `Several sites are configured; pass "site" (one of: ${config.sites.map((s) => s.id).join(', ')}).`);
+    throw new SearchkeepError(
+      'bad_request',
+      `Several sites are configured; pass "site" (one of: ${config.sites.map((s) => s.id).join(', ')}).`,
+    );
   }
   const site = config.sites.find((s) => s.id === siteId || s.domain === siteId.toLowerCase());
   if (!site) throw new SearchkeepError('not_found', `Unknown site "${siteId}". Known: ${config.sites.map((s) => s.id).join(', ')}.`);

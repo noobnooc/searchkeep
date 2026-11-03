@@ -23,8 +23,8 @@
     {
       "binding": "DB",
       "database_name": "searchkeep",
-      "migrations_dir": "../../packages/store-d1/migrations"
-    }
+      "migrations_dir": "../../packages/store-d1/migrations",
+    },
   ],
 
   // The dashboard (built into ./public). The Worker runs first on every request
@@ -33,12 +33,12 @@
     "directory": "./public",
     "binding": "ASSETS",
     "not_found_handling": "single-page-application",
-    "run_worker_first": true
+    "run_worker_first": true,
   },
 
   // Sync runs in small batches every 15 minutes; each pass does only the work
   // that is due and exits immediately otherwise.
   "triggers": { "crons": ["*/15 * * * *"] },
 
-  "observability": { "enabled": true }
+  "observability": { "enabled": true },
 }

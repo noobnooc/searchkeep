@@ -28,11 +28,15 @@ export async function queryPerformance(ctx: AnalysisContext, p: QueryPerformance
   if (p.orderBy !== undefined && !['clicks', 'impressions', 'ctr', 'position', 'date'].includes(p.orderBy)) {
     throw new SearchkeepError('bad_request', 'orderBy must be one of clicks, impressions, ctr, position, date.');
   }
-  if (p.order !== undefined && p.order !== 'asc' && p.order !== 'desc') throw new SearchkeepError('bad_request', 'order must be asc or desc.');
+  if (p.order !== undefined && p.order !== 'asc' && p.order !== 'desc')
+    throw new SearchkeepError('bad_request', 'order must be asc or desc.');
   const hasBreakdown = dimensions.some((d) => d === 'country' || d === 'device') || p.country || p.device;
   const hasQP = dimensions.some((d) => d === 'query' || d === 'page') || p.queryContains || p.pageContains || r.brand !== 'all';
   if (hasBreakdown && hasQP) {
-    throw new SearchkeepError('bad_request', 'country/device cannot be combined with query/page dimensions or filters (Search Console stores them separately).');
+    throw new SearchkeepError(
+      'bad_request',
+      'country/device cannot be combined with query/page dimensions or filters (Search Console stores them separately).',
+    );
   }
   if (hasBreakdown && r.source === 'bing') throw new SearchkeepError('bad_request', 'Bing does not provide country/device breakdowns.');
   if (r.source === 'bing' && dimensions.includes('query') && dimensions.includes('page')) {
@@ -49,7 +53,8 @@ export async function queryPerformance(ctx: AnalysisContext, p: QueryPerformance
     range: r.range,
     dimensions,
     filters,
-    orderBy: p.orderBy ?? (dimensions.some((d) => d === 'date' || d === 'week' || d === 'month') && dimensions.length === 1 ? 'date' : 'clicks'),
+    orderBy:
+      p.orderBy ?? (dimensions.some((d) => d === 'date' || d === 'week' || d === 'month') && dimensions.length === 1 ? 'date' : 'clicks'),
     order: p.order ?? (dimensions.length === 1 && ['date', 'week', 'month'].includes(dimensions[0]!) ? 'asc' : 'desc'),
     limit: r.limit,
   });
@@ -105,8 +110,14 @@ export async function comparePeriods(ctx: AnalysisContext, p: ComparePeriodsPara
       status: !a ? 'new' : !b ? 'lost' : 'changed',
     };
   });
-  const gainers = changes.filter((c) => c.clicksDelta > 0).sort((x, y) => y.clicksDelta - x.clicksDelta).slice(0, r.limit);
-  const losers = changes.filter((c) => c.clicksDelta < 0).sort((x, y) => x.clicksDelta - y.clicksDelta).slice(0, r.limit);
+  const gainers = changes
+    .filter((c) => c.clicksDelta > 0)
+    .sort((x, y) => y.clicksDelta - x.clicksDelta)
+    .slice(0, r.limit);
+  const losers = changes
+    .filter((c) => c.clicksDelta < 0)
+    .sort((x, y) => x.clicksDelta - y.clicksDelta)
+    .slice(0, r.limit);
   const t = (rows: PerformanceRow[]) => rows[0] ?? metrics(0, 0, null);
   const ct = t(curTotals);
   const pt = t(prevTotals);
@@ -143,8 +154,26 @@ export interface QuickWinsParams extends CommonParams {
 
 /** Benchmark CTR by position used when the site has too little data of its own. */
 export const BENCHMARK_CTR: Record<number, number> = {
-  1: 0.28, 2: 0.16, 3: 0.11, 4: 0.08, 5: 0.06, 6: 0.045, 7: 0.035, 8: 0.028, 9: 0.023, 10: 0.02,
-  11: 0.012, 12: 0.011, 13: 0.01, 14: 0.009, 15: 0.008, 16: 0.007, 17: 0.007, 18: 0.006, 19: 0.006, 20: 0.005,
+  1: 0.28,
+  2: 0.16,
+  3: 0.11,
+  4: 0.08,
+  5: 0.06,
+  6: 0.045,
+  7: 0.035,
+  8: 0.028,
+  9: 0.023,
+  10: 0.02,
+  11: 0.012,
+  12: 0.011,
+  13: 0.01,
+  14: 0.009,
+  15: 0.008,
+  16: 0.007,
+  17: 0.007,
+  18: 0.006,
+  19: 0.006,
+  20: 0.005,
 };
 
 export function benchmarkCtr(position: number): number {
@@ -244,13 +273,26 @@ export async function findCannibalization(ctx: AnalysisContext, p: Cannibalizati
       pages: competing
         .sort((a, b) => b.impressions - a.impressions)
         .slice(0, 5)
-        .map((x) => ({ page: x.page, impressions: x.impressions, clicks: x.clicks, position: x.position, share: round(x.impressions / total, 3) })),
+        .map((x) => ({
+          page: x.page,
+          impressions: x.impressions,
+          clicks: x.clicks,
+          position: x.position,
+          share: round(x.impressions / total, 3),
+        })),
     });
   }
   issues.sort((a, b) => b.impressions - a.impressions);
   const notes = [...r.notes];
   if (p.source === 'bing') notes.push('Cannibalization needs query × page data, which only Search Console provides; GSC was used.');
-  return { site: r.site.id, source: 'gsc' as SearchSource, range: r.range, criteria: { minImpressions, minShare }, issues: issues.slice(0, r.limit), notes };
+  return {
+    site: r.site.id,
+    source: 'gsc' as SearchSource,
+    range: r.range,
+    criteria: { minImpressions, minShare },
+    issues: issues.slice(0, r.limit),
+    notes,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -322,7 +364,7 @@ export async function findCtrAnomalies(ctx: AnalysisContext, p: CtrAnomalyParams
     anomalies,
     notes: [
       ...r.notes,
-      'Expected CTR is the median CTR of this site\'s queries at the same rounded position (benchmark curve when fewer than 8 samples). Low CTR often means a weak title/snippet, a SERP feature above you, or mismatched intent.',
+      "Expected CTR is the median CTR of this site's queries at the same rounded position (benchmark curve when fewer than 8 samples). Low CTR often means a weak title/snippet, a SERP feature above you, or mismatched intent.",
     ],
   };
 }
@@ -402,7 +444,10 @@ export async function findContentDecay(ctx: AnalysisContext, p: ContentDecayPara
     weeks: weekKeys,
     criteria: { minWeeklyClicks: minWeekly, minDecline },
     decaying: decaying.slice(0, clampLimit(p.limit, 25)),
-    notes: [...r0.notes.filter((n) => !n.startsWith('Bing data is weekly')), 'Compares the last 4 weeks with the best earlier 4-week window and requires a downward trend since that peak.'],
+    notes: [
+      ...r0.notes.filter((n) => !n.startsWith('Bing data is weekly')),
+      'Compares the last 4 weeks with the best earlier 4-week window and requires a downward trend since that peak.',
+    ],
   };
 }
 

@@ -7,31 +7,31 @@ updates:
       interval: weekly
       day: monday
     open-pull-requests-limit: 5
-    labels: ["type:chore"]
+    labels: ['type:chore']
     commit-message:
-      prefix: "chore(deps)"
+      prefix: 'chore(deps)'
     groups:
       cloudflare:
-        patterns: ["wrangler", "@cloudflare/*"]
-        update-types: ["minor", "patch"]
+        patterns: ['wrangler', '@cloudflare/*']
+        update-types: ['minor', 'patch']
       svelte:
-        patterns: ["svelte", "@sveltejs/*", "vite", "@vitejs/*"]
-        update-types: ["minor", "patch"]
+        patterns: ['svelte', '@sveltejs/*', 'vite', '@vitejs/*']
+        update-types: ['minor', 'patch']
       dev-dependencies:
         dependency-type: development
-        update-types: ["minor", "patch"]
+        update-types: ['minor', 'patch']
       production-dependencies:
         dependency-type: production
-        update-types: ["minor", "patch"]
+        update-types: ['minor', 'patch']
 
   - package-ecosystem: github-actions
     directory: /
     schedule:
       interval: weekly
       day: monday
-    labels: ["type:chore"]
+    labels: ['type:chore']
     commit-message:
-      prefix: "chore(ci)"
+      prefix: 'chore(ci)'
     groups:
       github-actions:
-        patterns: ["*"]
+        patterns: ['*']

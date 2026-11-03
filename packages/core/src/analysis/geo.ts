@@ -25,8 +25,22 @@ export async function geoFunnel(ctx: AnalysisContext, p: GeoFunnelParams) {
     ctx.store.queryCrawlers({ siteId, range, groupBy: ['path'], limit: big, ...(p.pageContains ? { pathContains: p.pageContains } : {}) }),
     ctx.store.queryAiCitations(siteId, range, big),
     ctx.store.queryReferrals({ siteId, range, refererHosts: AI_HOSTS, groupBy: ['path'], limit: big }),
-    ctx.store.queryPerformance({ siteId, source: 'gsc', range, dimensions: ['page'], filters: p.pageContains ? { pageContains: p.pageContains } : {}, limit: big }),
-    ctx.store.queryPerformance({ siteId, source: 'bing', range, dimensions: ['page'], filters: p.pageContains ? { pageContains: p.pageContains } : {}, limit: big }),
+    ctx.store.queryPerformance({
+      siteId,
+      source: 'gsc',
+      range,
+      dimensions: ['page'],
+      filters: p.pageContains ? { pageContains: p.pageContains } : {},
+      limit: big,
+    }),
+    ctx.store.queryPerformance({
+      siteId,
+      source: 'bing',
+      range,
+      dimensions: ['page'],
+      filters: p.pageContains ? { pageContains: p.pageContains } : {},
+      limit: big,
+    }),
   ]);
   interface Row {
     page: string;
@@ -58,14 +72,32 @@ export async function geoFunnel(ctx: AnalysisContext, p: GeoFunnelParams) {
   const sortBy = p.sortBy ?? 'crawled';
   const all = [...rows.values()];
   const totals = all.reduce(
-    (t, x) => ({ crawled: t.crawled + x.crawled, cited: t.cited + x.cited, aiVisits: t.aiVisits + x.aiVisits, clicks: t.clicks + x.clicks }),
+    (t, x) => ({
+      crawled: t.crawled + x.crawled,
+      cited: t.cited + x.cited,
+      aiVisits: t.aiVisits + x.aiVisits,
+      clicks: t.clicks + x.clicks,
+    }),
     { crawled: 0, cited: 0, aiVisits: 0, clicks: 0 },
   );
   const notes: string[] = [];
-  if (totals.crawled === 0) notes.push('No AI crawler data: set cloudflareZoneId for this site (the zone must be proxied through Cloudflare) and give the API token Zone Analytics Read.');
-  if (totals.cited === 0) notes.push('No AI citation data yet. Bing AI Performance is not exposed by the Bing Webmaster API; import its CSV export from the dashboard (Settings → Import) to fill the "cited" step.');
-  if (totals.aiVisits === 0) notes.push('No AI referral visits: set webAnalyticsSiteTag (Cloudflare Web Analytics) for this site. AI visits are page loads whose referrer is a known AI assistant.');
-  const crawledNotCited = all.filter((x) => x.crawled > 0 && x.cited === 0).sort((a, b) => b.crawled - a.crawled).slice(0, 10).map((x) => x.page);
+  if (totals.crawled === 0)
+    notes.push(
+      'No AI crawler data: set cloudflareZoneId for this site (the zone must be proxied through Cloudflare) and give the API token Zone Analytics Read.',
+    );
+  if (totals.cited === 0)
+    notes.push(
+      'No AI citation data yet. Bing AI Performance is not exposed by the Bing Webmaster API; import its CSV export from the dashboard (Settings → Import) to fill the "cited" step.',
+    );
+  if (totals.aiVisits === 0)
+    notes.push(
+      'No AI referral visits: set webAnalyticsSiteTag (Cloudflare Web Analytics) for this site. AI visits are page loads whose referrer is a known AI assistant.',
+    );
+  const crawledNotCited = all
+    .filter((x) => x.crawled > 0 && x.cited === 0)
+    .sort((a, b) => b.crawled - a.crawled)
+    .slice(0, 10)
+    .map((x) => x.page);
   return {
     site: siteId,
     range,
@@ -98,7 +130,10 @@ export async function aiCrawlers(ctx: AnalysisContext, p: AiCrawlersParams) {
   });
   const total = rows.reduce((s, x) => s + x.requests, 0);
   const notes: string[] = [];
-  if (rows.length === 0) notes.push('No AI crawler requests recorded for this range. Check that cloudflareZoneId is set and the zone is proxied (orange cloud).');
+  if (rows.length === 0)
+    notes.push(
+      'No AI crawler requests recorded for this range. Check that cloudflareZoneId is set and the zone is proxied (orange cloud).',
+    );
   return { site: r.site.id, range: r.range, groupBy, totalRequests: total, rows, notes };
 }
 
@@ -124,7 +159,8 @@ export async function aiReferrals(ctx: AnalysisContext, p: AiReferralsParams) {
   const r = await resolve(ctx, { ...p, source: 'gsc' }, { limit: 50 });
   const groupBy = p.groupBy && p.groupBy.length > 0 ? p.groupBy : (['refererHost'] as const);
   for (const g of groupBy) {
-    if (!['path', 'refererHost', 'date'].includes(g)) throw new SearchkeepError('bad_request', `Unknown groupBy "${g}". Use: path, refererHost, date.`);
+    if (!['path', 'refererHost', 'date'].includes(g))
+      throw new SearchkeepError('bad_request', `Unknown groupBy "${g}". Use: path, refererHost, date.`);
   }
   const rows = await ctx.store.queryReferrals({
     siteId: site.id,
@@ -137,6 +173,8 @@ export async function aiReferrals(ctx: AnalysisContext, p: AiReferralsParams) {
     site: site.id,
     range: r.range,
     rows: rows.map((x) => (x.refererHost ? { ...x, assistant: AI_REFERRER_HOSTS[x.refererHost] ?? x.refererHost } : x)),
-    notes: ['AI referrals are Web Analytics page loads whose referrer host is a known AI assistant. Many assistants strip referrers, so this undercounts.'],
+    notes: [
+      'AI referrals are Web Analytics page loads whose referrer host is a known AI assistant. Many assistants strip referrers, so this undercounts.',
+    ],
   };
 }

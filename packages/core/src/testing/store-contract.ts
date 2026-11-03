@@ -10,12 +10,26 @@ import type { SourceClients } from '../sources.js';
 import type { Store } from '../store.js';
 import type { SearchFactInput } from '../types.js';
 import { runSync } from '../sync/run-sync.js';
-import { comparePeriods, findCannibalization, findContentDecay, findCtrAnomalies, findQuickWins, queryPerformance } from '../analysis/search.js';
+import {
+  comparePeriods,
+  findCannibalization,
+  findContentDecay,
+  findCtrAnomalies,
+  findQuickWins,
+  queryPerformance,
+} from '../analysis/search.js';
 import { aiCrawlers, geoFunnel } from '../analysis/geo.js';
 import { listSites, setupStatus } from '../analysis/ops.js';
 import { evaluateReadiness } from '../auth/readiness.js';
 
-const SITE = { id: 'acme', domain: 'acme.com', gscProperty: 'sc-domain:acme.com', bingSiteUrl: 'https://acme.com/', cloudflareZoneId: 'zone1', webAnalyticsSiteTag: 'tag1' };
+const SITE = {
+  id: 'acme',
+  domain: 'acme.com',
+  gscProperty: 'sc-domain:acme.com',
+  bingSiteUrl: 'https://acme.com/',
+  cloudflareZoneId: 'zone1',
+  webAnalyticsSiteTag: 'tag1',
+};
 
 function config(extra: Record<string, string> = {}): SearchkeepConfig {
   return loadConfig({ SITES: JSON.stringify([SITE]), BRAND_REGEX: 'acme', CLOUDFLARE_ACCOUNT_ID: 'acct', ...extra });
@@ -41,8 +55,24 @@ export function storeContract(name: string, makeStore: () => Promise<Store>): vo
     it('upserts facts idempotently and skips unchanged rows', async () => {
       const rows: SearchFactInput[] = [
         { date: '2026-10-01', kind: 'total', clicks: 10, impressions: 100, position: 5 },
-        { date: '2026-10-01', kind: 'query_page', query: 'acme shoes', page: 'https://acme.com/shoes', clicks: 6, impressions: 50, position: 3 },
-        { date: '2026-10-01', kind: 'query_page', query: 'red shoes', page: 'https://acme.com/shoes', clicks: 4, impressions: 50, position: 7 },
+        {
+          date: '2026-10-01',
+          kind: 'query_page',
+          query: 'acme shoes',
+          page: 'https://acme.com/shoes',
+          clicks: 6,
+          impressions: 50,
+          position: 3,
+        },
+        {
+          date: '2026-10-01',
+          kind: 'query_page',
+          query: 'red shoes',
+          page: 'https://acme.com/shoes',
+          clicks: 4,
+          impressions: 50,
+          position: 7,
+        },
       ];
       expect(await store.writeSearchFacts('acme', 'gsc', rows)).toBeGreaterThan(0);
       expect(await store.writeSearchFacts('acme', 'gsc', rows)).toBe(0);
@@ -55,7 +85,12 @@ export function storeContract(name: string, makeStore: () => Promise<Store>): vo
         { date: '2026-10-01', kind: 'query_page', query: 'q', page: '/a', clicks: 1, impressions: 10, position: 2 },
         { date: '2026-10-01', kind: 'query_page', query: 'q', page: '/a', clicks: 2, impressions: 30, position: 4 },
       ]);
-      const rows = await store.queryPerformance({ siteId: 'acme', source: 'gsc', range: { start: '2026-10-01', end: '2026-10-01' }, dimensions: ['page'] });
+      const rows = await store.queryPerformance({
+        siteId: 'acme',
+        source: 'gsc',
+        range: { start: '2026-10-01', end: '2026-10-01' },
+        dimensions: ['page'],
+      });
       expect(rows).toEqual([{ page: '/a', clicks: 3, impressions: 40, ctr: 0.075, position: 3.5 }]);
     });
 
@@ -75,7 +110,11 @@ export function storeContract(name: string, makeStore: () => Promise<Store>): vo
           { date: '2026-10-06', kind: 'query', query: 'running shoes', clicks: 3, impressions: 40, position: 4 },
           { date: '2026-10-06', kind: 'page', page: '/shoes', clicks: 4, impressions: 50, position: 3 },
         ]);
-        await store.setBrandFlags('acme', 'acme', (await store.listQueriesForBrandClassification('acme', 'acme', 100)).map((q) => ({ id: q.id, isBrand: /acme/i.test(q.text) })));
+        await store.setBrandFlags(
+          'acme',
+          'acme',
+          (await store.listQueriesForBrandClassification('acme', 'acme', 100)).map((q) => ({ id: q.id, isBrand: /acme/i.test(q.text) })),
+        );
       });
       const range = { start: '2026-10-01', end: '2026-10-14' };
 
@@ -85,7 +124,14 @@ export function storeContract(name: string, makeStore: () => Promise<Store>): vo
       });
 
       it('returns an empty list for a range without data', async () => {
-        expect(await store.queryPerformance({ siteId: 'acme', source: 'gsc', range: { start: '2020-01-01', end: '2020-01-02' }, dimensions: [] })).toEqual([]);
+        expect(
+          await store.queryPerformance({
+            siteId: 'acme',
+            source: 'gsc',
+            range: { start: '2020-01-01', end: '2020-01-02' },
+            dimensions: [],
+          }),
+        ).toEqual([]);
       });
 
       it('groups by query with impression-weighted position', async () => {
@@ -95,35 +141,85 @@ export function storeContract(name: string, makeStore: () => Promise<Store>): vo
       });
 
       it('groups by date and week in order', async () => {
-        const days = await store.queryPerformance({ siteId: 'acme', source: 'gsc', range, dimensions: ['date'], orderBy: 'date', order: 'asc' });
+        const days = await store.queryPerformance({
+          siteId: 'acme',
+          source: 'gsc',
+          range,
+          dimensions: ['date'],
+          orderBy: 'date',
+          order: 'asc',
+        });
         expect(days).toHaveLength(14);
         expect(days[0]!.date).toBe('2026-10-01');
-        const weeks = await store.queryPerformance({ siteId: 'acme', source: 'gsc', range, dimensions: ['week'], orderBy: 'date', order: 'asc' });
+        const weeks = await store.queryPerformance({
+          siteId: 'acme',
+          source: 'gsc',
+          range,
+          dimensions: ['week'],
+          orderBy: 'date',
+          order: 'asc',
+        });
         expect(weeks.map((w) => w.week)).toEqual(['2026-09-28', '2026-10-05', '2026-10-12']);
       });
 
       it('filters by brand, substring and having', async () => {
-        const brand = await store.queryPerformance({ siteId: 'acme', source: 'gsc', range, dimensions: ['query'], filters: { brand: 'brand' } });
+        const brand = await store.queryPerformance({
+          siteId: 'acme',
+          source: 'gsc',
+          range,
+          dimensions: ['query'],
+          filters: { brand: 'brand' },
+        });
         expect(brand.map((r) => r.query)).toEqual(['acme shoes']);
-        const nonBrand = await store.queryPerformance({ siteId: 'acme', source: 'gsc', range, dimensions: [], filters: { brand: 'non_brand' } });
+        const nonBrand = await store.queryPerformance({
+          siteId: 'acme',
+          source: 'gsc',
+          range,
+          dimensions: [],
+          filters: { brand: 'non_brand' },
+        });
         expect(nonBrand[0]).toMatchObject({ clicks: 70 });
-        const blog = await store.queryPerformance({ siteId: 'acme', source: 'gsc', range, dimensions: ['page'], filters: { pageContains: 'BLOG' } });
+        const blog = await store.queryPerformance({
+          siteId: 'acme',
+          source: 'gsc',
+          range,
+          dimensions: ['page'],
+          filters: { pageContains: 'BLOG' },
+        });
         expect(blog.map((r) => r.page)).toEqual(['/blog/running']);
-        const mid = await store.queryPerformance({ siteId: 'acme', source: 'gsc', range, dimensions: ['query', 'page'], having: { minPosition: 8, maxPosition: 20 } });
+        const mid = await store.queryPerformance({
+          siteId: 'acme',
+          source: 'gsc',
+          range,
+          dimensions: ['query', 'page'],
+          having: { minPosition: 8, maxPosition: 20 },
+        });
         expect(mid).toHaveLength(2);
       });
 
       it('keeps Bing query and page rows separate', async () => {
         const r = { start: '2026-10-05', end: '2026-10-11' };
-        expect((await store.queryPerformance({ siteId: 'acme', source: 'bing', range: r, dimensions: ['query'] }))[0]).toMatchObject({ query: 'running shoes', clicks: 3 });
-        expect((await store.queryPerformance({ siteId: 'acme', source: 'bing', range: r, dimensions: ['page'] }))[0]).toMatchObject({ page: '/shoes', clicks: 4 });
-        expect((await store.queryPerformance({ siteId: 'acme', source: 'bing', range: r, dimensions: [] }))[0]).toMatchObject({ clicks: 5 });
+        expect((await store.queryPerformance({ siteId: 'acme', source: 'bing', range: r, dimensions: ['query'] }))[0]).toMatchObject({
+          query: 'running shoes',
+          clicks: 3,
+        });
+        expect((await store.queryPerformance({ siteId: 'acme', source: 'bing', range: r, dimensions: ['page'] }))[0]).toMatchObject({
+          page: '/shoes',
+          clicks: 4,
+        });
+        expect((await store.queryPerformance({ siteId: 'acme', source: 'bing', range: r, dimensions: [] }))[0]).toMatchObject({
+          clicks: 5,
+        });
       });
 
       it('reports coverage and latest date', async () => {
         expect(await store.latestDate('acme', 'gsc')).toBe('2026-10-14');
         const cov = await store.coverage('acme');
-        expect(cov.find((c) => c.source === 'gsc' && c.dataset === 'search')).toMatchObject({ firstDate: '2026-10-01', lastDate: '2026-10-14', days: 14 });
+        expect(cov.find((c) => c.source === 'gsc' && c.dataset === 'search')).toMatchObject({
+          firstDate: '2026-10-01',
+          lastDate: '2026-10-14',
+          days: 14,
+        });
       });
     });
 
@@ -132,9 +228,20 @@ export function storeContract(name: string, makeStore: () => Promise<Store>): vo
         { date: '2026-10-01', country: 'USA', device: 'mobile', clicks: 3, impressions: 30, position: 4 },
         { date: '2026-10-01', country: 'deu', device: 'DESKTOP', clicks: 1, impressions: 10, position: 8 },
       ]);
-      const rows = await store.queryPerformance({ siteId: 'acme', source: 'gsc', range: { start: '2026-10-01', end: '2026-10-01' }, dimensions: ['country'] });
+      const rows = await store.queryPerformance({
+        siteId: 'acme',
+        source: 'gsc',
+        range: { start: '2026-10-01', end: '2026-10-01' },
+        dimensions: ['country'],
+      });
       expect(rows.map((r) => r.country)).toEqual(['usa', 'deu']);
-      const mobile = await store.queryPerformance({ siteId: 'acme', source: 'gsc', range: { start: '2026-10-01', end: '2026-10-01' }, dimensions: [], filters: { device: 'mobile' } });
+      const mobile = await store.queryPerformance({
+        siteId: 'acme',
+        source: 'gsc',
+        range: { start: '2026-10-01', end: '2026-10-01' },
+        dimensions: [],
+        filters: { device: 'mobile' },
+      });
       expect(mobile[0]).toMatchObject({ clicks: 3 });
     });
 
@@ -158,7 +265,9 @@ export function storeContract(name: string, makeStore: () => Promise<Store>): vo
         { date: '2026-10-01', path: '/a', refererHost: 'chatgpt.com', visits: 3, pageViews: 4 },
         { date: '2026-10-01', path: '/a', refererHost: 'google.com', visits: 9, pageViews: 9 },
       ]);
-      expect(await store.queryReferrals({ siteId: 'acme', range, refererHosts: ['chatgpt.com'], groupBy: ['path'] })).toEqual([{ path: '/a', visits: 3, pageViews: 4 }]);
+      expect(await store.queryReferrals({ siteId: 'acme', range, refererHosts: ['chatgpt.com'], groupBy: ['path'] })).toEqual([
+        { path: '/a', visits: 3, pageViews: 4 },
+      ]);
       await store.writeWebVitals('acme', [{ date: '2026-10-01', path: '/a', lcpP75: 2000, inpP75: 150, clsP75: 0.05, samples: 10 }]);
       expect((await store.queryWebVitals('acme', range, 10))[0]).toMatchObject({ page: '/a', lcpP75: 2000, samples: 10 });
       await store.writeAiCitations('acme', [{ date: '2026-10-01', page: '/a', surface: 'bing_copilot', citations: 7 }]);
@@ -169,9 +278,20 @@ export function storeContract(name: string, makeStore: () => Promise<Store>): vo
       await store.replaceCrawlIssues('acme', 'bing', [{ url: 'https://acme.com/x', issue: 'Code4xx', httpCode: 404 }]);
       await store.replaceCrawlIssues('acme', 'bing', [{ url: 'https://acme.com/y', issue: 'Code5xx', httpCode: 500 }]);
       expect((await store.listCrawlIssues('acme', 'bing', 10)).map((i) => i.url)).toEqual(['https://acme.com/y']);
-      await store.replaceSitemaps('acme', 'gsc', [{ path: 'https://acme.com/sitemap.xml', errors: 0, warnings: 1, submitted: 10, indexed: null }]);
+      await store.replaceSitemaps('acme', 'gsc', [
+        { path: 'https://acme.com/sitemap.xml', errors: 0, warnings: 1, submitted: 10, indexed: null },
+      ]);
       expect(await store.listSitemaps('acme', 'gsc')).toEqual([
-        { path: 'https://acme.com/sitemap.xml', lastSubmitted: null, lastDownloaded: null, isPending: false, errors: 0, warnings: 1, submitted: 10, indexed: null },
+        {
+          path: 'https://acme.com/sitemap.xml',
+          lastSubmitted: null,
+          lastDownloaded: null,
+          isPending: false,
+          errors: 0,
+          warnings: 1,
+          submitted: 10,
+          indexed: null,
+        },
       ]);
     });
 
@@ -183,10 +303,16 @@ export function storeContract(name: string, makeStore: () => Promise<Store>): vo
     });
 
     it('reclassifies brand queries when the regex changes', async () => {
-      await store.writeSearchFacts('acme', 'gsc', [{ date: '2026-10-01', kind: 'query_page', query: 'widget', page: '/', clicks: 1, impressions: 1 }]);
+      await store.writeSearchFacts('acme', 'gsc', [
+        { date: '2026-10-01', kind: 'query_page', query: 'widget', page: '/', clicks: 1, impressions: 1 },
+      ]);
       expect(await store.listQueriesForBrandClassification('acme', 'v1', 10)).toHaveLength(1);
       const q = await store.listQueriesForBrandClassification('acme', 'v1', 10);
-      await store.setBrandFlags('acme', 'v1', q.map((x) => ({ id: x.id, isBrand: false })));
+      await store.setBrandFlags(
+        'acme',
+        'v1',
+        q.map((x) => ({ id: x.id, isBrand: false })),
+      );
       expect(await store.listQueriesForBrandClassification('acme', 'v1', 10)).toHaveLength(0);
       expect(await store.listQueriesForBrandClassification('acme', 'v2', 10)).toHaveLength(1);
     });
@@ -199,9 +325,25 @@ export function storeContract(name: string, makeStore: () => Promise<Store>): vo
             const date = addDays('2026-07-06', w * 7 + d);
             const decaying = w < 8 ? 30 : 4;
             facts.push({ date, kind: 'total', clicks: 100, impressions: 3000, position: 8 });
-            facts.push({ date, kind: 'query_page', query: 'best widgets', page: '/widgets', clicks: decaying, impressions: 300, position: 4 });
+            facts.push({
+              date,
+              kind: 'query_page',
+              query: 'best widgets',
+              page: '/widgets',
+              clicks: decaying,
+              impressions: 300,
+              position: 4,
+            });
             facts.push({ date, kind: 'query_page', query: 'cheap widgets', page: '/widgets', clicks: 1, impressions: 200, position: 11 });
-            facts.push({ date, kind: 'query_page', query: 'cheap widgets', page: '/blog/cheap', clicks: 1, impressions: 150, position: 13 });
+            facts.push({
+              date,
+              kind: 'query_page',
+              query: 'cheap widgets',
+              page: '/blog/cheap',
+              clicks: 1,
+              impressions: 150,
+              position: 13,
+            });
             facts.push({ date, kind: 'query_page', query: 'widget review', page: '/review', clicks: 0, impressions: 120, position: 2 });
           }
         }
@@ -251,8 +393,17 @@ export function storeContract(name: string, makeStore: () => Promise<Store>): vo
         gsc: {
           async searchAnalytics(req) {
             if (req.dimensions.length === 1) return [{ keys: [req.startDate], clicks: 10, impressions: 100, ctr: 0.1, position: 5 }];
-            if (req.dimensions.includes('country')) return [{ keys: [req.startDate, 'usa', 'MOBILE'], clicks: 10, impressions: 100, ctr: 0.1, position: 5 }];
-            return [{ keys: [req.startDate, 'acme widgets', 'https://acme.com/widgets?ref=x'], clicks: 9, impressions: 80, ctr: 0.11, position: 3 }];
+            if (req.dimensions.includes('country'))
+              return [{ keys: [req.startDate, 'usa', 'MOBILE'], clicks: 10, impressions: 100, ctr: 0.1, position: 5 }];
+            return [
+              {
+                keys: [req.startDate, 'acme widgets', 'https://acme.com/widgets?ref=x'],
+                clicks: 9,
+                impressions: 80,
+                ctr: 0.11,
+                position: 3,
+              },
+            ];
           },
           async listSitemaps() {
             return [{ path: 'https://acme.com/sitemap.xml', errors: 0, warnings: 0 }];
@@ -284,7 +435,16 @@ export function storeContract(name: string, makeStore: () => Promise<Store>): vo
         },
         cloudflare: {
           async aiCrawlerRequests(_zone, date) {
-            return [{ date, userAgent: 'Mozilla/5.0 (compatible; GPTBot/1.2; +https://openai.com/gptbot)', host: 'acme.com', path: '/widgets', status: 200, requests: 4 }];
+            return [
+              {
+                date,
+                userAgent: 'Mozilla/5.0 (compatible; GPTBot/1.2; +https://openai.com/gptbot)',
+                host: 'acme.com',
+                path: '/widgets',
+                status: 200,
+                requests: 4,
+              },
+            ];
           },
           async webAnalytics(_a, _t, date) {
             return [{ date, host: 'www.acme.com', path: '/widgets', refererHost: 'chatgpt.com', visits: 2, pageViews: 3 }];
@@ -304,7 +464,12 @@ export function storeContract(name: string, makeStore: () => Promise<Store>): vo
         expect(run.status).toBe('ok');
         expect(run.rowsWritten).toBeGreaterThan(0);
         expect(await store.latestDate('acme', 'gsc')).toBe('2026-10-19');
-        const pages = await store.queryPerformance({ siteId: 'acme', source: 'gsc', range: { start: '2026-10-19', end: '2026-10-19' }, dimensions: ['page'] });
+        const pages = await store.queryPerformance({
+          siteId: 'acme',
+          source: 'gsc',
+          range: { start: '2026-10-19', end: '2026-10-19' },
+          dimensions: ['page'],
+        });
         expect(pages[0]!.page).toBe('/widgets');
         // Backfill walked back one month.
         const cov = await store.coverage('acme');
@@ -340,7 +505,13 @@ export function storeContract(name: string, makeStore: () => Promise<Store>): vo
         c.bing!.getQueryStats = async () => {
           throw new Error('HTTP 401 apikey=SECRET123');
         };
-        const run = await runSync({ store, config: config({ SYNC_MAX_CALLS_PER_RUN: '900', GSC_BACKFILL_MONTHS: '0' }), clients: c, trigger: 'manual', now: NOW });
+        const run = await runSync({
+          store,
+          config: config({ SYNC_MAX_CALLS_PER_RUN: '900', GSC_BACKFILL_MONTHS: '0' }),
+          clients: c,
+          trigger: 'manual',
+          now: NOW,
+        });
         expect(run.status).toBe('partial');
         const failed = run.details!.find((d) => d.task === 'bing.queries')!;
         expect(failed.status).toBe('error');
@@ -349,8 +520,17 @@ export function storeContract(name: string, makeStore: () => Promise<Store>): vo
       });
 
       it('reports setup status without secrets', async () => {
-        const cfg = config({ GSC_CLIENT_EMAIL: 'sa@x.iam.gserviceaccount.com', GSC_PRIVATE_KEY: 'pk-s3cr3t-value', BING_API_KEY: 'bing-s3cr3t', CLOUDFLARE_API_TOKEN: 'cf-s3cr3t' });
-        const readiness = evaluateReadiness({ configured: true, identityOk: true, inspection: { appFound: true, managedOAuthEnabled: true, broadPolicyReasons: [] } });
+        const cfg = config({
+          GSC_CLIENT_EMAIL: 'sa@x.iam.gserviceaccount.com',
+          GSC_PRIVATE_KEY: 'pk-s3cr3t-value',
+          BING_API_KEY: 'bing-s3cr3t',
+          CLOUDFLARE_API_TOKEN: 'cf-s3cr3t',
+        });
+        const readiness = evaluateReadiness({
+          configured: true,
+          identityOk: true,
+          inspection: { appFound: true, managedOAuthEnabled: true, broadPolicyReasons: [] },
+        });
         const status = await setupStatus({ store, config: cfg, clients: clients() }, { readiness });
         const text = JSON.stringify(status);
         expect(text).not.toContain('pk-s3cr3t-value');

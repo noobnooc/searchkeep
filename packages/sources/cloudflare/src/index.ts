@@ -67,7 +67,14 @@ export function createCloudflareClient(opts: CloudflareClientOptions): Cloudflar
       describe,
     );
     if (res.errors && res.errors.length > 0) {
-      throw new SourceError('cloudflare', 200, `GraphQL: ${res.errors.map((e) => e.message).join('; ').slice(0, 300)}`);
+      throw new SourceError(
+        'cloudflare',
+        200,
+        `GraphQL: ${res.errors
+          .map((e) => e.message)
+          .join('; ')
+          .slice(0, 300)}`,
+      );
     }
     if (!res.data) throw new SourceError('cloudflare', 200, 'GraphQL: empty response');
     return res.data;
@@ -83,7 +90,12 @@ export function createCloudflareClient(opts: CloudflareClientOptions): Cloudflar
     const out: T[] = [];
     for (let page = 1; page <= 20; page++) {
       const sep = path.includes('?') ? '&' : '?';
-      const res = await requestJson<Envelope<T[]>>('cloudflare', `${API}${path}${sep}page=${page}&per_page=50`, { headers: auth, fetch: f }, describe);
+      const res = await requestJson<Envelope<T[]>>(
+        'cloudflare',
+        `${API}${path}${sep}page=${page}&per_page=50`,
+        { headers: auth, fetch: f },
+        describe,
+      );
       if (!res.success) throw new SourceError('cloudflare', 200, res.errors?.[0]?.message ?? 'request failed');
       out.push(...(res.result ?? []));
       if (!res.result_info || res.result_info.page >= res.result_info.total_pages) break;
@@ -103,7 +115,10 @@ export function createCloudflareClient(opts: CloudflareClientOptions): Cloudflar
           }
         } }
       }`;
-      type Row = { count: number; dimensions: { userAgent: string; clientRequestHTTPHost: string; clientRequestPath: string; edgeResponseStatus: number } };
+      type Row = {
+        count: number;
+        dimensions: { userAgent: string; clientRequestHTTPHost: string; clientRequestPath: string; edgeResponseStatus: number };
+      };
       const data = await graphql<{ viewer: { zones: Array<{ httpRequestsAdaptiveGroups: Row[] }> } }>(query, {
         zone: zoneId,
         start,
@@ -134,7 +149,12 @@ export function createCloudflareClient(opts: CloudflareClientOptions): Cloudflar
         } }
       }`;
       type Row = { count: number; sum: { visits: number }; dimensions: { requestHost: string; requestPath: string; refererHost: string } };
-      const data = await graphql<{ viewer: { accounts: Array<{ rumPageloadEventsAdaptiveGroups: Row[] }> } }>(query, { acct: accountId, tag: siteTag, start, end });
+      const data = await graphql<{ viewer: { accounts: Array<{ rumPageloadEventsAdaptiveGroups: Row[] }> } }>(query, {
+        acct: accountId,
+        tag: siteTag,
+        start,
+        end,
+      });
       const rows = data.viewer.accounts[0]?.rumPageloadEventsAdaptiveGroups ?? [];
       return rows.map((r) => ({
         date,
@@ -163,7 +183,12 @@ export function createCloudflareClient(opts: CloudflareClientOptions): Cloudflar
         quantiles: { largestContentfulPaintP75: number; interactionToNextPaintP75: number; cumulativeLayoutShiftP75: number };
         dimensions: { requestHost: string; requestPath: string };
       };
-      const data = await graphql<{ viewer: { accounts: Array<{ rumWebVitalsEventsAdaptiveGroups: Row[] }> } }>(query, { acct: accountId, tag: siteTag, start, end });
+      const data = await graphql<{ viewer: { accounts: Array<{ rumWebVitalsEventsAdaptiveGroups: Row[] }> } }>(query, {
+        acct: accountId,
+        tag: siteTag,
+        start,
+        end,
+      });
       const rows = data.viewer.accounts[0]?.rumWebVitalsEventsAdaptiveGroups ?? [];
       return rows.map((r) => ({
         date,

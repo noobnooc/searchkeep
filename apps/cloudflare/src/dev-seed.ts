@@ -12,7 +12,18 @@ function rng(seed: number) {
   };
 }
 
-const PAGES = ['/', '/pricing', '/blog/what-is-geo', '/blog/ai-crawlers-explained', '/blog/gsc-16-month-limit', '/docs/getting-started', '/docs/mcp', '/compare/searchkeep-vs-saas', '/blog/llms-txt', '/changelog'];
+const PAGES = [
+  '/',
+  '/pricing',
+  '/blog/what-is-geo',
+  '/blog/ai-crawlers-explained',
+  '/blog/gsc-16-month-limit',
+  '/docs/getting-started',
+  '/docs/mcp',
+  '/compare/searchkeep-vs-saas',
+  '/blog/llms-txt',
+  '/changelog',
+];
 const QUERIES: Array<[string, string, number, number]> = [
   ['acme analytics', '/', 2.1, 900],
   ['acme pricing', '/pricing', 1.6, 300],
@@ -64,7 +75,14 @@ export async function seedDemo(store: Store, siteId: string, domain: string, tod
     const date = addDays(end, -w * 7);
     bing.push({ date, kind: 'total', clicks: Math.round(140 + r() * 60), impressions: Math.round(3800 + r() * 900) });
     for (const [q, page, pos, imp] of QUERIES.slice(0, 8)) {
-      bing.push({ date, kind: 'query', query: q, clicks: Math.round(imp / 40 + r() * 5), impressions: Math.round(imp / 5), position: pos + 1 });
+      bing.push({
+        date,
+        kind: 'query',
+        query: q,
+        clicks: Math.round(imp / 40 + r() * 5),
+        impressions: Math.round(imp / 5),
+        position: pos + 1,
+      });
       bing.push({ date, kind: 'page', page, clicks: Math.round(imp / 50), impressions: Math.round(imp / 6), position: pos });
     }
   }
@@ -78,22 +96,61 @@ export async function seedDemo(store: Store, siteId: string, domain: string, tod
       PAGES.flatMap((path, pi) =>
         crawlers
           .filter((_c, ci) => (ci + pi + i) % 3 !== 0)
-          .map((c, ci) => ({ date, crawler: c.name, operator: c.operator, purpose: c.purpose, path: normalizePage(path, domain), status: (ci + pi) % 11 === 0 ? 404 : 200, requests: Math.round(2 + r() * (c.purpose === 'training' ? 30 : 10)) })),
+          .map((c, ci) => ({
+            date,
+            crawler: c.name,
+            operator: c.operator,
+            purpose: c.purpose,
+            path: normalizePage(path, domain),
+            status: (ci + pi) % 11 === 0 ? 404 : 200,
+            requests: Math.round(2 + r() * (c.purpose === 'training' ? 30 : 10)),
+          })),
       ),
     );
     n += await store.writeWebAnalytics(
       siteId,
       PAGES.flatMap((path) => [
         { date, path, refererHost: 'www.google.com', visits: Math.round(10 + r() * 40), pageViews: Math.round(14 + r() * 50) },
-        { date, path, refererHost: 'chatgpt.com', visits: Math.round(r() * (path.startsWith('/blog') ? 9 : 2)), pageViews: Math.round(r() * 10) },
+        {
+          date,
+          path,
+          refererHost: 'chatgpt.com',
+          visits: Math.round(r() * (path.startsWith('/blog') ? 9 : 2)),
+          pageViews: Math.round(r() * 10),
+        },
         { date, path, refererHost: 'www.perplexity.ai', visits: Math.round(r() * 4), pageViews: Math.round(r() * 5) },
         { date, path, refererHost: '', visits: Math.round(5 + r() * 20), pageViews: Math.round(6 + r() * 25) },
       ]),
     );
-    n += await store.writeWebVitals(siteId, PAGES.map((path) => ({ date, path, lcpP75: Math.round(1400 + r() * 1800), inpP75: Math.round(80 + r() * 220), clsP75: Math.round(r() * 150) / 1000, samples: Math.round(20 + r() * 80) })));
+    n += await store.writeWebVitals(
+      siteId,
+      PAGES.map((path) => ({
+        date,
+        path,
+        lcpP75: Math.round(1400 + r() * 1800),
+        inpP75: Math.round(80 + r() * 220),
+        clsP75: Math.round(r() * 150) / 1000,
+        samples: Math.round(20 + r() * 80),
+      })),
+    );
   }
-  n += await store.writeAiCitations(siteId, PAGES.slice(1, 7).map((page, i) => ({ date: addDays(today, -7), page, surface: 'bing_copilot', citations: 40 - i * 6 })));
-  await store.replaceSitemaps(siteId, 'gsc', [{ path: `https://${domain}/sitemap.xml`, lastSubmitted: `${addDays(today, -20)}T08:00:00Z`, lastDownloaded: `${addDays(today, -1)}T03:12:00Z`, errors: 0, warnings: 0, submitted: 128, indexed: null }]);
-  await store.replaceCrawlIssues(siteId, 'bing', [{ url: `https://${domain}/old-page`, issue: 'Code4xx', httpCode: 404, detectedAt: today }]);
+  n += await store.writeAiCitations(
+    siteId,
+    PAGES.slice(1, 7).map((page, i) => ({ date: addDays(today, -7), page, surface: 'bing_copilot', citations: 40 - i * 6 })),
+  );
+  await store.replaceSitemaps(siteId, 'gsc', [
+    {
+      path: `https://${domain}/sitemap.xml`,
+      lastSubmitted: `${addDays(today, -20)}T08:00:00Z`,
+      lastDownloaded: `${addDays(today, -1)}T03:12:00Z`,
+      errors: 0,
+      warnings: 0,
+      submitted: 128,
+      indexed: null,
+    },
+  ]);
+  await store.replaceCrawlIssues(siteId, 'bing', [
+    { url: `https://${domain}/old-page`, issue: 'Code4xx', httpCode: 404, detectedAt: today },
+  ]);
   return n;
 }

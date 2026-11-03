@@ -47,7 +47,10 @@ const common = {
   brand: z.enum(['all', 'brand', 'non_brand']).optional().describe('Split by the configured brand regex. Default all.'),
   limit: z.number().int().min(1).max(500).optional().describe('Maximum rows returned.'),
 };
-const source = z.enum(['gsc', 'bing']).optional().describe('gsc = Google Search Console (daily), bing = Bing Webmaster Tools (weekly). Default gsc.');
+const source = z
+  .enum(['gsc', 'bing'])
+  .optional()
+  .describe('gsc = Google Search Console (daily), bing = Bing Webmaster Tools (weekly). Default gsc.');
 
 const READ_ONLY = { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false } as const;
 
@@ -98,13 +101,18 @@ export function createSearchkeepMcpServer(deps: McpDeps): McpServer {
     {
       jsonSchemaValidator: new CfWorkerJsonSchemaValidator(),
       instructions:
-        'Searchkeep answers SEO and GEO questions about the owner\'s own sites from first-party data (Google Search Console, Bing Webmaster Tools, Cloudflare AI crawler traffic and Web Analytics) kept in their own Cloudflare D1. Start with list_sites. Data is synced daily; GSC lags 2-3 days and Bing is weekly. Results are aggregated and capped; use filters and limit to narrow down.',
+        "Searchkeep answers SEO and GEO questions about the owner's own sites from first-party data (Google Search Console, Bing Webmaster Tools, Cloudflare AI crawler traffic and Web Analytics) kept in their own Cloudflare D1. Start with list_sites. Data is synced daily; GSC lags 2-3 days and Bing is weekly. Results are aggregated and capped; use filters and limit to narrow down.",
     },
   );
 
   server.registerTool(
     'list_sites',
-    { title: 'List sites', description: 'Configured sites, which data sources are connected for each, and the date range of stored data.', inputSchema: {}, annotations: READ_ONLY },
+    {
+      title: 'List sites',
+      description: 'Configured sites, which data sources are connected for each, and the date range of stored data.',
+      inputSchema: {},
+      annotations: READ_ONLY,
+    },
     async () => run(() => listSites(ctx)),
   );
 
@@ -117,7 +125,11 @@ export function createSearchkeepMcpServer(deps: McpDeps): McpServer {
       inputSchema: {
         ...common,
         source,
-        dimensions: z.array(z.enum(['date', 'week', 'month', 'query', 'page', 'country', 'device'])).max(3).optional().describe('Group-by dimensions. Empty = totals.'),
+        dimensions: z
+          .array(z.enum(['date', 'week', 'month', 'query', 'page', 'country', 'device']))
+          .max(3)
+          .optional()
+          .describe('Group-by dimensions. Empty = totals.'),
         queryContains: z.string().optional().describe('Case-insensitive substring filter on the query.'),
         pageContains: z.string().optional().describe('Case-insensitive substring filter on the page path.'),
         country: z.string().optional().describe('ISO 3166-1 alpha-3 country code, e.g. usa.'),
@@ -134,7 +146,8 @@ export function createSearchkeepMcpServer(deps: McpDeps): McpServer {
     'compare_periods',
     {
       title: 'Compare two periods',
-      description: 'Compares a period with the previous one (or a custom one) and returns totals plus the queries or pages that gained and lost the most clicks.',
+      description:
+        'Compares a period with the previous one (or a custom one) and returns totals plus the queries or pages that gained and lost the most clicks.',
       inputSchema: {
         ...common,
         source,
@@ -151,7 +164,8 @@ export function createSearchkeepMcpServer(deps: McpDeps): McpServer {
     'find_quick_wins',
     {
       title: 'Find quick wins',
-      description: 'Queries ranking just off the top (default positions 8-20) with high impressions, ranked by extra clicks available if they reached the top 3.',
+      description:
+        'Queries ranking just off the top (default positions 8-20) with high impressions, ranked by extra clicks available if they reached the top 3.',
       inputSchema: {
         ...common,
         source,
@@ -172,7 +186,7 @@ export function createSearchkeepMcpServer(deps: McpDeps): McpServer {
       inputSchema: {
         ...common,
         minImpressions: z.number().int().min(1).optional().describe('Minimum impressions per query/page pair. Default 10.'),
-        minShare: z.number().min(0.01).max(0.5).optional().describe('Minimum share of the query\'s impressions per page. Default 0.1.'),
+        minShare: z.number().min(0.01).max(0.5).optional().describe("Minimum share of the query's impressions per page. Default 0.1."),
       },
       annotations: READ_ONLY,
     },
@@ -183,7 +197,8 @@ export function createSearchkeepMcpServer(deps: McpDeps): McpServer {
     'find_ctr_anomalies',
     {
       title: 'Find CTR anomalies',
-      description: 'Queries whose CTR is far below what this site normally gets at the same position — usually a title/snippet or SERP-feature problem.',
+      description:
+        'Queries whose CTR is far below what this site normally gets at the same position — usually a title/snippet or SERP-feature problem.',
       inputSchema: {
         ...common,
         source,
@@ -239,14 +254,19 @@ export function createSearchkeepMcpServer(deps: McpDeps): McpServer {
     'ai_crawlers',
     {
       title: 'AI crawler traffic',
-      description: 'Requests from AI crawlers and assistants (GPTBot, ClaudeBot, PerplexityBot, …) recorded by Cloudflare, grouped by crawler, operator, purpose, path, status or date.',
+      description:
+        'Requests from AI crawlers and assistants (GPTBot, ClaudeBot, PerplexityBot, …) recorded by Cloudflare, grouped by crawler, operator, purpose, path, status or date.',
       inputSchema: {
         site: common.site,
         start: common.start,
         end: common.end,
         days: common.days.describe('Window length in days. Default 7.'),
         limit: common.limit,
-        groupBy: z.array(z.enum(['crawler', 'operator', 'purpose', 'path', 'status', 'date'])).max(3).optional().describe('Default [crawler].'),
+        groupBy: z
+          .array(z.enum(['crawler', 'operator', 'purpose', 'path', 'status', 'date']))
+          .max(3)
+          .optional()
+          .describe('Default [crawler].'),
         crawler: z.string().optional().describe('Only this crawler, e.g. GPTBot.'),
         pathContains: z.string().optional(),
       },
@@ -259,7 +279,8 @@ export function createSearchkeepMcpServer(deps: McpDeps): McpServer {
     'inspect_url',
     {
       title: 'Inspect URL (live)',
-      description: 'Live Google URL Inspection: index status, coverage, canonical, last crawl. Counts against the ~2,000/day per-property quota.',
+      description:
+        'Live Google URL Inspection: index status, coverage, canonical, last crawl. Counts against the ~2,000/day per-property quota.',
       inputSchema: { site: common.site, url: z.string().min(1).describe('Absolute URL or path on the site.') },
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
     },
@@ -282,7 +303,8 @@ export function createSearchkeepMcpServer(deps: McpDeps): McpServer {
       'submit_sitemap',
       {
         title: 'Submit sitemap',
-        description: 'Submits a sitemap to Google Search Console. Writes to an external system; requires ENABLE_WRITES and Full permission for the service account.',
+        description:
+          'Submits a sitemap to Google Search Console. Writes to an external system; requires ENABLE_WRITES and Full permission for the service account.',
         inputSchema: { site: common.site, sitemapUrl: z.string().url().describe('Absolute https URL of the sitemap.') },
         annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
       },
@@ -294,11 +316,13 @@ export function createSearchkeepMcpServer(deps: McpDeps): McpServer {
     'setup_status',
     {
       title: 'Setup status',
-      description: 'Checks the deployment: Access protection, credentials, live API probes, last sync and data coverage. Never returns secret values. Use after deploying.',
+      description:
+        'Checks the deployment: Access protection, credentials, live API probes, last sync and data coverage. Never returns secret values. Use after deploying.',
       inputSchema: { probe: z.boolean().optional().describe('Call the source APIs to verify credentials. Default true.') },
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
     },
-    async (args) => run(async () => setupStatus(ctx, { readiness: await deps.readiness(), ...(args.probe === undefined ? {} : { probe: args.probe }) })),
+    async (args) =>
+      run(async () => setupStatus(ctx, { readiness: await deps.readiness(), ...(args.probe === undefined ? {} : { probe: args.probe }) })),
   );
 
   return server;

@@ -67,12 +67,20 @@ export class D1Store implements Store {
   // ---------------------------------------------------------------- helpers
 
   private async all<T>(sql: string, ...binds: Bind[]): Promise<T[]> {
-    const res = await this.db.prepare(sql).bind(...binds).all<T>();
+    const res = await this.db
+      .prepare(sql)
+      .bind(...binds)
+      .all<T>();
     return res.results ?? [];
   }
 
   private async first<T>(sql: string, ...binds: Bind[]): Promise<T | null> {
-    return (await this.db.prepare(sql).bind(...binds).first<T>()) ?? null;
+    return (
+      (await this.db
+        .prepare(sql)
+        .bind(...binds)
+        .first<T>()) ?? null
+    );
   }
 
   private async batch(statements: D1PreparedStatement[]): Promise<number> {
@@ -99,7 +107,9 @@ export class D1Store implements Store {
     const unique = [...new Set(texts)].filter((q) => q !== '');
     return chunks(unique).map((group) =>
       this.db
-        .prepare('INSERT INTO queries (site_id, text) SELECT ?1, value FROM json_each(?2) WHERE true ON CONFLICT (site_id, text) DO NOTHING')
+        .prepare(
+          'INSERT INTO queries (site_id, text) SELECT ?1, value FROM json_each(?2) WHERE true ON CONFLICT (site_id, text) DO NOTHING',
+        )
         .bind(siteId, JSON.stringify(group)),
     );
   }
@@ -162,8 +172,14 @@ export class D1Store implements Store {
     }
     const items = [...agg.values()].map((x) => ({ ...x, ps: x.ps === null ? null : round6(x.ps) }));
     const statements = [
-      ...this.ensurePagesStatements(siteId, items.map((x) => x.p)),
-      ...this.ensureQueriesStatements(siteId, items.map((x) => x.q)),
+      ...this.ensurePagesStatements(
+        siteId,
+        items.map((x) => x.p),
+      ),
+      ...this.ensureQueriesStatements(
+        siteId,
+        items.map((x) => x.q),
+      ),
     ];
     const dims = await this.batch(statements);
     const facts = chunks(items).map((group) =>
@@ -213,7 +229,12 @@ export class D1Store implements Store {
 
   async writeCrawlerRequests(siteId: string, rows: CrawlerRequestInput[]): Promise<number> {
     if (rows.length === 0) return 0;
-    const dims = await this.batch(this.ensurePagesStatements(siteId, rows.map((r) => r.path)));
+    const dims = await this.batch(
+      this.ensurePagesStatements(
+        siteId,
+        rows.map((r) => r.path),
+      ),
+    );
     const items = rows.map((r) => ({ d: r.date, cr: r.crawler, op: r.operator, pu: r.purpose, p: r.path, s: r.status, n: r.requests }));
     return (
       dims +
@@ -245,7 +266,12 @@ export class D1Store implements Store {
       } else agg.set(key, { d: r.date, p: r.path, h: r.refererHost, v: r.visits, pv: r.pageViews });
     }
     const items = [...agg.values()];
-    const dims = await this.batch(this.ensurePagesStatements(siteId, items.map((r) => r.p)));
+    const dims = await this.batch(
+      this.ensurePagesStatements(
+        siteId,
+        items.map((r) => r.p),
+      ),
+    );
     return (
       dims +
       (await this.batch(
@@ -266,7 +292,12 @@ export class D1Store implements Store {
 
   async writeWebVitals(siteId: string, rows: WebVitalsInput[]): Promise<number> {
     if (rows.length === 0) return 0;
-    const dims = await this.batch(this.ensurePagesStatements(siteId, rows.map((r) => r.path)));
+    const dims = await this.batch(
+      this.ensurePagesStatements(
+        siteId,
+        rows.map((r) => r.path),
+      ),
+    );
     const items = rows.map((r) => ({ d: r.date, p: r.path, l: r.lcpP75 ?? null, n: r.inpP75 ?? null, c: r.clsP75 ?? null, s: r.samples }));
     return (
       dims +
@@ -289,7 +320,12 @@ export class D1Store implements Store {
 
   async writeAiCitations(siteId: string, rows: AiCitationInput[]): Promise<number> {
     if (rows.length === 0) return 0;
-    const dims = await this.batch(this.ensurePagesStatements(siteId, rows.map((r) => r.page)));
+    const dims = await this.batch(
+      this.ensurePagesStatements(
+        siteId,
+        rows.map((r) => r.page),
+      ),
+    );
     const items = rows.map((r) => ({ d: r.date, p: r.page, s: r.surface, n: r.citations }));
     return (
       dims +
@@ -341,7 +377,18 @@ export class D1Store implements Store {
           .prepare(
             'INSERT OR REPLACE INTO sitemaps (site_id, source, path, last_submitted, last_downloaded, is_pending, errors, warnings, submitted, indexed) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)',
           )
-          .bind(siteId, source, r.path, r.lastSubmitted ?? null, r.lastDownloaded ?? null, r.isPending ? 1 : 0, r.errors ?? 0, r.warnings ?? 0, r.submitted ?? null, r.indexed ?? null),
+          .bind(
+            siteId,
+            source,
+            r.path,
+            r.lastSubmitted ?? null,
+            r.lastDownloaded ?? null,
+            r.isPending ? 1 : 0,
+            r.errors ?? 0,
+            r.warnings ?? 0,
+            r.submitted ?? null,
+            r.indexed ?? null,
+          ),
       );
     }
     await this.db.batch(statements);
@@ -376,7 +423,13 @@ export class D1Store implements Store {
   async startSyncRun(run: SyncRunRecord): Promise<number> {
     const row = await this.orm
       .insert(schema.syncRuns)
-      .values({ startedAt: run.startedAt, trigger: run.trigger, status: run.status, rowsWritten: run.rowsWritten, message: run.message ?? null })
+      .values({
+        startedAt: run.startedAt,
+        trigger: run.trigger,
+        status: run.status,
+        rowsWritten: run.rowsWritten,
+        message: run.message ?? null,
+      })
       .returning({ id: schema.syncRuns.id })
       .get();
     // Keep the table small: drop runs older than the latest 500.
@@ -426,7 +479,8 @@ export class D1Store implements Store {
     const joins: string[] = [];
     const table = breakdown ? 'search_breakdowns' : 'search_facts';
     if (!breakdown) {
-      const kinds = hasQuery && hasPage ? ['query_page'] : hasQuery ? ['query_page', 'query'] : hasPage ? ['query_page', 'page'] : ['total'];
+      const kinds =
+        hasQuery && hasPage ? ['query_page'] : hasQuery ? ['query_page', 'query'] : hasPage ? ['query_page', 'page'] : ['total'];
       where.push(`f.kind IN (${kinds.map((k) => `'${k}'`).join(', ')})`);
       if (hasPage) joins.push('JOIN pages p ON p.id = f.page_id');
       if (hasQuery) joins.push('JOIN queries q ON q.id = f.query_id');
@@ -474,7 +528,13 @@ export class D1Store implements Store {
     const dir = q.order === 'asc' ? 'ASC' : 'DESC';
     const timeDim = dims.find((d) => d === 'date' || d === 'week' || d === 'month');
     const orderCol =
-      q.orderBy === 'date' ? (timeDim ?? null) : q.orderBy === 'ctr' ? 'CAST(SUM(f.clicks) AS REAL) / NULLIF(SUM(f.impressions), 0)' : q.orderBy === 'position' ? posExpr : (q.orderBy ?? 'clicks');
+      q.orderBy === 'date'
+        ? (timeDim ?? null)
+        : q.orderBy === 'ctr'
+          ? 'CAST(SUM(f.clicks) AS REAL) / NULLIF(SUM(f.impressions), 0)'
+          : q.orderBy === 'position'
+            ? posExpr
+            : (q.orderBy ?? 'clicks');
     const order = orderCol ? `ORDER BY ${orderCol} ${dir}${timeDim && orderCol !== timeDim ? `, ${timeDim} ASC` : ''}` : '';
     const limit = Math.max(1, Math.min(Math.floor(Number(q.limit ?? 1000)) || 1000, 50_000));
 
@@ -510,7 +570,14 @@ export class D1Store implements Store {
     const needPage = q.groupBy.includes('path') || Boolean(q.pathContains);
     if (q.crawler) where.push(`lower(c.crawler) = lower(${arg(q.crawler)})`);
     if (q.pathContains) where.push(`instr(lower(p.path), lower(${arg(q.pathContains)})) > 0`);
-    const cols: Record<string, string> = { crawler: 'c.crawler', operator: 'c.operator', purpose: 'c.purpose', path: 'p.path', status: 'c.status', date: 'c.date' };
+    const cols: Record<string, string> = {
+      crawler: 'c.crawler',
+      operator: 'c.operator',
+      purpose: 'c.purpose',
+      path: 'p.path',
+      status: 'c.status',
+      date: 'c.date',
+    };
     const select = q.groupBy.map((g) => `${cols[g]} AS ${g}`);
     const group = q.groupBy.map((g) => cols[g]!);
     const sql = `SELECT ${[...select, 'SUM(c.requests) AS requests'].join(', ')} FROM ai_crawler_requests c
@@ -561,7 +628,14 @@ export class D1Store implements Store {
   }
 
   async queryWebVitals(siteId: string, range: DateRange, limit: number) {
-    const rows = await this.all<{ page: string; lcp: number | null; inp: number | null; cls: number | null; samples: number; date: string }>(
+    const rows = await this.all<{
+      page: string;
+      lcp: number | null;
+      inp: number | null;
+      cls: number | null;
+      samples: number;
+      date: string;
+    }>(
       `SELECT p.path AS page, MAX(v.date) AS date,
          SUM(v.lcp_p75 * v.samples) / NULLIF(SUM(CASE WHEN v.lcp_p75 IS NULL THEN 0 ELSE v.samples END), 0) AS lcp,
          SUM(v.inp_p75 * v.samples) / NULLIF(SUM(CASE WHEN v.inp_p75 IS NULL THEN 0 ELSE v.samples END), 0) AS inp,
@@ -575,7 +649,15 @@ export class D1Store implements Store {
       limit,
     );
     const r0 = (v: number | null) => (v == null ? null : Math.round(v));
-    return rows.map((r) => ({ page: r.page, path: r.page, date: r.date, lcpP75: r0(r.lcp), inpP75: r0(r.inp), clsP75: r.cls == null ? null : Math.round(r.cls * 1000) / 1000, samples: Number(r.samples) }));
+    return rows.map((r) => ({
+      page: r.page,
+      path: r.page,
+      date: r.date,
+      lcpP75: r0(r.lcp),
+      inpP75: r0(r.inp),
+      clsP75: r.cls == null ? null : Math.round(r.cls * 1000) / 1000,
+      samples: Number(r.samples),
+    }));
   }
 
   async listCrawlIssues(siteId: string, source: SearchSource, limit: number): Promise<CrawlIssueInput[]> {
@@ -589,7 +671,11 @@ export class D1Store implements Store {
   }
 
   async listSitemaps(siteId: string, source: SearchSource): Promise<SitemapRecord[]> {
-    const rows = await this.all<Record<string, unknown>>('SELECT * FROM sitemaps WHERE site_id = ?1 AND source = ?2 ORDER BY path', siteId, source);
+    const rows = await this.all<Record<string, unknown>>(
+      'SELECT * FROM sitemaps WHERE site_id = ?1 AND source = ?2 ORDER BY path',
+      siteId,
+      source,
+    );
     return rows.map((r) => ({
       path: String(r.path),
       lastSubmitted: (r.last_submitted as string | null) ?? null,
@@ -608,15 +694,30 @@ export class D1Store implements Store {
     for (const id of sites) {
       // Every query below is an index range seek (no full scans): D1 bills rows read.
       const [gsc, bing, crawl, rum, cites] = await this.db.batch([
-        this.db.prepare("SELECT MIN(date) AS first, MAX(date) AS last, COUNT(*) AS days FROM search_facts WHERE site_id = ?1 AND source = 'gsc' AND kind = 'total'").bind(id),
-        this.db.prepare("SELECT MIN(date) AS first, MAX(date) AS last, COUNT(*) AS days FROM search_facts WHERE site_id = ?1 AND source = 'bing' AND kind = 'total'").bind(id),
+        this.db
+          .prepare(
+            "SELECT MIN(date) AS first, MAX(date) AS last, COUNT(*) AS days FROM search_facts WHERE site_id = ?1 AND source = 'gsc' AND kind = 'total'",
+          )
+          .bind(id),
+        this.db
+          .prepare(
+            "SELECT MIN(date) AS first, MAX(date) AS last, COUNT(*) AS days FROM search_facts WHERE site_id = ?1 AND source = 'bing' AND kind = 'total'",
+          )
+          .bind(id),
         this.db.prepare('SELECT MIN(date) AS first, MAX(date) AS last FROM ai_crawler_requests WHERE site_id = ?1').bind(id),
         this.db.prepare('SELECT MIN(date) AS first, MAX(date) AS last FROM web_analytics WHERE site_id = ?1').bind(id),
         this.db.prepare('SELECT MIN(date) AS first, MAX(date) AS last FROM ai_citations WHERE site_id = ?1').bind(id),
       ]);
       const push = (source: string, dataset: string, res: D1Result | undefined) => {
         const r = (res?.results?.[0] ?? {}) as { first?: string | null; last?: string | null; days?: number };
-        out.push({ siteId: id, source, dataset, firstDate: r.first ?? null, lastDate: r.last ?? null, days: r.days === undefined ? null : Number(r.days) });
+        out.push({
+          siteId: id,
+          source,
+          dataset,
+          firstDate: r.first ?? null,
+          lastDate: r.last ?? null,
+          days: r.days === undefined ? null : Number(r.days),
+        });
       };
       push('gsc', 'search', gsc);
       push('bing', 'search', bing);
@@ -628,7 +729,11 @@ export class D1Store implements Store {
   }
 
   async latestDate(siteId: string, source: SearchSource): Promise<IsoDate | null> {
-    const row = await this.first<{ d: string | null }>("SELECT MAX(date) AS d FROM search_facts WHERE site_id = ?1 AND source = ?2 AND kind = 'total'", siteId, source);
+    const row = await this.first<{ d: string | null }>(
+      "SELECT MAX(date) AS d FROM search_facts WHERE site_id = ?1 AND source = ?2 AND kind = 'total'",
+      siteId,
+      source,
+    );
     return row?.d ?? null;
   }
 }

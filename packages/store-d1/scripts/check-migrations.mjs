@@ -12,7 +12,10 @@ let failed = false;
 try {
   cpSync(join(root, 'migrations'), tmp, { recursive: true });
   const before = readdirSync(tmp).filter((f) => f.endsWith('.sql')).length;
-  execFileSync('npx', ['drizzle-kit', 'generate', '--dialect', 'sqlite', '--schema', './src/schema.ts', '--out', tmp], { cwd: root, stdio: 'pipe' });
+  execFileSync('npx', ['drizzle-kit', 'generate', '--dialect', 'sqlite', '--schema', './src/schema.ts', '--out', tmp], {
+    cwd: root,
+    stdio: 'pipe',
+  });
   const after = readdirSync(tmp).filter((f) => f.endsWith('.sql')).length;
   if (after !== before) {
     console.error('Schema changed without a migration. Run: pnpm --filter @searchkeep/store-d1 run db:generate');
@@ -31,7 +34,12 @@ try {
 // Released migrations are immutable: compare against the latest tag, if any.
 try {
   const tag = execFileSync('git', ['describe', '--tags', '--abbrev=0'], { cwd: root, stdio: 'pipe' }).toString().trim();
-  const changed = execFileSync('git', ['diff', '--name-only', '--diff-filter=MDR', tag, '--', 'migrations/*.sql'], { cwd: root, stdio: 'pipe' }).toString().trim();
+  const changed = execFileSync('git', ['diff', '--name-only', '--diff-filter=MDR', tag, '--', 'migrations/*.sql'], {
+    cwd: root,
+    stdio: 'pipe',
+  })
+    .toString()
+    .trim();
   if (changed) {
     console.error(`Released migrations were modified since ${tag} (forward-only!):\n${changed}`);
     failed = true;
