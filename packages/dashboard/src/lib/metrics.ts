@@ -29,7 +29,12 @@ export function searchKpis(cur: Metrics, prev: Metrics): KpiSet[] {
   return [
     { label: 'Clicks', value: big(cur.clicks), sub: `vs ${big(prev.clicks)}`, delta: delta(cp, pctChange(cp), true, 0.05) },
     { label: 'Impressions', value: big(cur.impressions), sub: `vs ${big(prev.impressions)}`, delta: delta(ip, pctChange(ip), true, 0.05) },
-    { label: 'CTR', value: percent(cur.ctr), sub: `vs ${percent(prev.ctr)}`, delta: delta(ctrPp, `${deltaDecimal(ctrPp, 2)} pp`, true, 0.005) },
+    {
+      label: 'CTR',
+      value: percent(cur.ctr),
+      sub: `vs ${percent(prev.ctr)}`,
+      delta: delta(ctrPp, `${deltaDecimal(ctrPp, 2)} pp`, true, 0.005),
+    },
     {
       label: 'Avg. position',
       value: decimal(cur.position, 1),

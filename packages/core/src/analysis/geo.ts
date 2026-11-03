@@ -17,7 +17,10 @@ const CRAWLER_GROUPS: CrawlerQuery['groupBy'] = ['crawler', 'operator', 'purpose
  * are joined on the normalized page path.
  */
 export async function geoFunnel(ctx: AnalysisContext, p: GeoFunnelParams) {
-  const r = await resolve(ctx, { ...p, source: 'gsc', brand: 'all' }, { limit: 50 });
+  const site = findSite(ctx.config, p.site);
+  // Default the window to the newest date any funnel dataset has (Cloudflare data is fresher than GSC).
+  const end = p.end ?? (p.start ? undefined : await latestOf(ctx, site.id, ['search', 'ai_crawlers', 'web_analytics', 'ai_citations']));
+  const r = await resolve(ctx, { ...p, source: 'gsc', brand: 'all', ...(end ? { end } : {}) }, { limit: 50 });
   const range = r.range;
   const siteId = r.site.id;
   const big = 5000;
@@ -120,9 +123,10 @@ export async function aiCrawlers(ctx: AnalysisContext, p: AiCrawlersParams) {
   for (const g of groupBy) {
     if (!CRAWLER_GROUPS.includes(g)) throw new SearchkeepError('bad_request', `Unknown groupBy "${g}". Use: ${CRAWLER_GROUPS.join(', ')}.`);
   }
+  const range = await crawlerRange(ctx, r.site.id, p, r.range);
   const rows = await ctx.store.queryCrawlers({
     siteId: r.site.id,
-    range: await crawlerRange(ctx, r.site.id, p, r.range),
+    range,
     groupBy,
     ...(p.crawler ? { crawler: p.crawler } : {}),
     ...(p.pathContains ? { pathContains: p.pathContains } : {}),
@@ -134,7 +138,7 @@ export async function aiCrawlers(ctx: AnalysisContext, p: AiCrawlersParams) {
     notes.push(
       'No AI crawler requests recorded for this range. Check that cloudflareZoneId is set and the zone is proxied (orange cloud).',
     );
-  return { site: r.site.id, range: r.range, groupBy, totalRequests: total, rows, notes };
+  return { site: r.site.id, range, groupBy, totalRequests: total, rows, notes };
 }
 
 /** Crawler data has its own latest date; default the window to it rather than to GSC's. */
@@ -156,7 +160,8 @@ export interface AiReferralsParams extends Omit<CommonParams, 'source' | 'brand'
 export async function aiReferrals(ctx: AnalysisContext, p: AiReferralsParams) {
   const site = findSite(ctx.config, p.site);
   if (!site.webAnalyticsSiteTag) throw new SearchkeepError('not_configured', 'webAnalyticsSiteTag is not set for this site.');
-  const r = await resolve(ctx, { ...p, source: 'gsc' }, { limit: 50 });
+  const end = p.end ?? (p.start ? undefined : await latestOf(ctx, site.id, ['web_analytics']));
+  const r = await resolve(ctx, { ...p, source: 'gsc', ...(end ? { end } : {}) }, { limit: 50 });
   const groupBy = p.groupBy && p.groupBy.length > 0 ? p.groupBy : (['refererHost'] as const);
   for (const g of groupBy) {
     if (!['path', 'refererHost', 'date'].includes(g))
@@ -177,4 +182,13 @@ export async function aiReferrals(ctx: AnalysisContext, p: AiReferralsParams) {
       'AI referrals are Web Analytics page loads whose referrer host is a known AI assistant. Many assistants strip referrers, so this undercounts.',
     ],
   };
+}
+
+/** Newest date across the given datasets (from store coverage), or undefined when none has data. */
+async function latestOf(ctx: AnalysisContext, siteId: string, datasets: string[]): Promise<string | undefined> {
+  const cov = await ctx.store.coverage(siteId);
+  const dates = cov
+    .filter((c) => datasets.includes(c.dataset) && (c.dataset !== 'search' || c.source === 'gsc') && c.lastDate)
+    .map((c) => c.lastDate!);
+  return dates.length ? dates.sort().at(-1) : undefined;
 }

@@ -1,6 +1,6 @@
 // Builds the dashboard and copies it into ./public (the Worker's static assets).
 import { execSync } from 'node:child_process';
-import { cpSync, existsSync, mkdirSync, rmSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, readdirSync, rmSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -9,7 +9,8 @@ const dashboard = join(app, '../../packages/dashboard');
 execSync('pnpm --filter @searchkeep/dashboard run build', { cwd: app, stdio: 'inherit' });
 const dist = join(dashboard, 'dist');
 if (!existsSync(join(dist, 'index.html'))) throw new Error('Dashboard build produced no index.html');
-rmSync(join(app, 'public'), { recursive: true, force: true });
+// Empty ./public in place (a running `wrangler dev` keeps watching the directory itself).
 mkdirSync(join(app, 'public'), { recursive: true });
+for (const entry of readdirSync(join(app, 'public'))) rmSync(join(app, 'public', entry), { recursive: true, force: true });
 cpSync(dist, join(app, 'public'), { recursive: true });
 console.log('Dashboard copied to apps/cloudflare/public');

@@ -57,7 +57,11 @@ export async function request<T>(url: string, opts: RequestOptions = {}): Promis
     });
   } catch (err) {
     if ((err as Error).name === 'AbortError') throw err;
-    throw new ApiError(0, 'network', 'Could not reach Searchkeep. Check your connection, or reload the page if your Cloudflare Access session expired.');
+    throw new ApiError(
+      0,
+      'network',
+      'Could not reach Searchkeep. Check your connection, or reload the page if your Cloudflare Access session expired.',
+    );
   }
   const text = await res.text();
   let data: unknown = null;
@@ -72,7 +76,11 @@ export async function request<T>(url: string, opts: RequestOptions = {}): Promis
     throw new ApiError(res.status, body.code ?? `http_${res.status}`, body.error ?? `Request failed with status ${res.status}.`);
   }
   if (data === null || typeof data !== 'object') {
-    throw new ApiError(res.status, 'bad_response', 'Searchkeep returned an unexpected response. Reload the page; your Access session may have expired.');
+    throw new ApiError(
+      res.status,
+      'bad_response',
+      'Searchkeep returned an unexpected response. Reload the page; your Access session may have expired.',
+    );
   }
   return data as T;
 }

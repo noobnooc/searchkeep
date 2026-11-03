@@ -4,7 +4,7 @@ import type { ReadinessReport } from '../auth/readiness.js';
 import type { SourceClients } from '../sources.js';
 import { pageToUrl } from '../url.js';
 import type { SearchSource, SiteConfig } from '../types.js';
-import { previousPeriod } from '../dates.js';
+import { previousPeriod, rangeLength } from '../dates.js';
 import { metrics, resolve, type AnalysisContext, type CommonParams } from './common.js';
 import { aiCrawlers } from './geo.js';
 
@@ -218,10 +218,10 @@ export async function overview(ctx: OpsContext, p: CommonParams) {
       return { source, current: cur[0] ?? metrics(0, 0, null), previous: before[0] ?? metrics(0, 0, null), series: daily };
     }),
   );
+  // Crawler data is fresher than GSC: same window length, ending at its own latest date.
   const crawlers = await aiCrawlers(ctx, {
     ...(p.site ? { site: p.site } : {}),
-    start: r.range.start,
-    end: r.range.end,
+    days: rangeLength(r.range),
     groupBy: ['crawler'],
     limit: 10,
   });

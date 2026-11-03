@@ -1,8 +1,19 @@
 /** Minimal hash router: `#/view/sub?key=value`. */
 
-export type ViewId = 'overview' | 'geo' | 'performance' | 'compare' | 'opportunities' | 'ai-crawlers' | 'ai-referrals' | 'technical' | 'settings';
+export type ViewId =
+  'overview' | 'geo' | 'performance' | 'compare' | 'opportunities' | 'ai-crawlers' | 'ai-referrals' | 'technical' | 'settings';
 
-const VIEWS: ViewId[] = ['overview', 'geo', 'performance', 'compare', 'opportunities', 'ai-crawlers', 'ai-referrals', 'technical', 'settings'];
+const VIEWS: ViewId[] = [
+  'overview',
+  'geo',
+  'performance',
+  'compare',
+  'opportunities',
+  'ai-crawlers',
+  'ai-referrals',
+  'technical',
+  'settings',
+];
 
 interface Route {
   view: ViewId;

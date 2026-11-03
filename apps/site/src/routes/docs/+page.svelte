@@ -25,6 +25,18 @@
   analysis code, so they always agree.
 </p>
 
+<figure class="shot">
+  <img
+    src="/screenshots/dashboard-geo-funnel.webp"
+    width="1600"
+    height="1398"
+    loading="lazy"
+    decoding="async"
+    alt="The Searchkeep dashboard's GEO funnel view: totals for crawled, cited, AI visits and clicks, a funnel band, pages crawled but never cited, and a per-page table."
+  />
+  <figcaption>The GEO funnel view of the dashboard (demo data).</figcaption>
+</figure>
+
 <h2 id="how-it-works">How it works</h2>
 <ol>
   <li>

@@ -14,6 +14,8 @@ You use it in two ways over one data layer:
 
 Website: <https://searchkeep.dev>
 
+![The Searchkeep dashboard: GEO funnel](docs/assets/dashboard-geo-funnel.png)
+
 ## The GEO funnel, connected
 
 Search is no longer just ten blue links. Searchkeep follows each page through the whole path from
@@ -27,6 +29,10 @@ AI crawler to visitor:
 
 The `geo_funnel` tool and the dashboard show all three stages per page, next to classic search
 performance.
+
+![The Searchkeep dashboard: overview](docs/assets/dashboard-overview.png)
+
+_Screenshots use the built-in demo data (`pnpm dev`, then `POST /api/dev/seed`)._
 
 ## Features
 
