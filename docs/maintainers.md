@@ -56,8 +56,8 @@ Repository → **Settings** → **Rules** → **Rulesets** → **New ruleset** �
   - **Require review from Code Owners**.
   - **Dismiss stale pull request approvals when new commits are pushed**.
   - **Require conversation resolution before merging**.
-- **Require status checks to pass**: add the check **`ci`** (the job in
-  [`.github/workflows/ci.yml`](../.github/workflows/ci.yml); it appears in the list after the
+- **Require status checks to pass**: add the checks **`ci`** and **`workers-builds`** (the jobs in
+  [`.github/workflows/ci.yml`](../.github/workflows/ci.yml); they appear in the list after the
   workflow has run once). Turn on **Require branches to be up to date before merging**.
 - **Bypass list:** empty, or repository admins only. Never add the agent identity.
 
@@ -69,8 +69,8 @@ Also under **Settings** → **General**: allow **Squash merging**, turn on **Aut
 branches**, and under **Settings** → **Code security** enable **Private vulnerability reporting**,
 **Dependabot alerts** and **Dependabot security updates**.
 
-**Verify:** a test PR from the agent shows "Review required" from a code owner and the `ci` check as
-required, and the merge button stays disabled until both pass.
+**Verify:** a test PR from the agent shows "Review required" from a code owner and the `ci` and
+`workers-builds` checks as required, and the merge button stays disabled until they pass.
 
 ## 3. Labels
 
@@ -116,7 +116,12 @@ scheduler works. Run it at most a few times a day; once a day is the default.
 Other agents can run the same skill by following the file as a runbook.
 
 Before the first run, create the first log issue yourself or let the agent do it: title
-`Agent log: YYYY-MM` (current UTC month), label `agent-log`, pinned.
+`Agent log: YYYY-MM` (current UTC month), label `agent-log`, pinned. (`Agent log: 2026-11` already
+exists; pin it from the issue page.)
+
+The maintainer's Claude account already has a **disabled** daily scheduled task named "Searchkeep
+maintain (daily)". Enable it only after step 1: under your own identity the skill stops at step 0b
+on purpose, because a maintainer must never be the agent.
 
 **Verify:** after a run, the month's log issue has a new comment with a summary, next steps and a
 hidden `agent-state` block, and no stale lock comment remains.
@@ -183,7 +188,9 @@ workflow**. It needs two repository secrets (**Settings** → **Secrets and vari
 | `CLOUDFLARE_ACCOUNT_ID` | The account that owns the `searchkeep.dev` zone                                                                                      |
 
 Until the token is set, the job logs "CLOUDFLARE_API_TOKEN is not set; skipping the website deploy."
-and succeeds without deploying.
+and succeeds without deploying. In the meantime a daily Claude Code scheduled task on the
+maintainer's account ("searchkeep.dev auto-deploy (daily)") redeploys the site from `main` whenever
+`apps/site` changed; disable it once the secrets are set.
 
 **Manual deploy** (maintainers only, with the same token and account ID exported in the shell):
 
