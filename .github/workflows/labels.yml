@@ -49,7 +49,7 @@ jobs:
 
             for (const label of wanted) {
               const name = String(label.name);
-              const color = String(label.color).replace(/^#/, '').toLowerCase();
+              const color = String(label.color).replace(/^#/, '').toLowerCase().padStart(6, '0');
               const description = String(label.description ?? '');
               if (description.length > 100) {
                 core.setFailed(`Description of "${name}" is longer than 100 characters`);
