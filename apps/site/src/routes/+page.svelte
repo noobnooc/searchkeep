@@ -13,13 +13,13 @@
   const funnel = [
     {
       step: 'Crawled',
-      source: 'Cloudflare AI Crawl Control',
+      source: 'Cloudflare AI crawler traffic',
       text: 'Which pages GPTBot, ClaudeBot, PerplexityBot and friends actually fetch, how often, and with what status code.',
       value: 412,
     },
     {
       step: 'Cited',
-      source: 'Bing AI Performance',
+      source: 'Bing AI Performance (CSV import)',
       text: 'Which of those pages show up as sources in AI answers, so you know crawling turned into visibility.',
       value: 96,
     },
@@ -32,12 +32,12 @@
   ];
 
   const dashboardViews: { icon: IconName; title: string; text: string }[] = [
-    { icon: 'chart', title: 'Overview', text: 'Clicks, impressions, AI crawls and AI referrals for every site, with trends you can trust.' },
-    { icon: 'sparkle', title: 'GEO funnel', text: 'Every page’s path from crawled to cited to clicked, with the stalls flagged.' },
-    { icon: 'eye', title: 'AI crawlers', text: 'Requests by bot, operator and purpose: training, search, or a user asking right now.' },
-    { icon: 'globe', title: 'Queries & pages', text: 'GSC and Bing side by side, brand vs non-brand, by country and device.' },
+    { icon: 'chart', title: 'Overview', text: 'Clicks, impressions and AI crawler requests for a site, against the previous period.' },
+    { icon: 'sparkle', title: 'GEO funnel', text: 'Every page’s path from crawled to cited to clicked, with crawled-but-never-cited pages flagged.' },
+    { icon: 'eye', title: 'AI crawlers & referrals', text: 'Requests by bot, operator and purpose (training, search, user), and visits sent by AI assistants.' },
+    { icon: 'globe', title: 'Performance & compare', text: 'GSC and Bing queries and pages, brand vs non-brand, by country and device, period over period.' },
     { icon: 'zap', title: 'Opportunities', text: 'Quick wins, cannibalization, CTR anomalies and content decay, ranked.' },
-    { icon: 'shield', title: 'Setup', text: 'Readiness, connected sources, last sync and backfill progress at a glance.' },
+    { icon: 'shield', title: 'Technical & settings', text: 'Web Vitals, sitemaps, crawl issues and URL inspection, plus setup checks, sync runs and Sync now.' },
   ];
 
   const sources = [
@@ -49,7 +49,7 @@
     },
     {
       name: 'Bing Webmaster Tools',
-      pulls: ['Query and page stats', 'Crawl issues', 'AI Performance citations, where the API exposes them'],
+      pulls: ['Traffic, query and page stats', 'Crawl issues', 'AI Performance citations, imported from its CSV export'],
       cred: 'API key',
       limit: 'Weekly granularity, no date filter',
     },
@@ -74,7 +74,7 @@
     { row: 'Price', sk: { v: 'Free, MIT licensed', good: true }, saas: { v: 'Monthly subscription' } },
     { row: 'History past GSC’s 16 months', sk: { v: 'Kept in D1, forever', good: true }, saas: { v: 'Varies; often only while subscribed' } },
     { row: 'AI crawled → cited → clicked, per page', sk: { v: 'Built in', good: true }, saas: { v: 'Rare' } },
-    { row: 'Ask from Claude, Cursor, ChatGPT', sk: { v: '13 MCP tools', good: true }, saas: { v: 'Sometimes' } },
+    { row: 'Ask from Claude, Cursor, ChatGPT', sk: { v: '12 read-only MCP tools', good: true }, saas: { v: 'Sometimes' } },
     { row: 'Telemetry', sk: { v: 'None', good: true }, saas: { v: 'Usually' } },
     { row: 'Writes to your properties', sk: { v: 'Off unless you opt in', good: true }, saas: { v: 'Varies' } },
     { row: 'Backlink index', sk: { v: 'No, by design', no: true }, saas: { v: 'Yes', good: true } },
@@ -137,7 +137,7 @@
     <ul>
       <li>Google Search Console</li>
       <li>Bing Webmaster Tools</li>
-      <li>Cloudflare AI Crawl Control</li>
+      <li>Cloudflare AI crawler traffic</li>
       <li>Cloudflare Web Analytics</li>
       <li class="sep" aria-hidden="true"></li>
       <li>Claude</li>
@@ -197,8 +197,8 @@
           <p>The answer is complete without you. Add what an answer can’t: tools, data, depth, a next step.</p>
         </div>
         <p class="fineprint">
-          The Cited step uses Bing AI Performance where its API makes the data available. Example figures are
-          illustrative.
+          The Cited step uses Bing AI Performance, which has no API yet: you import its CSV export from the
+          dashboard. Example figures are illustrative.
         </p>
       </div>
     </div>
@@ -212,8 +212,8 @@
       <span class="eyebrow">MCP server</span>
       <h2 id="mcp-title">Ask, don’t dig.</h2>
       <p>
-        Point Claude, Claude Code, Cursor or ChatGPT at <code>https://your-domain/mcp</code>. Thirteen task-shaped
-        tools aggregate on the server and return compact answers, so your assistant does the digging.
+        Point Claude, Claude Code, Cursor or ChatGPT at <code>https://your-domain/mcp</code>. Twelve task-shaped
+        read-only tools aggregate on the server and return compact answers, so your assistant does the digging.
       </p>
     </div>
     <div class="mcp-grid">
@@ -269,8 +269,9 @@
         <span class="eyebrow">Long-term history</span>
         <h2 id="history-title">Keep your history forever.</h2>
         <p>
-          Search Console forgets everything older than 16 months. Searchkeep backfills those 16 months on day one,
-          then syncs every night into D1 and never deletes. Comparing this quarter with the same quarter two years ago just works.
+          Search Console forgets everything older than 16 months. Searchkeep starts backfilling those 16 months the
+          day you deploy, keeps every new day in D1 and never deletes. Comparing this quarter with the same quarter two
+          years ago just works.
         </p>
         <dl class="stats">
           <div><dt>Search Console</dt><dd>16 <span>months</span></dd></div>
@@ -289,8 +290,8 @@
       <span class="eyebrow">Data sources</span>
       <h2 id="sources-title">First-party data only.</h2>
       <p>
-        Searchkeep reads the APIs you already have access to, for sites you own. Each source syncs daily into D1; live
-        calls are reserved for things like URL inspection.
+        Searchkeep reads the APIs you already have access to, for sites you own. Each source is synced into D1 once a
+        day, in small batches; live calls are reserved for things like URL inspection.
       </p>
     </div>
     <ul class="sources">
@@ -320,7 +321,7 @@
       <span class="eyebrow">Ownership</span>
       <h2 id="own-title">One Worker. Your account.<br /><span class="muted">Nobody else in the loop.</span></h2>
       <p>
-        MCP, the dashboard and the nightly sync are three entrances to one Worker, sharing one core and one D1
+        MCP, the dashboard and the scheduled sync are three entrances to one Worker, sharing one core and one D1
         database. There is no Searchkeep server to trust, pay or outlive.
       </p>
     </div>
@@ -372,7 +373,7 @@
             <span class="st-badge">{r.id === 'ready' ? 'Serving' : 'Locked'}</span>
           </li>
         {/each}
-        <li class="st-foot">Cron only syncs after <code>ready</code> is recorded, and stops the moment a check fails.</li>
+        <li class="st-foot">Cron only syncs after <code>ready</code> is recorded, and re-checks Access before every pass.</li>
       </ol>
     </div>
   </div>
@@ -392,7 +393,10 @@
         <ul class="human-steps">
           <li><span class="hs">You, once</span> Authorize the Cloudflare GitHub App</li>
           <li><span class="hs">You, once</span> Create your Zero Trust organization</li>
+          <li><span class="hs">You, once</span> Create the read-only Cloudflare API token</li>
           <li><span class="hs">You, once</span> Add the service account in Search Console</li>
+          <li><span class="hs">You, once</span> Generate the Bing API key</li>
+          <li><span class="hs">You</span> Sign in through Access</li>
         </ul>
         <div class="cta-row left">
           <a class="btn btn-secondary" href="/docs/deploy#with-an-agent">Read the runbook <Icon name="arrow" /></a>
@@ -462,7 +466,7 @@
   <div class="final-bg" aria-hidden="true"></div>
   <div class="container final-inner">
     <h2 id="final-title">Start keeping your search data today.</h2>
-    <p>Every day you wait is a day Search Console forgets. Deploying takes about twenty minutes.</p>
+    <p>Every day you wait is a day Search Console forgets. Deploying takes about 30–45 minutes.</p>
     <div class="cta-row">
       <a class="btn btn-primary btn-lg" href="/docs/deploy">Deploy to your Cloudflare <Icon name="arrow" /></a>
       <a class="btn btn-secondary btn-lg" href={GITHUB.repo}><Icon name="github" /> Star on GitHub</a>

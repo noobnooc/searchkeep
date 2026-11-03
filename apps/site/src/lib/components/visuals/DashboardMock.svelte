@@ -51,7 +51,7 @@
   ] as const;
   const statusLabel = { ok: 'Healthy', uncited: 'Not cited', unclicked: 'Not clicked' } as const;
 
-  const nav = ['Overview', 'GEO funnel', 'AI crawlers', 'Queries', 'Pages', 'Opportunities', 'Setup'];
+  const nav = ['Overview', 'GEO funnel', 'Performance', 'Compare', 'Opportunities', 'AI crawlers', 'Technical', 'Settings'];
 </script>
 
 <Window
@@ -73,7 +73,7 @@
       </ul>
       <div class="sync">
         <span class="live"></span>
-        Synced 03:17 UTC
+        Synced 12 min ago
       </div>
     </aside>
 

@@ -47,19 +47,35 @@ Run from the repository root unless noted.
 | Command                                                     | What                                                                                                      |
 | ----------------------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
 | `pnpm install`                                              | Install all workspace dependencies                                                                        |
-| `pnpm build`                                                | Build packages and the Worker                                                                             |
+| `pnpm build`                                                | Build the Worker (with the dashboard) and the website                                                     |
 | `pnpm typecheck`                                            | TypeScript type check across the workspace                                                                |
 | `pnpm lint`                                                 | dependency-cruiser boundary rules + prettier check                                                        |
 | `pnpm format`                                               | Apply prettier                                                                                            |
 | `pnpm test`                                                 | All tests, including the Store interface tests on local D1                                                |
-| `pnpm dev`                                                  | Local Worker via `wrangler dev` (apps/cloudflare)                                                         |
+| `pnpm dev`                                                  | Build the dashboard and run the Worker locally in dev mode (`wrangler dev`, port 8787)                    |
 | `pnpm --filter @searchkeep/store-d1 run db:generate`        | Generate a migration from schema changes                                                                  |
 | `pnpm --filter @searchkeep/store-d1 run db:check`           | Check schema and migrations (no ungenerated changes; migrations apply on the previous release's database) |
 | `pnpm --filter @searchkeep/cloudflare run size`             | Worker bundle size check                                                                                  |
-| `pnpm run db:migrate:local` (in `apps/cloudflare`)          | Apply migrations to the local D1 database                                                                 |
+| `pnpm run db:migrate:local` (in `apps/cloudflare`)          | Apply migrations to the local D1 database (the Worker also does it on its first request)                  |
 | `pnpm run build` / `pnpm run deploy` (in `apps/cloudflare`) | What Workers Builds runs; never run `deploy` yourself                                                     |
 
-Local secrets for `pnpm dev` go in `apps/cloudflare/.dev.vars` (gitignored). Never commit real values.
+### Local development
+
+```sh
+cp apps/cloudflare/.dev.vars.example apps/cloudflare/.dev.vars   # once; .dev.vars is gitignored
+pnpm dev                                                          # http://localhost:8787
+curl -X POST localhost:8787/api/dev/seed                          # in another terminal: demo data
+```
+
+- `pnpm dev` runs `wrangler dev --var SEARCHKEEP_DEV:true`. Dev mode skips Cloudflare Access and
+  reports `ready`, but only for requests to `localhost`, `127.0.0.1` or `[::1]`; every other host is
+  treated like production. `POST /api/dev/seed` works only in dev mode.
+- The seed writes demo data for the site in `SITES` (pass `?site=<id>` when there are several).
+  Without real credentials the sync has nothing to pull, so the seed is how the dashboard and the
+  MCP tools get data locally.
+- The Worker applies D1 migrations to the local database on its first request.
+- Local values go only in `apps/cloudflare/.dev.vars`. Never commit real values, and never put real
+  credentials in `.dev.vars.example`.
 
 ## Code conventions
 
@@ -90,7 +106,8 @@ A change is done when all of these hold:
       Store interface tests.
 - [ ] Schema changes come with a generated migration, and `db:check` passes.
 - [ ] `pnpm --filter @searchkeep/cloudflare run size` passes.
-- [ ] Docs that describe the changed behavior are updated (README, deploy.md, tool descriptions).
+- [ ] Docs that describe the changed behavior are updated (README, deploy.md, tool descriptions, and
+      the website's facts in `apps/site/src/lib/content.ts` and its docs pages).
 - [ ] `CHANGELOG.md` has an entry under `Unreleased`.
 - [ ] If users must do anything by hand after syncing (new secret, new permission, changed Access
       setting), the PR has **Upgrade notes** and the same notes are in `CHANGELOG.md`.

@@ -1,6 +1,6 @@
 <script lang="ts">
   import Seo from '#lib/components/Seo.svelte';
-  import { TOOLS } from '#lib/content.ts';
+  import { READ_ONLY_TOOLS } from '#lib/content.ts';
   import { GITHUB, SITE } from '#lib/site.ts';
   import { breadcrumbs } from '#lib/schema.ts';
 </script>
@@ -36,16 +36,17 @@
         </p>
         <h3>Highlights</h3>
         <ul>
-          <li><strong>GEO funnel per page</strong>: AI crawler requests (Cloudflare), AI citations (Bing AI Performance, where available) and AI referral visits (Web Analytics), next to GSC and Bing clicks.</li>
-          <li><strong>Long-term history</strong>: daily sync into D1 with a 16-month Search Console backfill on first run, and nothing ever deleted.</li>
-          <li><strong>MCP server</strong> at <code>/mcp</code> (Streamable HTTP, stateless) with {TOOLS.length} tools: {TOOLS.map((t) => t.name).join(', ')}.</li>
-          <li><strong>Dashboard</strong> served from the same Worker, using the same analysis functions as the MCP tools.</li>
+          <li><strong>GEO funnel per page</strong>: AI crawler requests (Cloudflare), AI citations (imported from Bing AI Performance CSV exports) and AI referral visits (Web Analytics), next to GSC and Bing clicks.</li>
+          <li><strong>Long-term history</strong>: a sync every 15 minutes in small batches, with daily increments first and a 16-month Search Console backfill paced to D1’s free write quota, and nothing ever deleted.</li>
+          <li><strong>MCP server</strong> at <code>/mcp</code> (Streamable HTTP, stateless) with {READ_ONLY_TOOLS.length} read-only tools: {READ_ONLY_TOOLS.map((t) => t.name).join(', ')}; plus <code>submit_sitemap</code>, registered only with <code>ENABLE_WRITES=true</code>.</li>
+          <li><strong>Dashboard</strong> served from the same Worker, using the same analysis functions as the MCP tools, with <strong>Sync now</strong> and an AI citation CSV import.</li>
           <li><strong>Brand vs non-brand</strong> filtering on every query-level view via <code>BRAND_REGEX</code> or a per-site <code>brandRegex</code>.</li>
         </ul>
         <h3>Data sources</h3>
         <ul>
           <li>Google Search Console: Search Analytics, sitemaps, URL Inspection.</li>
-          <li>Bing Webmaster Tools: query and page stats, crawl issues, keyword data.</li>
+          <li>Bing Webmaster Tools: traffic, query and page stats, crawl issues.</li>
+          <li>Bing AI Performance: citations imported from its CSV export (it has no API).</li>
           <li>Cloudflare: AI crawler requests by crawler, path and status; Web Analytics page views, referrers and Core Web Vitals.</li>
         </ul>
         <h3>Security</h3>
@@ -57,14 +58,15 @@
         </ul>
         <h3>Deploy</h3>
         <ul>
-          <li>Fork and Workers Builds, with D1 auto-provisioned on first deploy and migrations applied on every deploy.</li>
+          <li>Fork and Workers Builds, with D1 auto-provisioned on first deploy; the Worker applies pending migrations itself, so the default build token needs no D1 permission.</li>
+          <li>Local development with <code>pnpm dev</code> and demo data.</li>
           <li>Agent-ready runbook in <code>docs/deploy.md</code> and <code>AGENTS.md</code>.</li>
         </ul>
         <h3>Upgrade notes</h3>
         <p>None. This is the first release; follow the <a href="/docs/deploy">deploy guide</a>.</p>
         <h3>Known limitations</h3>
         <ul>
-          <li>Whether Bing AI Performance is available through the public API is unconfirmed; without it the Cited step is empty.</li>
+          <li>Bing AI Performance has no API, so the Cited step stays empty until you import its CSV export.</li>
           <li>Web Analytics data is unavailable for accounts using the EU data localization boundary.</li>
           <li>Cloudflare Workers + D1 is the only supported runtime in this release.</li>
         </ul>

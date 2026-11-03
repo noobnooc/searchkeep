@@ -19,9 +19,17 @@ gh repo sync <you>/searchkeep --source noobnooc/searchkeep --branch main`;
 
 <h2 id="what-happens">What happens next</h2>
 <ol>
-  <li>Workers Builds sees the new commit on <code>main</code> and starts a build.</li>
+  <li>
+    Workers Builds sees the new commit on <code>main</code> and starts a build if it touches the watch paths
+    (<code>apps/cloudflare/**</code>, <code>packages/**</code> or <code>pnpm-lock.yaml</code>). Changes that only touch
+    the docs or the website do not rebuild your Worker.
+  </li>
   <li>The build compiles the Worker and the dashboard.</li>
-  <li>The deploy command applies any new D1 migrations, then deploys the new Worker version.</li>
+  <li>
+    The deploy command tries to apply new D1 migrations remotely, deploys the new Worker version, and never fails
+    because of the migrations. With the default build token, which has no D1 permission, the remote step is skipped.
+  </li>
+  <li>The new Worker applies any pending migrations itself on its first request.</li>
   <li>Your secrets, the D1 database, the custom domain and Access are untouched.</li>
 </ol>
 <p>
@@ -41,6 +49,10 @@ gh repo sync <you>/searchkeep --source noobnooc/searchkeep --branch main`;
 </p>
 <ul>
   <li>Migrations are forward-only and safe to run more than once.</li>
+  <li>
+    Whether Wrangler or the Worker applies them, both record them in the same <code>d1_migrations</code> table, so a
+    migration never runs twice.
+  </li>
   <li>CI applies each new migration to a database created by the previous release before it can merge.</li>
   <li>Migration files require review by a maintainer.</li>
 </ul>

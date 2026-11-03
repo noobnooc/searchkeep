@@ -21,7 +21,7 @@
   const extension = [
     { iface: 'Store', now: 'store-d1 (Drizzle, D1)', later: 'store-pg: same interface, same test suite' },
     { iface: 'Auth', now: 'Cloudflare Access JWT', later: 'Any OIDC proxy, e.g. oauth2-proxy or Pomerium' },
-    { iface: 'Scheduler', now: 'Cron Trigger → core.runSync()', later: 'Vercel Cron, node-cron calling the same function' },
+    { iface: 'Scheduler', now: 'Cron Trigger (every 15 minutes) → core runSync()', later: 'Vercel Cron, node-cron calling the same function' },
     { iface: 'Runtime entry', now: 'apps/cloudflare', later: 'apps/node (Docker), Vercel' },
     { iface: 'Source', now: 'GSC, Bing, Cloudflare', later: 'More first-party sources' },
     { iface: 'Config', now: 'Worker Secrets', later: 'Environment variables' },
@@ -30,8 +30,8 @@
 
 <h2 id="overview">Overview</h2>
 <p>
-  You deploy exactly one Worker. MCP, the dashboard and the daily sync are three entrances to it. They share one core
-  library and one D1 database, so there is only one place where numbers are computed.
+  You deploy exactly one Worker. MCP, the dashboard and the scheduled sync are three entrances to it. They share one
+  core library and one D1 database, so there is only one place where numbers are computed.
 </p>
 <ArchitectureDiagram />
 
@@ -42,12 +42,19 @@
     <code>/api/*</code> hit Cloudflare Access first, which authenticates the person (cookie for the browser, OAuth for MCP
     clients) and attaches a signed JWT.
   </li>
-  <li>The Worker, built on Hono, verifies the JWT and computes the readiness state before routing.</li>
+  <li>
+    The Worker, built on Hono, verifies the JWT on every request and computes the readiness state before serving
+    anything but <code>/healthz</code>, <code>/setup</code> and <code>/robots.txt</code>.
+  </li>
   <li>
     The <strong>MCP</strong> entrance is a stateless Streamable HTTP server built with the official TypeScript SDK; the
     <strong>dashboard</strong> is a static single-page app served from Worker assets that talks to <code>/api</code>.
   </li>
-  <li>The <strong>cron</strong> entrance (<code>scheduled()</code>) is invoked internally by Cloudflare and calls <code>core.runSync()</code>.</li>
+  <li>
+    The <strong>cron</strong> entrance (<code>scheduled()</code>) is invoked internally by Cloudflare every 15 minutes.
+    It checks the ready flag in D1, re-reads the Access configuration through the API, and then calls core’s
+    <code>runSync()</code>, which does only the work that is due within its budgets.
+  </li>
   <li>
     All three call <strong>core</strong>. Core reads and writes data only through the <strong>Store</strong> interface and
     calls external APIs only through <strong>Source</strong> adapters.
@@ -75,15 +82,20 @@
 
 <h2 id="data">Data model</h2>
 <p>
-  Each source writes to its own raw tables, which are then folded into a unified fact table: date, source, page, query
-  and metrics. Analysis reads only the fact table and a few dimension tables, which is what makes cross-source views
-  such as the GEO funnel straightforward.
+  Search data from GSC and Bing goes into one fact table keyed by site, source, date, page and query, with pages and
+  queries in their own dimension tables. Country and device breakdowns, AI crawler requests, Web Analytics visits, Web
+  Vitals, imported AI citations, sitemaps and crawl issues have tables of their own. Every page is stored as a
+  normalized path, which is what lets cross-source views such as the GEO funnel join them.
 </p>
 <ul>
   <li>Dates are UTC calendar dates.</li>
   <li>Positions are stored as impression-weighted sums so they re-aggregate exactly across days, pages and queries.</li>
   <li>Site-wide daily totals are stored separately from query × page rows, so anonymized queries do not distort totals.</li>
-  <li>Migrations are generated with drizzle-kit and are forward-only.</li>
+  <li>
+    Migrations are generated with drizzle-kit and are forward-only. The Worker applies pending migrations itself on its
+    first request, tracked in the same <code>d1_migrations</code> table Wrangler uses.
+  </li>
+  <li>Sync progress (cursors, the daily write count) and the readiness flag live in a small key-value table in D1.</li>
 </ul>
 <p>
   There are no Durable Objects, which are the hardest primitive to port. Short-lived API access tokens are cached in
@@ -131,7 +143,7 @@
   <li><strong>Drizzle behind a Store interface</strong>, so databases are swappable.</li>
   <li><strong>Fork + Workers Builds</strong> for deploys and upgrades, instead of a deploy button.</li>
   <li>
-    <strong>Discrete MCP tools rather than Code Mode.</strong> Thirteen tools fit comfortably in context; each can be
+    <strong>Discrete MCP tools rather than Code Mode.</strong> About a dozen tools fit comfortably in context; each can be
     annotated read-only or write so clients can auto-approve reads and confirm the one write; and it needs no sandbox.
     Tools aggregate on the server and cap their output, which keeps responses small.
   </li>

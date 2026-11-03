@@ -150,6 +150,54 @@ Only maintainers create tags and releases; agents never do.
    ```
 
 4. Start a new `docs/roadmap.md` section if the release closes a version's scope.
+5. Update the website: `version` and `releaseDate` in `apps/site/src/lib/site.ts`, and the release
+   entry in `apps/site/src/routes/changelog/+page.svelte`.
 
 Users who "Sync fork" follow `main`, not tags, so tags mark versions for the changelog and for
 people who want to pin a release.
+
+## 7. The website (searchkeep.dev)
+
+The website in `apps/site` is deployed by the project, never by users: their Workers Builds watch
+paths (`apps/cloudflare/**`, `packages/**`, `pnpm-lock.yaml`) leave it out, and the workflow below
+is skipped in forks.
+
+**How it is hosted.** The site is a small Worker, `searchkeep-site`
+([`apps/site/wrangler.jsonc`](../apps/site/wrangler.jsonc)), that serves the prerendered SvelteKit
+build from its own bundle. `pnpm --filter @searchkeep/site run build` prerenders the site and
+`apps/site/scripts/embed-build.mjs` packs it into `apps/site/worker/files.generated.js`
+(gitignored), so a deploy is a single script upload. The Worker answers on `searchkeep.dev`,
+redirects `www.searchkeep.dev` and other subdomains to it, and serves canonical URLs without `.html`
+or trailing slashes. Both hostnames are custom domains declared in `wrangler.jsonc`; `workers.dev`
+and preview URLs are off.
+
+**Automatic deploys.** [`.github/workflows/deploy-site.yml`](../.github/workflows/deploy-site.yml)
+builds and deploys the site on every push to `main` that changes `apps/site/**`, `pnpm-lock.yaml` or
+the workflow itself. It can also be started by hand: **Actions** → **Deploy website** → **Run
+workflow**. It needs two repository secrets (**Settings** → **Secrets and variables** →
+**Actions**):
+
+| Secret                  | Value                                                                                                                                |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| `CLOUDFLARE_API_TOKEN`  | API token with **Workers Scripts: Edit** on the account, and **Workers Routes: Edit** and **DNS: Edit** on the `searchkeep.dev` zone |
+| `CLOUDFLARE_ACCOUNT_ID` | The account that owns the `searchkeep.dev` zone                                                                                      |
+
+Until the token is set, the job logs "CLOUDFLARE_API_TOKEN is not set; skipping the website deploy."
+and succeeds without deploying.
+
+**Manual deploy** (maintainers only, with the same token and account ID exported in the shell):
+
+```sh
+pnpm --filter @searchkeep/site run build
+cd apps/site && npx wrangler deploy
+```
+
+**Keeping it accurate.** Product facts on the site (tool names, parameters and defaults, secrets,
+readiness states) live in `apps/site/src/lib/content.ts` and feed the docs pages, `llms.txt` and
+`llms-full.txt`. Update them in the same pull request that changes `packages/mcp`,
+`packages/core/src/config.ts` or `apps/cloudflare`, and keep `/docs/deploy` in line with
+[docs/deploy.md](deploy.md).
+
+**Verify:** the latest **Deploy website** run succeeded; `curl -sI https://searchkeep.dev/` returns
+`200`; `curl -sI https://www.searchkeep.dev/` returns `301` with `location: https://searchkeep.dev/`;
+and `https://searchkeep.dev/llms.txt` shows the current version.

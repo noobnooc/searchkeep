@@ -18,23 +18,25 @@ merges, and the user's copy drifts from upstream.
 2. **Users run `wrangler deploy` from their own machine.** Needs a local toolchain and manual
    upgrades; hard for non-technical users.
 3. **Fork plus Workers Builds.** The user forks `noobnooc/searchkeep` and connects the fork to
-   Cloudflare Workers Builds. Upgrading is "Sync fork" on GitHub, after which Workers Builds rebuilds,
-   applies migrations and deploys.
+   Cloudflare Workers Builds. Upgrading is "Sync fork" on GitHub, after which Workers Builds rebuilds
+   and deploys, and pending migrations are applied.
 
 ## Decision
 
 Option 3. There is no Deploy button.
 
 - Workers Builds settings: root directory `apps/cloudflare`, build command `pnpm run build`, deploy
-  command `pnpm run deploy` (applies D1 migrations remotely, then `wrangler deploy`), watch paths
-  `apps/cloudflare/**` and `packages/**`.
+  command `pnpm run deploy` (tries to apply D1 migrations remotely, runs `wrangler deploy`, retries
+  the migrations, and never fails because of them), watch paths `apps/cloudflare/**`, `packages/**`
+  and `pnpm-lock.yaml`.
 - `wrangler.jsonc` declares bindings by name only (D1 binding `DB`, `database_name: "searchkeep"`,
   no `database_id`); wrangler provisions the database on first deploy and the ID is stored only in
   Cloudflare. Nothing user-specific is ever committed, so syncing upstream never conflicts.
 - All user configuration is in Worker Secrets; `keep_vars: true` protects any plain variables set in
   the dashboard from being overwritten on deploy.
-- If the Workers Builds build token cannot apply D1 migrations remotely, the Worker applies pending
-  migrations itself at startup, tracking them in the same `d1_migrations` table wrangler uses.
+- The default Workers Builds build token has no D1 permission, so the remote migration step is
+  skipped there; the Worker applies pending migrations itself on its first request, tracking them in
+  the same `d1_migrations` table wrangler uses.
 - [docs/deploy.md](../deploy.md) is written as an idempotent runbook that an agent can execute
   (fork via GitHub MCP, Workers Builds via the Builds API, Access via the Cloudflare API), with the
   few human-only steps marked.

@@ -39,7 +39,7 @@ Option 3.
   oauth2-proxy or Pomerium.
 - **Locked until ready.** Readiness is computed from the request's JWT plus a Cloudflare API check of
   the Access application and its policies (token permission `Access: Apps and Policies Read`,
-  cached for a few minutes, refreshed when the dashboard opens):
+  cached for a few minutes, refreshed on demand with `/api/status?refresh=1`):
 
   | State              | Condition                                                            | Dashboard               | `/api` and `/mcp`     | Cron    |
   | ------------------ | -------------------------------------------------------------------- | ----------------------- | --------------------- | ------- |
@@ -49,7 +49,8 @@ Option 3.
   | `ready`            | All checks pass                                                      | Normal                  | Normal                | Syncs   |
 
 - Cron requests carry no JWT. The cron syncs only after a `ready` flag has been recorded in D1 by a
-  request that reached `ready`; any failed check clears the flag.
+  request that reached `ready`; any failed check clears the flag. Each cron pass also re-checks the
+  Access application through the API before syncing.
 - The public `/setup` page shows only generic steps: no data, no configuration values, no source
   status, and no action that writes anything.
 

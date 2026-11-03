@@ -50,7 +50,7 @@
 
   <figcaption class="legend">
     <span><i class="sw gone"></i>Dropped by Google after 16 months</span>
-    <span><i class="sw backfill"></i>Backfilled on first sync</span>
+    <span><i class="sw backfill"></i>Backfilled after you deploy</span>
     <span><i class="sw kept"></i>Synced daily, never deleted</span>
   </figcaption>
 </figure>

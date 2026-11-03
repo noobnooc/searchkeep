@@ -51,7 +51,7 @@ None
 ## Checklist
 
 - [ ] `CHANGELOG.md` updated under `Unreleased` (including upgrade notes, if any)
-- [ ] Docs updated where behavior changed (README, docs/deploy.md, tool descriptions)
+- [ ] Docs updated where behavior changed (README, docs/deploy.md, tool descriptions, website facts in `apps/site/src/lib/content.ts`)
 - [ ] Migrations are generated, forward-only and safe on the previous release's database
 - [ ] No secrets, personal configuration or user data in the diff, logs or this description
 - [ ] Touches CODEOWNERS-protected paths (charter, ADRs, `wrangler.jsonc`, migrations, auth, `.github/`, `.claude/skills/`): yes / no
