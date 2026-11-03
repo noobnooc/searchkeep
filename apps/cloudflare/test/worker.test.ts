@@ -94,7 +94,12 @@ describe('locked until ready', () => {
     const mcp = await call(env, '/mcp', { method: 'POST', body: '{}' });
     expect(mcp.status).toBe(403);
     expect(((await mcp.json()) as { error: { message: string } }).error.message).toMatch(/not protected by Cloudflare Access/);
-    const forged = await call(env, '/api/sites', { headers: { 'cf-access-jwt-assertion': (await jwt()).replace(/.$/, 'x') } });
+    // Tamper with a byte in the middle of the signature (the last base64url char only carries 2 bits).
+    const token = await jwt();
+    const sigStart = token.lastIndexOf('.') + 1;
+    const i = sigStart + 20;
+    const tampered = token.slice(0, i) + (token[i] === 'A' ? 'B' : 'A') + token.slice(i + 1);
+    const forged = await call(env, '/api/sites', { headers: { 'cf-access-jwt-assertion': tampered } });
     expect(forged.status).toBe(403);
     const wrongAud = await call(env, '/api/sites', { headers: { 'cf-access-jwt-assertion': await jwt({ aud: ['someone-else'] }) } });
     expect(wrongAud.status).toBe(403);
