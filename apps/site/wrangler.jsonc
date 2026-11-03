@@ -1,0 +1,14 @@
+// Searchkeep website (searchkeep.dev). A static-assets-only Worker:
+// no Worker script, every page is prerendered by SvelteKit into ./build.
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "searchkeep-site",
+  "compatibility_date": "2026-10-01",
+  "assets": {
+    "directory": "./build",
+    "not_found_handling": "404-page"
+  },
+  "routes": [{ "pattern": "searchkeep.dev", "custom_domain": true }],
+  "workers_dev": false,
+  "preview_urls": false
+}
