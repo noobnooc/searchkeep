@@ -26,8 +26,12 @@ every deployment at once.
 - `packages/store-d1` implements it with Drizzle `sqliteTable` schemas and owns all D1 migrations
   (`packages/store-d1/migrations`, generated with `pnpm --filter @searchkeep/store-d1 run db:generate`).
 - **Analysis SQL lives only in `store-*` packages.** The core never builds SQL.
-- Each source has its own raw table; sync jobs roll them up into one unified fact table
-  (date, source, page, query, metrics). Analysis reads only the fact table.
+- Search data from every source lands in one unified fact table, `search_facts`
+  (site, source, kind, date, page, query, clicks, impressions, weighted position), which search
+  analysis reads. Data that has no equivalent in other sources keeps its own raw table:
+  GSC country × device breakdowns, Cloudflare AI-crawler requests, Web Analytics page loads,
+  Web Vitals, AI citations, crawl issues and sitemaps. Cross-source views such as the GEO funnel
+  join those tables on the normalized page path inside the Store.
 - A shared Store interface test suite runs against local D1 from v0.1. A future `store-pg`
   (copying the schema to `pgTable`) is done when it passes the same suite.
 - Migrations are forward-only and idempotent, and CI applies them on top of the previous release's

@@ -77,8 +77,12 @@ export async function comparePeriods(ctx: AnalysisContext, p: ComparePeriodsPara
   const r = await resolve(ctx, p, { limit: 20 });
   const dimension = p.dimension ?? 'query';
   let previous: DateRange;
-  if (p.compareStart && p.compareEnd) {
-    previous = (await resolve(ctx, { ...p, start: p.compareStart, end: p.compareEnd })).range;
+  if (p.compareStart || p.compareEnd) {
+    // One end is enough: the other is derived so both periods have the same length.
+    const len = rangeLength(r.range);
+    const start = p.compareStart ?? addDays(p.compareEnd!, -(len - 1));
+    const end = p.compareEnd ?? addDays(p.compareStart!, len - 1);
+    previous = (await resolve(ctx, { ...p, start, end })).range;
   } else {
     previous = previousPeriod(r.range);
   }

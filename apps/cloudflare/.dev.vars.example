@@ -1,0 +1,3 @@
+# Copy to .dev.vars for `pnpm dev`. Never commit .dev.vars.
+SITES=[{"id":"demo","domain":"demo.example.com","gscProperty":"sc-domain:demo.example.com","cloudflareZoneId":"demo-zone","webAnalyticsSiteTag":"demo-tag"}]
+BRAND_REGEX=acme

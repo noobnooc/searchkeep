@@ -152,8 +152,12 @@ export function createSearchkeepMcpServer(deps: McpDeps): McpServer {
         ...common,
         source,
         dimension: z.enum(['query', 'page']).optional().describe('Default query.'),
-        compareStart: date.optional().describe('Start of the comparison period. Default: the equal-length period right before.'),
-        compareEnd: date.optional(),
+        compareStart: date
+          .optional()
+          .describe(
+            'Start of the comparison period. Default: the equal-length period right before. Give one end and the other is derived.',
+          ),
+        compareEnd: date.optional().describe('End of the comparison period.'),
       },
       annotations: READ_ONLY,
     },
