@@ -15,3 +15,4 @@ export * from './analysis/common.js';
 export * from './analysis/search.js';
 export * from './analysis/geo.js';
 export * from './analysis/ops.js';
+export * from './http.js';
