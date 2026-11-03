@@ -74,6 +74,14 @@ the few steps that need a human are clearly marked.
 There is no "Deploy to Cloudflare" button on purpose; see
 [ADR 0005](docs/adr/0005-fork-and-workers-builds-deployment.md).
 
+**How this deploy path is verified.** The `workers-builds` CI job replays the exact Workers Builds
+commands on every change: a fresh `pnpm install --frozen-lockfile` from `apps/cloudflare`, the build
+command, and a `wrangler deploy --dry-run`. Before the first release the deploy command was also run
+against a real Cloudflare account: Wrangler created the D1 database from the name-only binding, the
+deploy script tolerated the first (pre-database) migration attempt and applied the migration on its
+retry, and the deployed Worker served the public setup page, returned `403 locked` on `/api` and a
+JSON-RPC lock error on `/mcp`, and rejected forged Access JWTs.
+
 ## Architecture
 
 ```

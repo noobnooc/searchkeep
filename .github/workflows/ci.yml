@@ -50,3 +50,26 @@ jobs:
 
       - name: Worker bundle size
         run: pnpm --filter @searchkeep/cloudflare run size
+
+  # Rehearses exactly what Workers Builds runs on a user's fork: install from the
+  # Worker's root directory, the build command, then a wrangler dry-run deploy.
+  workers-builds:
+    name: workers-builds
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: apps/cloudflare
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: apps/cloudflare/.node-version
+          cache: pnpm
+      - name: Install (as Workers Builds does, from the root directory)
+        run: pnpm install --frozen-lockfile
+      - name: Build command
+        run: pnpm run build
+      - name: Deploy command (dry run)
+        run: npx wrangler deploy --dry-run --outdir .wrangler/dry-run
