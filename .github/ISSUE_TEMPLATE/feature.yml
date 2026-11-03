@@ -1,0 +1,46 @@
+name: Feature request
+description: Suggest an improvement that fits the Searchkeep charter.
+title: "Feature: "
+labels: ["type:feature", "status:triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Please read the [charter](https://github.com/noobnooc/searchkeep/blob/main/docs/charter.md) first.
+        Searchkeep does **not** do backlinks, competitor data, rank tracking or scraping, telemetry,
+        or anything that sends data out of the user's own account.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What are you trying to do, and what gets in the way today?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: What should Searchkeep do? Which MCP tool, dashboard view or data source is involved?
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+  - type: checkboxes
+    id: charter
+    attributes:
+      label: Charter check
+      description: Tick each statement that holds for your proposal.
+      options:
+        - label: Data stays in the user's own account (no telemetry, no external servers).
+        - label: It uses only first-party data the site owner already has access to.
+        - label: It works on the Cloudflare free tier and needs no extra operations.
+        - label: It is read-only, or any external write is opt-in.
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checklist
+      options:
+        - label: I searched existing issues and this is not a duplicate.
+          required: true

@@ -1,0 +1,78 @@
+name: Bug report
+description: Something in Searchkeep does not work as documented.
+title: "Bug: "
+labels: ["type:bug", "status:triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. **Never paste secrets** (API tokens, private keys, Bing keys, Access AUD tags),
+        your `SITES` value or your analytics data. Redact them as `<redacted>`.
+        Security problems go through private reporting instead: see SECURITY.md.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what happened instead.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Call `query_performance` with ...
+        2. ...
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Deployment / Workers Builds
+        - Access / readiness / authentication
+        - Sync (cron)
+        - Google Search Console source
+        - Bing Webmaster Tools source
+        - Cloudflare source (AI crawlers, Web Analytics)
+        - MCP tools
+        - Dashboard
+        - Documentation
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version or commit
+      description: The CHANGELOG version or the commit SHA your fork is on, and when you last synced.
+      placeholder: "0.1.0, or abc1234 (synced 2026-11-03)"
+    validations:
+      required: true
+  - type: input
+    id: readiness
+    attributes:
+      label: Readiness state
+      description: From `setup_status` or the dashboard status page.
+      placeholder: "ready / no_access / oauth_disabled / policy_too_broad"
+  - type: input
+    id: client
+    attributes:
+      label: MCP client (if relevant)
+      placeholder: "Claude Code 2.x, Cursor 1.x, claude.ai ..."
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs or error messages (redacted)
+      description: Build logs, Worker logs or tool errors, with all secrets and personal data removed.
+      render: text
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checklist
+      options:
+        - label: I searched existing issues and this is not a duplicate.
+          required: true
+        - label: I removed all secrets and personal data from this report.
+          required: true
