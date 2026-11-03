@@ -146,14 +146,14 @@ export function loadConfig(env: RawEnv): SearchkeepConfig {
     gsc: {
       clientEmail: str(env, 'GSC_CLIENT_EMAIL'),
       privateKey: normalizePem(str(env, 'GSC_PRIVATE_KEY')),
-      rowsPerDay: int(env, 'GSC_ROWS_PER_DAY', 5000, 100, 100_000),
+      rowsPerDay: int(env, 'GSC_ROWS_PER_DAY', 2500, 100, 100_000),
     },
     bing: { apiKey: str(env, 'BING_API_KEY') },
     brandRegex: brandRegex && compileBrandRegex(brandRegex) ? brandRegex : null,
     enableWrites: str(env, 'ENABLE_WRITES')?.toLowerCase() === 'true',
     sync: {
       dailyWriteBudget: int(env, 'SYNC_DAILY_WRITE_BUDGET', 80_000, 1_000, 100_000_000),
-      maxCallsPerRun: int(env, 'SYNC_MAX_CALLS_PER_RUN', 30, 5, 900),
+      maxCallsPerRun: int(env, 'SYNC_MAX_CALLS_PER_RUN', 20, 5, 900),
       backfillMonths: int(env, 'GSC_BACKFILL_MONTHS', 16, 0, 16),
     },
     errors,

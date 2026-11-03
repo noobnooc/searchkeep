@@ -38,8 +38,16 @@ interface Unit {
   backfill: boolean;
   /** Upper bound of API calls this unit makes. */
   calls: number;
+  /** Stable id used to detect invocations killed mid-unit (e.g. CPU limit). */
+  key: string;
   run: () => Promise<number>;
+  /** Advances past this unit without running it. */
+  skip: () => Promise<void>;
 }
+
+/** Units interrupted this many times in a row are skipped so sync never gets stuck. */
+const MAX_INTERRUPTED_ATTEMPTS = 3;
+const INFLIGHT_KEY = 'sync:inflight';
 
 class BudgetExceeded extends Error {}
 
@@ -81,6 +89,7 @@ export async function runSync(ctx: SyncContext): Promise<SyncRunRecord> {
   };
 
   let stoppedFor: string | null = null;
+  let inflight = await metaJson<{ key: string; attempts: number }>(store, INFLIGHT_KEY);
   try {
     const units = await planUnits(ctx, today);
     for (const unit of units) {
@@ -97,13 +106,27 @@ export async function runSync(ctx: SyncContext): Promise<SyncRunRecord> {
         stoppedFor = 'daily write budget reached';
         continue;
       }
+      if (inflight && inflight.key === unit.key && inflight.attempts >= MAX_INTERRUPTED_ATTEMPTS) {
+        await unit.skip();
+        await store.deleteMeta(INFLIGHT_KEY);
+        inflight = null;
+        record(unit, 'error', 0, `Skipped ${unit.key} after ${MAX_INTERRUPTED_ATTEMPTS} interrupted attempts (likely the Worker CPU limit; lower GSC_ROWS_PER_DAY).`);
+        continue;
+      }
+      const attempts = inflight && inflight.key === unit.key ? inflight.attempts + 1 : 1;
+      await store.setMeta(INFLIGHT_KEY, JSON.stringify({ key: unit.key, attempts }));
+      inflight = { key: unit.key, attempts };
       callsLeft -= unit.calls;
       try {
         const rows = await unit.run();
         rowsWritten += rows;
         writesToday += rows;
         record(unit, 'ok', rows);
+        await store.deleteMeta(INFLIGHT_KEY);
+        inflight = null;
       } catch (err) {
+        await store.deleteMeta(INFLIGHT_KEY);
+        inflight = null;
         if (err instanceof BudgetExceeded) {
           stoppedFor = 'API call budget reached';
           break;
@@ -205,18 +228,23 @@ async function planUnits(ctx: SyncContext, today: IsoDate): Promise<Unit[]> {
         if (!(await store.getMeta(`gsc:backfill:${site.id}`))) await store.setMeta(`gsc:backfill:${site.id}`, start);
       }
       for (const date of [...pending]) {
+        const done = async () => {
+          pending = pending.filter((d) => d !== date);
+          await store.setMeta(`${doneKey}:progress`, JSON.stringify({ day: today, pending }));
+        };
         daily.push({
           task: 'gsc.search_analytics',
           siteId: site.id,
           source: 'gsc',
           backfill: false,
           calls: callsPerDay,
+          key: `gsc.daily:${site.id}:${date}`,
           run: async () => {
             const n = await pullDay(date);
-            pending = pending.filter((d) => d !== date);
-            await store.setMeta(`${doneKey}:progress`, JSON.stringify({ day: today, pending }));
+            await done();
             return n;
           },
+          skip: () => done(),
         });
       }
 
@@ -228,12 +256,14 @@ async function planUnits(ctx: SyncContext, today: IsoDate): Promise<Unit[]> {
           source: 'gsc',
           backfill: false,
           calls: 1,
+          key: `gsc.sitemaps:${site.id}:${today}`,
           run: async () => {
             const maps = await gsc.listSitemaps(property);
             const n = await store.replaceSitemaps(site.id, 'gsc', maps);
             await store.setMeta(`gsc:sitemaps:${site.id}`, today);
             return n;
           },
+          skip: () => store.setMeta(`gsc:sitemaps:${site.id}`, today),
         });
       }
 
@@ -250,11 +280,13 @@ async function planUnits(ctx: SyncContext, today: IsoDate): Promise<Unit[]> {
             source: 'gsc',
             backfill: true,
             calls: callsPerDay,
+            key: `gsc.backfill:${site.id}:${date}`,
             run: async () => {
               const n = await pullDay(date);
               await store.setMeta(`gsc:backfill:${site.id}`, date);
               return n;
             },
+            skip: () => store.setMeta(`gsc:backfill:${site.id}`, date),
           });
           c = date;
         }
@@ -312,11 +344,13 @@ async function planUnits(ctx: SyncContext, today: IsoDate): Promise<Unit[]> {
           source: 'bing',
           backfill: false,
           calls: 1,
+          key: `${ds.name}:${site.id}:${today}`,
           run: async () => {
             const n = await ds.run();
             await store.setMeta(key, today);
             return n;
           },
+          skip: () => store.setMeta(key, today),
         });
       }
     }
@@ -339,6 +373,8 @@ async function planUnits(ctx: SyncContext, today: IsoDate): Promise<Unit[]> {
             source: 'cloudflare',
             backfill: false,
             calls: 1,
+            key: `cloudflare.ai_crawlers:${site.id}:${date}`,
+            skip: () => store.setMeta(key, date),
             run: async () => {
               const rows = await cf.aiCrawlerRequests(zoneId, date, patterns);
               const merged = new Map<string, CrawlerRequestInput>();
@@ -373,6 +409,8 @@ async function planUnits(ctx: SyncContext, today: IsoDate): Promise<Unit[]> {
             source: 'cloudflare',
             backfill: false,
             calls: 2,
+            key: `cloudflare.web_analytics:${site.id}:${date}`,
+            skip: () => store.setMeta(key, date),
             run: async () => {
               const rum = await cf.webAnalytics(accountId, tag, date);
               let n = await store.writeWebAnalytics(

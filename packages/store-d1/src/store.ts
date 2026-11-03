@@ -37,6 +37,16 @@ function chunks<T>(xs: T[], size = CHUNK): T[][] {
   return out;
 }
 
+/** Identifiers interpolated into SQL are only ever taken from these allow-lists. */
+function allow<T extends string>(values: readonly string[], allowed: readonly T[], what: string): T[] {
+  for (const v of values) if (!(allowed as readonly string[]).includes(v)) throw new Error(`Unknown ${what} "${String(v).slice(0, 40)}"`);
+  return values as T[];
+}
+const PERF_DIMS = ['date', 'week', 'month', 'query', 'page', 'country', 'device'] as const;
+const PERF_ORDER = ['clicks', 'impressions', 'ctr', 'position', 'date'] as const;
+const CRAWLER_GROUPS = ['crawler', 'operator', 'purpose', 'path', 'status', 'date'] as const;
+const REFERRAL_GROUPS = ['path', 'refererHost', 'date'] as const;
+
 function round6(n: number): number {
   return Math.round(n * 1e6) / 1e6;
 }
@@ -403,7 +413,8 @@ export class D1Store implements Store {
 
   async queryPerformance(q: PerformanceQuery): Promise<PerformanceRow[]> {
     const f = q.filters ?? {};
-    const dims = q.dimensions;
+    const dims = allow(q.dimensions, PERF_DIMS, 'dimension');
+    if (q.orderBy !== undefined) allow([q.orderBy], PERF_ORDER, 'orderBy');
     const breakdown = dims.includes('country') || dims.includes('device') || Boolean(f.country) || Boolean(f.device);
     const brand = f.brand ?? 'all';
     const hasQuery = dims.includes('query') || Boolean(f.queryContains) || brand !== 'all';
@@ -465,7 +476,7 @@ export class D1Store implements Store {
     const orderCol =
       q.orderBy === 'date' ? (timeDim ?? null) : q.orderBy === 'ctr' ? 'CAST(SUM(f.clicks) AS REAL) / NULLIF(SUM(f.impressions), 0)' : q.orderBy === 'position' ? posExpr : (q.orderBy ?? 'clicks');
     const order = orderCol ? `ORDER BY ${orderCol} ${dir}${timeDim && orderCol !== timeDim ? `, ${timeDim} ASC` : ''}` : '';
-    const limit = Math.max(1, Math.min(q.limit ?? 1000, 50_000));
+    const limit = Math.max(1, Math.min(Math.floor(Number(q.limit ?? 1000)) || 1000, 50_000));
 
     const sql = `SELECT ${select.join(', ')} FROM ${table} f ${joins.join(' ')} WHERE ${where.join(' AND ')}
       ${group.length ? `GROUP BY ${group.join(', ')}` : ''} ${having.length && group.length ? `HAVING ${having.join(' AND ')}` : ''}
@@ -495,6 +506,7 @@ export class D1Store implements Store {
       binds.push(v);
       return `?${binds.length}`;
     };
+    allow(q.groupBy, CRAWLER_GROUPS, 'groupBy');
     const needPage = q.groupBy.includes('path') || Boolean(q.pathContains);
     if (q.crawler) where.push(`lower(c.crawler) = lower(${arg(q.crawler)})`);
     if (q.pathContains) where.push(`instr(lower(p.path), lower(${arg(q.pathContains)})) > 0`);
@@ -504,7 +516,7 @@ export class D1Store implements Store {
     const sql = `SELECT ${[...select, 'SUM(c.requests) AS requests'].join(', ')} FROM ai_crawler_requests c
       ${needPage ? 'JOIN pages p ON p.id = c.page_id' : ''} WHERE ${where.join(' AND ')}
       ${group.length ? `GROUP BY ${group.join(', ')}` : ''}
-      ORDER BY ${q.groupBy.length === 1 && q.groupBy[0] === 'date' ? 'c.date ASC' : 'requests DESC'} LIMIT ${Math.max(1, Math.min(q.limit ?? 100, 50_000))}`;
+      ORDER BY ${q.groupBy.length === 1 && q.groupBy[0] === 'date' ? 'c.date ASC' : 'requests DESC'} LIMIT ${Math.max(1, Math.min(Math.floor(Number(q.limit ?? 100)) || 100, 50_000))}`;
     const rows = await this.all<Record<string, unknown>>(sql, ...binds);
     return rows.filter((r) => r.requests !== null).map((r) => ({ ...r, requests: Number(r.requests) }) as CrawlerRow);
   }
@@ -516,13 +528,14 @@ export class D1Store implements Store {
       binds.push(JSON.stringify(q.refererHosts));
       where.push(`w.referer_host IN (SELECT value FROM json_each(?${binds.length}))`);
     }
+    allow(q.groupBy, REFERRAL_GROUPS, 'groupBy');
     const cols: Record<string, string> = { path: 'p.path', refererHost: 'w.referer_host', date: 'w.date' };
     const select = q.groupBy.map((g) => `${cols[g]} AS ${g}`);
     const group = q.groupBy.map((g) => cols[g]!);
     const sql = `SELECT ${[...select, 'SUM(w.visits) AS visits', 'SUM(w.page_views) AS page_views'].join(', ')} FROM web_analytics w
       ${q.groupBy.includes('path') ? 'JOIN pages p ON p.id = w.page_id' : ''} WHERE ${where.join(' AND ')}
       ${group.length ? `GROUP BY ${group.join(', ')}` : ''}
-      ORDER BY ${q.groupBy.length === 1 && q.groupBy[0] === 'date' ? 'w.date ASC' : 'visits DESC'} LIMIT ${Math.max(1, Math.min(q.limit ?? 100, 50_000))}`;
+      ORDER BY ${q.groupBy.length === 1 && q.groupBy[0] === 'date' ? 'w.date ASC' : 'visits DESC'} LIMIT ${Math.max(1, Math.min(Math.floor(Number(q.limit ?? 100)) || 100, 50_000))}`;
     const rows = await this.all<Record<string, unknown>>(sql, ...binds);
     return rows
       .filter((r) => r.visits !== null)
@@ -561,7 +574,8 @@ export class D1Store implements Store {
       range.end,
       limit,
     );
-    return rows.map((r) => ({ page: r.page, path: r.page, date: r.date, lcpP75: r.lcp, inpP75: r.inp, clsP75: r.cls, samples: Number(r.samples) }));
+    const r0 = (v: number | null) => (v == null ? null : Math.round(v));
+    return rows.map((r) => ({ page: r.page, path: r.page, date: r.date, lcpP75: r0(r.lcp), inpP75: r0(r.inp), clsP75: r.cls == null ? null : Math.round(r.cls * 1000) / 1000, samples: Number(r.samples) }));
   }
 
   async listCrawlIssues(siteId: string, source: SearchSource, limit: number): Promise<CrawlIssueInput[]> {

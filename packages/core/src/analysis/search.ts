@@ -25,6 +25,10 @@ export async function queryPerformance(ctx: AnalysisContext, p: QueryPerformance
   for (const d of dimensions) {
     if (!DIMENSIONS.includes(d)) throw new SearchkeepError('bad_request', `Unknown dimension "${d}". Use: ${DIMENSIONS.join(', ')}.`);
   }
+  if (p.orderBy !== undefined && !['clicks', 'impressions', 'ctr', 'position', 'date'].includes(p.orderBy)) {
+    throw new SearchkeepError('bad_request', 'orderBy must be one of clicks, impressions, ctr, position, date.');
+  }
+  if (p.order !== undefined && p.order !== 'asc' && p.order !== 'desc') throw new SearchkeepError('bad_request', 'order must be asc or desc.');
   const hasBreakdown = dimensions.some((d) => d === 'country' || d === 'device') || p.country || p.device;
   const hasQP = dimensions.some((d) => d === 'query' || d === 'page') || p.queryContains || p.pageContains || r.brand !== 'all';
   if (hasBreakdown && hasQP) {

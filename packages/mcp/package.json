@@ -1,0 +1,24 @@
+{
+  "name": "@searchkeep/mcp",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Searchkeep MCP tools (task-shaped, read-only by default). Calls core only.",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@cfworker/json-schema": "^4.1.1",
+    "@modelcontextprotocol/sdk": "^1.32.2",
+    "@searchkeep/core": "workspace:*",
+    "zod": "^4.1.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.0"
+  }
+}

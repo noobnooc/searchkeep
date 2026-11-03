@@ -9,6 +9,7 @@ export interface GeoFunnelParams extends CommonParams {
 }
 
 const AI_HOSTS = Object.keys(AI_REFERRER_HOSTS);
+const CRAWLER_GROUPS: CrawlerQuery['groupBy'] = ['crawler', 'operator', 'purpose', 'path', 'status', 'date'];
 
 /**
  * Per page: crawled by AI bots → cited by AI answers → visited from AI
@@ -84,6 +85,9 @@ export interface AiCrawlersParams extends Omit<CommonParams, 'source' | 'brand'>
 export async function aiCrawlers(ctx: AnalysisContext, p: AiCrawlersParams) {
   const r = await resolve(ctx, { ...p, source: 'gsc' }, { days: 7, limit: 50 });
   const groupBy: CrawlerQuery['groupBy'] = p.groupBy && p.groupBy.length > 0 ? p.groupBy : ['crawler'];
+  for (const g of groupBy) {
+    if (!CRAWLER_GROUPS.includes(g)) throw new SearchkeepError('bad_request', `Unknown groupBy "${g}". Use: ${CRAWLER_GROUPS.join(', ')}.`);
+  }
   const rows = await ctx.store.queryCrawlers({
     siteId: r.site.id,
     range: await crawlerRange(ctx, r.site.id, p, r.range),
@@ -118,11 +122,15 @@ export async function aiReferrals(ctx: AnalysisContext, p: AiReferralsParams) {
   const site = findSite(ctx.config, p.site);
   if (!site.webAnalyticsSiteTag) throw new SearchkeepError('not_configured', 'webAnalyticsSiteTag is not set for this site.');
   const r = await resolve(ctx, { ...p, source: 'gsc' }, { limit: 50 });
+  const groupBy = p.groupBy && p.groupBy.length > 0 ? p.groupBy : (['refererHost'] as const);
+  for (const g of groupBy) {
+    if (!['path', 'refererHost', 'date'].includes(g)) throw new SearchkeepError('bad_request', `Unknown groupBy "${g}". Use: path, refererHost, date.`);
+  }
   const rows = await ctx.store.queryReferrals({
     siteId: site.id,
     range: r.range,
     refererHosts: AI_HOSTS,
-    groupBy: p.groupBy ?? ['refererHost'],
+    groupBy: [...groupBy],
     limit: clampLimit(p.limit, 50),
   });
   return {
