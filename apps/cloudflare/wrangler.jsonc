@@ -1,0 +1,44 @@
+// Searchkeep Worker configuration.
+//
+// This file is shared by every fork: do NOT put your own IDs, domains or
+// settings here. Bindings are declared by name only — Wrangler creates the D1
+// database on the first deploy and remembers it in your Cloudflare account.
+// Your configuration lives in Worker Secrets (see docs/deploy.md).
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "searchkeep",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-10-01",
+  "compatibility_flags": ["nodejs_compat"],
+
+  // Reachable only through your custom domain (added in the dashboard, behind
+  // Cloudflare Access). No routes here, so your domain survives upgrades.
+  "workers_dev": false,
+  "preview_urls": false,
+
+  // Keep variables set in the dashboard across deploys.
+  "keep_vars": true,
+
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "searchkeep",
+      "migrations_dir": "../../packages/store-d1/migrations",
+    },
+  ],
+
+  // The dashboard (built into ./public). The Worker runs first on every request
+  // so it can check Cloudflare Access before serving anything.
+  "assets": {
+    "directory": "./public",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": true,
+  },
+
+  // Sync runs in small batches every 15 minutes; each pass does only the work
+  // that is due and exits immediately otherwise.
+  "triggers": { "crons": ["*/15 * * * *"] },
+
+  "observability": { "enabled": true },
+}

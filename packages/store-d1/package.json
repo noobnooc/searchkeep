@@ -1,0 +1,28 @@
+{
+  "name": "@searchkeep/store-d1",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Cloudflare D1 implementation of the Searchkeep Store (Drizzle schema + migrations).",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "vitest run",
+    "db:generate": "drizzle-kit generate && node scripts/embed-migrations.mjs",
+    "db:check": "node scripts/check-migrations.mjs && vitest run test/migrations.test.ts"
+  },
+  "dependencies": {
+    "@searchkeep/core": "workspace:*",
+    "drizzle-orm": "^0.45.0"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20261103.1",
+    "drizzle-kit": "^0.31.0",
+    "miniflare": "^4.20260730.0",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.0",
+    "@types/node": "^22.19.0"
+  }
+}

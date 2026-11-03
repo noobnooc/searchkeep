@@ -1,0 +1,34 @@
+{
+  "name": "@searchkeep/cloudflare",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "The Searchkeep Worker: MCP, dashboard and daily sync in one Cloudflare Worker.",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "deploy": "node scripts/deploy.mjs",
+    "dev": "node scripts/build.mjs && wrangler dev --var SEARCHKEEP_DEV:true",
+    "db:migrate:local": "wrangler d1 migrations apply DB --local",
+    "size": "node scripts/size.mjs",
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@searchkeep/core": "workspace:*",
+    "@searchkeep/mcp": "workspace:*",
+    "@searchkeep/source-bing": "workspace:*",
+    "@searchkeep/source-cloudflare": "workspace:*",
+    "@searchkeep/source-gsc": "workspace:*",
+    "@searchkeep/store-d1": "workspace:*",
+    "hono": "^4.13.0"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20261103.1",
+    "@searchkeep/dashboard": "workspace:*",
+    "@types/node": "^22.19.0",
+    "miniflare": "^4.20260730.0",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.0",
+    "wrangler": "^4.157.0"
+  }
+}

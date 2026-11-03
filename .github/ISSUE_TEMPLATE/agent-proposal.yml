@@ -1,0 +1,64 @@
+name: Agent proposal
+description: A change proposed by an automated agent (or a contributor using the same format). Needs maintainer approval.
+title: 'Proposal: '
+labels: ['agent-proposal', 'status:triage']
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Proposals are not approved until a maintainer adds `status:agent-ready`.
+        Do not include secrets, tokens or user data.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What is wrong or missing, and who is affected.
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Evidence
+      description: Links to code, docs, issues, upstream changelogs or CI runs; redacted output.
+    validations:
+      required: true
+  - type: textarea
+    id: change
+    attributes:
+      label: Proposed change
+      description: The smallest change that solves the problem. Files and packages involved.
+    validations:
+      required: true
+  - type: textarea
+    id: charter
+    attributes:
+      label: Charter check
+      description: Which principles the change touches and why it respects them. Earlier principles win on conflict.
+      value: |
+        - [ ] 1. User data stays in the user's account
+        - [ ] 2. First-party data only
+        - [ ] 3. Self-hosted, zero operations, upgrade by Sync fork
+        - [ ] 4. Read-only by default
+        - [ ] 5. Core does not depend on any platform
+        - [ ] 6. Docs are idempotent and verifiable
+        - [ ] 7. Few dependencies
+    validations:
+      required: true
+  - type: input
+    id: adr
+    attributes:
+      label: ADR impact
+      description: '"None", or which ADRs are involved. A proposal that would reverse an ADR needs a new ADR.'
+    validations:
+      required: true
+  - type: textarea
+    id: upgrade
+    attributes:
+      label: User impact and upgrade notes
+      description: Would users need to do anything by hand after syncing their fork? "None" if not.
+    validations:
+      required: true
+  - type: textarea
+    id: risks
+    attributes:
+      label: Risks and open questions

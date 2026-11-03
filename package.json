@@ -1,0 +1,26 @@
+{
+  "name": "searchkeep-monorepo",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@10.28.0",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "pnpm --filter @searchkeep/cloudflare run build && pnpm --filter @searchkeep/site run build",
+    "typecheck": "pnpm -r run typecheck",
+    "lint": "pnpm run lint:deps && pnpm run lint:format",
+    "lint:deps": "depcruise packages apps/cloudflare/src --config .dependency-cruiser.cjs",
+    "lint:format": "prettier --check .",
+    "format": "prettier --write .",
+    "test": "pnpm -r run test",
+    "dev": "pnpm --filter @searchkeep/cloudflare run dev"
+  },
+  "devDependencies": {
+    "dependency-cruiser": "^17.0.0",
+    "prettier": "^3.6.0",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.0",
+    "@types/node": "^22.19.0"
+  }
+}

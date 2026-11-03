@@ -1,0 +1,63 @@
+name: Deploy website
+
+# Deploys searchkeep.dev (apps/site) when it changes on main.
+# Requires two repository secrets (Settings → Secrets and variables → Actions):
+#   CLOUDFLARE_API_TOKEN  – token with "Workers Scripts: Edit" on the account and
+#                           "Workers Routes: Edit" + "DNS: Edit" on the searchkeep.dev zone
+#   CLOUDFLARE_ACCOUNT_ID – the account that owns the searchkeep.dev zone
+# Without them the job is skipped (forks never deploy the website).
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - apps/site/**
+      - pnpm-lock.yaml
+      - .github/workflows/deploy-site.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-site
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      HAS_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN != '' }}
+    steps:
+      - name: Skip without credentials
+        if: env.HAS_TOKEN != 'true'
+        run: echo "CLOUDFLARE_API_TOKEN is not set; skipping the website deploy."
+
+      - uses: actions/checkout@v5
+        if: env.HAS_TOKEN == 'true'
+
+      - uses: pnpm/action-setup@v4
+        if: env.HAS_TOKEN == 'true'
+
+      - uses: actions/setup-node@v5
+        if: env.HAS_TOKEN == 'true'
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install
+        if: env.HAS_TOKEN == 'true'
+        run: pnpm install --frozen-lockfile
+
+      - name: Build
+        if: env.HAS_TOKEN == 'true'
+        run: pnpm --filter @searchkeep/site run build
+
+      - name: Deploy
+        if: env.HAS_TOKEN == 'true'
+        working-directory: apps/site
+        run: npx wrangler deploy
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}

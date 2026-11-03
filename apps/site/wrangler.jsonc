@@ -1,0 +1,15 @@
+// Searchkeep website (searchkeep.dev). A tiny Worker that serves the
+// prerendered SvelteKit site from its own bundle (see scripts/embed-build.mjs).
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "searchkeep-site",
+  "main": "worker/index.js",
+  "compatibility_date": "2026-10-01",
+  "routes": [
+    { "pattern": "searchkeep.dev", "custom_domain": true },
+    { "pattern": "www.searchkeep.dev", "custom_domain": true },
+  ],
+  "workers_dev": false,
+  "preview_urls": false,
+  "observability": { "enabled": true },
+}

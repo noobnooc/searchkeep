@@ -1,0 +1,13 @@
+node_modules
+dist
+build
+public
+.svelte-kit
+.wrangler
+coverage
+pnpm-lock.yaml
+packages/store-d1/migrations
+packages/store-d1/src/migrations.generated.ts
+apps/site/static
+*.svelte
+apps/site/worker/files.generated.js

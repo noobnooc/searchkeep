@@ -1,0 +1,79 @@
+name: Sync labels
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/labels.yml
+  workflow_dispatch:
+
+permissions:
+  issues: write
+
+concurrency:
+  group: labels
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          sparse-checkout: .github/labels.yml
+          sparse-checkout-cone-mode: false
+
+      # yq is preinstalled on GitHub-hosted Ubuntu runners.
+      - name: Convert labels to JSON
+        run: yq -o=json '.' .github/labels.yml > "$RUNNER_TEMP/labels.json"
+
+      - name: Create or update labels
+        uses: actions/github-script@v8
+        env:
+          LABELS_FILE: ${{ runner.temp }}/labels.json
+        with:
+          script: |
+            const fs = require('fs');
+            const wanted = JSON.parse(fs.readFileSync(process.env.LABELS_FILE, 'utf8'));
+            const { owner, repo } = context.repo;
+
+            const existing = await github.paginate(github.rest.issues.listLabelsForRepo, {
+              owner,
+              repo,
+              per_page: 100,
+            });
+            const byName = new Map(existing.map((l) => [l.name.toLowerCase(), l]));
+
+            for (const label of wanted) {
+              const name = String(label.name);
+              const color = String(label.color).replace(/^#/, '').toLowerCase();
+              const description = String(label.description ?? '');
+              if (description.length > 100) {
+                core.setFailed(`Description of "${name}" is longer than 100 characters`);
+                continue;
+              }
+              const current = byName.get(name.toLowerCase());
+              if (!current) {
+                await github.rest.issues.createLabel({ owner, repo, name, color, description });
+                core.info(`created ${name}`);
+              } else if (
+                current.name !== name ||
+                current.color.toLowerCase() !== color ||
+                (current.description ?? '') !== description
+              ) {
+                await github.rest.issues.updateLabel({
+                  owner,
+                  repo,
+                  name: current.name,
+                  new_name: name,
+                  color,
+                  description,
+                });
+                core.info(`updated ${name}`);
+              } else {
+                core.info(`unchanged ${name}`);
+              }
+            }

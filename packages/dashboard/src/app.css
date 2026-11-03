@@ -1,0 +1,448 @@
+/*
+ * Searchkeep dashboard — design tokens and base styles.
+ * Dark first; light via prefers-color-scheme or the stored toggle (data-theme).
+ * The accent is the brand mint shared with searchkeep.dev. No web fonts: the
+ * stack prefers a locally installed Inter, then the system UI font.
+ *
+ * Chart palettes were checked with a colour-vision validator against the card
+ * surface in each mode: the four crawler purposes (categorical) and the four
+ * GEO funnel stages (ordinal, one hue).
+ */
+
+:root {
+  color-scheme: dark;
+  --font: 'Inter', 'InterVariable', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  --mono: ui-monospace, 'SF Mono', 'JetBrains Mono', 'Cascadia Code', Menlo, Consolas, monospace;
+
+  --bg: #08090a;
+  --bg-side: #0b0c0e;
+  --surface: #111214;
+  --surface-2: #17181b;
+  --surface-3: #1e1f23;
+  --border: rgba(255, 255, 255, 0.07);
+  --border-2: rgba(255, 255, 255, 0.11);
+  --border-3: rgba(255, 255, 255, 0.18);
+
+  --text: #f3f4f5;
+  --text-2: #b3b7be;
+  --text-3: #8b9099;
+  --text-4: #646973;
+
+  /* Brand mint: oklch(0.87 0.15 162) for text and lines, oklch(0.86 0.17 160) as a fill. */
+  --accent: #67f3b6;
+  --accent-text: #67f3b6;
+  --accent-fill: #4ef2aa;
+  --accent-fill-hover: #6cfeb9;
+  --accent-ink: #03140c;
+  --accent-wash: rgba(78, 242, 170, 0.1);
+  --accent-wash-2: rgba(78, 242, 170, 0.18);
+  --accent-line: rgba(78, 242, 170, 0.3);
+  --cool: #6ccdea;
+
+  --pos: #5ed476;
+  --pos-wash: rgba(94, 212, 118, 0.12);
+  --neg: #fb817a;
+  --neg-wash: rgba(251, 129, 122, 0.11);
+  --warn: #f7bc50;
+  --warn-wash: rgba(247, 188, 80, 0.11);
+  --neutral-wash: rgba(255, 255, 255, 0.055);
+
+  --grid: rgba(255, 255, 255, 0.055);
+  --axis: rgba(255, 255, 255, 0.16);
+  --prev: #5d626c;
+  --spark: #5d626c;
+  --series-training: #18ac77;
+  --series-search: #2b88c0;
+  --series-user: #d47421;
+  --series-other: #b357ad;
+  --stage-1: #67f3b6;
+  --stage-2: #3ed196;
+  --stage-3: #33ae7c;
+  --stage-4: #288b63;
+  --vital-good: #5ed476;
+  --vital-ni: #f7bc50;
+  --vital-poor: #fb817a;
+
+  --shadow-pop: 0 16px 40px -12px rgba(0, 0, 0, 0.7), 0 0 0 1px var(--border-2);
+  --shadow-card: none;
+  --radius: 10px;
+  --radius-sm: 6px;
+  --side-w: 232px;
+}
+
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme='dark']) {
+    color-scheme: light;
+    --bg: #f7f7f6;
+    --bg-side: #fafaf9;
+    --surface: #ffffff;
+    --surface-2: #f4f4f2;
+    --surface-3: #ececea;
+    --border: rgba(15, 17, 20, 0.08);
+    --border-2: rgba(15, 17, 20, 0.13);
+    --border-3: rgba(15, 17, 20, 0.2);
+    --text: #0c0d0f;
+    --text-2: #3f434a;
+    --text-3: #5f646d;
+    --text-4: #80858e;
+    --accent: #00774d;
+    --accent-text: #00774d;
+    --accent-fill: #43dd9a;
+    --accent-fill-hover: #0fd18b;
+    --accent-ink: #03140c;
+    --accent-wash: rgba(67, 221, 154, 0.16);
+    --accent-wash-2: rgba(67, 221, 154, 0.28);
+    --accent-line: rgba(0, 140, 90, 0.35);
+    --cool: #006d91;
+    --pos: #0a7e3a;
+    --pos-wash: rgba(10, 126, 58, 0.09);
+    --neg: #be2e31;
+    --neg-wash: rgba(190, 46, 49, 0.08);
+    --warn: #a45f00;
+    --warn-wash: rgba(214, 145, 20, 0.12);
+    --neutral-wash: rgba(15, 17, 20, 0.05);
+    --grid: rgba(15, 17, 20, 0.065);
+    --axis: rgba(15, 17, 20, 0.2);
+    --prev: #b0b4bb;
+    --spark: #a6aab2;
+    --series-training: #009162;
+    --series-search: #036eae;
+    --series-user: #d66919;
+    --series-other: #aa4298;
+    --stage-1: #005d3c;
+    --stage-2: #007d53;
+    --stage-3: #199e6e;
+    --stage-4: #47be8b;
+    --vital-good: #16955a;
+    --vital-ni: #d08a10;
+    --vital-poor: #d64545;
+    --shadow-pop: 0 16px 40px -12px rgba(16, 24, 40, 0.2), 0 0 0 1px var(--border-2);
+    --shadow-card: 0 1px 2px rgba(16, 24, 40, 0.04);
+  }
+}
+
+:root[data-theme='light'] {
+  color-scheme: light;
+  --bg: #f7f7f6;
+  --bg-side: #fafaf9;
+  --surface: #ffffff;
+  --surface-2: #f4f4f2;
+  --surface-3: #ececea;
+  --border: rgba(15, 17, 20, 0.08);
+  --border-2: rgba(15, 17, 20, 0.13);
+  --border-3: rgba(15, 17, 20, 0.2);
+  --text: #0c0d0f;
+  --text-2: #3f434a;
+  --text-3: #5f646d;
+  --text-4: #80858e;
+  --accent: #00774d;
+  --accent-text: #00774d;
+  --accent-fill: #43dd9a;
+  --accent-fill-hover: #0fd18b;
+  --accent-ink: #03140c;
+  --accent-wash: rgba(67, 221, 154, 0.16);
+  --accent-wash-2: rgba(67, 221, 154, 0.28);
+  --accent-line: rgba(0, 140, 90, 0.35);
+  --cool: #006d91;
+  --pos: #0a7e3a;
+  --pos-wash: rgba(10, 126, 58, 0.09);
+  --neg: #be2e31;
+  --neg-wash: rgba(190, 46, 49, 0.08);
+  --warn: #a45f00;
+  --warn-wash: rgba(214, 145, 20, 0.12);
+  --neutral-wash: rgba(15, 17, 20, 0.05);
+  --grid: rgba(15, 17, 20, 0.065);
+  --axis: rgba(15, 17, 20, 0.2);
+  --prev: #b0b4bb;
+  --spark: #a6aab2;
+  --series-training: #009162;
+  --series-search: #036eae;
+  --series-user: #d66919;
+  --series-other: #aa4298;
+  --stage-1: #005d3c;
+  --stage-2: #007d53;
+  --stage-3: #199e6e;
+  --stage-4: #47be8b;
+  --vital-good: #16955a;
+  --vital-ni: #d08a10;
+  --vital-poor: #d64545;
+  --shadow-pop: 0 16px 40px -12px rgba(16, 24, 40, 0.2), 0 0 0 1px var(--border-2);
+  --shadow-card: 0 1px 2px rgba(16, 24, 40, 0.04);
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  background: var(--bg);
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font);
+  font-size: 13.5px;
+  line-height: 1.5;
+  font-feature-settings: 'cv11', 'ss01';
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  overflow-x: hidden;
+}
+
+h1,
+h2,
+h3,
+h4,
+p {
+  margin: 0;
+}
+
+a {
+  color: var(--accent-text);
+  text-decoration: none;
+}
+a:hover {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+  color: inherit;
+}
+
+button {
+  cursor: pointer;
+}
+
+code,
+kbd,
+pre {
+  font-family: var(--mono);
+  font-size: 0.92em;
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+::selection {
+  background: var(--accent-wash-2);
+}
+
+.num {
+  font-variant-numeric: tabular-nums;
+}
+
+.muted {
+  color: var(--text-3);
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* ---- Buttons ------------------------------------------------------------ */
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 12px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-2);
+  background: var(--surface-2);
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 500;
+  white-space: nowrap;
+  transition:
+    background 120ms ease,
+    border-color 120ms ease,
+    color 120ms ease;
+}
+.btn:hover:not(:disabled) {
+  background: var(--surface-3);
+  border-color: var(--border-3);
+  text-decoration: none;
+}
+.btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+.btn.primary {
+  background: var(--accent-fill);
+  border-color: transparent;
+  color: var(--accent-ink);
+  font-weight: 600;
+}
+.btn.primary:hover:not(:disabled) {
+  background: var(--accent-fill-hover);
+}
+.btn.ghost {
+  background: transparent;
+  border-color: transparent;
+  color: var(--text-2);
+}
+.btn.ghost:hover:not(:disabled) {
+  background: var(--neutral-wash);
+  color: var(--text);
+}
+.btn.sm {
+  height: 28px;
+  padding: 0 10px;
+  font-size: 12.5px;
+}
+.btn.icon {
+  width: 32px;
+  padding: 0;
+}
+
+/* ---- Form controls ------------------------------------------------------ */
+
+.input,
+.select {
+  height: 32px;
+  padding: 0 10px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-2);
+  background: var(--surface);
+  color: var(--text);
+  font-size: 13px;
+  min-width: 0;
+}
+.input::placeholder {
+  color: var(--text-3);
+}
+.input:focus,
+.select:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-wash);
+}
+.select {
+  appearance: none;
+  padding-right: 28px;
+  background-image: linear-gradient(45deg, transparent 50%, var(--text-3) 50%), linear-gradient(135deg, var(--text-3) 50%, transparent 50%);
+  background-position:
+    calc(100% - 14px) 50%,
+    calc(100% - 10px) 50%;
+  background-size: 4px 4px;
+  background-repeat: no-repeat;
+}
+input[type='date'].input {
+  font-variant-numeric: tabular-nums;
+}
+input[type='date']::-webkit-calendar-picker-indicator {
+  cursor: pointer;
+  opacity: 0.6;
+}
+
+label.field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-2);
+  font-weight: 500;
+}
+
+/* ---- Layout helpers ----------------------------------------------------- */
+
+.stack {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.grid-2 {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+@media (max-width: 1080px) {
+  .grid-2 {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.spacer {
+  flex: 1;
+}
+
+.truncate {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.path {
+  font-family: var(--mono);
+  font-size: 12.5px;
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+
+/* ---- Skeleton ----------------------------------------------------------- */
+
+.skel {
+  display: block;
+  border-radius: 6px;
+  background: linear-gradient(90deg, var(--surface-2) 0%, var(--surface-3) 50%, var(--surface-2) 100%);
+  background-size: 200% 100%;
+  animation: skel 1.4s ease-in-out infinite;
+}
+
+@keyframes skel {
+  0% {
+    background-position: 100% 0;
+  }
+  100% {
+    background-position: -100% 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .skel {
+    animation: none;
+  }
+  * {
+    transition: none !important;
+  }
+}
+
+.refetching {
+  opacity: 0.55;
+  transition: opacity 160ms ease;
+  pointer-events: none;
+}
