@@ -28,15 +28,23 @@ pnpm build
 pnpm test
 ```
 
-To run the Worker locally:
+To run the Worker locally with demo data:
 
 ```sh
-pnpm --filter @searchkeep/cloudflare run db:migrate:local
-pnpm dev
+cp apps/cloudflare/.dev.vars.example apps/cloudflare/.dev.vars   # once
+pnpm dev                                                          # http://localhost:8787
+curl -X POST localhost:8787/api/dev/seed                          # in another terminal
 ```
 
+`pnpm dev` builds the dashboard and starts `wrangler dev` in dev mode, which skips Cloudflare Access
+and reports `ready`, but only for requests to `localhost`, `127.0.0.1` or `[::1]`. The Worker applies
+the D1 migrations to its local database on the first request. `POST /api/dev/seed` (dev mode only)
+fills that database with demo data for the site in `SITES` (add `?site=<id>` if you configured
+several), so the dashboard and the MCP endpoint at `http://localhost:8787/mcp` have something to
+show without real credentials.
+
 Local configuration goes in `apps/cloudflare/.dev.vars`, which is gitignored. Never commit real
-credentials or site lists.
+credentials or site lists, and keep `.dev.vars.example` free of real values.
 
 ## Workflow
 

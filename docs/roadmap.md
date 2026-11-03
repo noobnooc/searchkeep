@@ -7,18 +7,18 @@ listed under "Later" needs a maintainer decision (and usually an ADR) before wor
 
 ### In scope
 
-| Area           | v0.1                                                                                                                       |
-| -------------- | -------------------------------------------------------------------------------------------------------------------------- |
-| Runtime        | Cloudflare Workers: one Worker (`apps/cloudflare`) serving dashboard, API, MCP and cron                                    |
-| Database       | Cloudflare D1 via Drizzle (`packages/store-d1`), behind the Store interface                                                |
-| Data sources   | Google Search Console, Bing Webmaster Tools, Cloudflare (AI crawler requests, Web Analytics)                               |
-| Entrances      | MCP (Streamable HTTP, stateless, 13 tools) and the dashboard (Svelte + Vite SPA)                                           |
-| Authentication | Cloudflare Access self-hosted application with Managed OAuth; JWT re-verified in the Worker                                |
-| Deployment     | Fork plus Workers Builds; upgrade with "Sync fork"                                                                         |
-| Sync           | Daily cron; GSC re-pulls the last 4 days; batched 16-month GSC backfill; weekly Bing upserts                               |
-| Analysis       | Quick wins, cannibalization, CTR anomalies, content decay, period comparison, GEO funnel, AI crawlers, brand vs. non-brand |
-| Live calls     | GSC URL inspection, sitemap listing; sitemap submission (off by default)                                                   |
-| Operations     | `setup_status`, readiness lock, the maintain skill, CI guardrails                                                          |
+| Area           | v0.1                                                                                                                                                  |
+| -------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Runtime        | Cloudflare Workers: one Worker (`apps/cloudflare`) serving dashboard, API, MCP and cron                                                               |
+| Database       | Cloudflare D1 via Drizzle (`packages/store-d1`), behind the Store interface                                                                           |
+| Data sources   | Google Search Console, Bing Webmaster Tools, Cloudflare (AI crawler requests, Web Analytics, Web Vitals); Bing AI Performance citations by CSV import |
+| Entrances      | MCP (Streamable HTTP, stateless, 12 read-only tools plus opt-in `submit_sitemap`) and the dashboard (Svelte + Vite SPA)                               |
+| Authentication | Cloudflare Access self-hosted application with Managed OAuth; JWT re-verified in the Worker                                                           |
+| Deployment     | Fork plus Workers Builds; upgrade with "Sync fork"                                                                                                    |
+| Sync           | Cron every 15 minutes in small, budgeted batches; daily increments (GSC re-pulls the last 4 days, Bing in full) before a 16-month GSC backfill        |
+| Analysis       | Quick wins, cannibalization, CTR anomalies, content decay, period comparison, GEO funnel, AI crawlers, brand vs. non-brand                            |
+| Live calls     | GSC URL inspection, sitemap listing; sitemap submission (off by default)                                                                              |
+| Operations     | `setup_status`, readiness lock, the maintain skill, CI guardrails                                                                                     |
 
 ### Out of scope for v0.1
 
@@ -32,12 +32,14 @@ listed under "Later" needs a maintainer decision (and usually an ADR) before wor
 - Code Mode and free-form SQL tools ([ADR 0006](adr/0006-discrete-mcp-tools-not-code-mode.md)).
 - Any hosted or multi-tenant service operated by the project.
 
-### Open questions for v0.1
+### Resolved questions for v0.1
 
-- Whether Bing AI Performance data is available through the API. The "Cited" stage of the GEO
-  funnel depends on it.
-- Whether the Workers Builds build token can apply D1 migrations remotely. If not, the Worker
-  applies pending migrations itself at startup.
+- Bing AI Performance has no API (public preview since February 2026; Microsoft says an API is on
+  its backlog). The "Cited" stage of the GEO funnel is filled from its CSV export, imported in the
+  dashboard or through `POST /api/import/ai-citations`.
+- The default Workers Builds build token has no D1 permission, so remote migrations are skipped
+  there. The Worker applies pending migrations itself on its first request; users may add "D1 Edit"
+  to the build token, but do not need to.
 
 ## Later
 

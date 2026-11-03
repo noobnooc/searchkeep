@@ -7,7 +7,7 @@
 ## Context
 
 Searchkeep has three ways in: the dashboard (and the JSON API it calls), the MCP endpoint for AI
-clients, and a daily scheduled sync. Users deploy Searchkeep themselves, often with the help of an
+clients, and a scheduled sync. Users deploy Searchkeep themselves, often with the help of an
 AI agent, so every extra moving part is one more thing to configure, secure, upgrade and debug.
 The charter requires zero operations and free-tier friendliness.
 
@@ -28,7 +28,7 @@ Users deploy exactly one Worker, `searchkeep`, from `apps/cloudflare`. It serves
 - `/` the dashboard single-page app as static assets, `/api/*` its JSON API and `/api/status`;
 - `/mcp` the MCP endpoint (Streamable HTTP, stateless);
 - `/setup` a public setup guide and `/healthz` a liveness check;
-- the Cron Trigger (`17 3 * * *`) that runs the daily sync.
+- the Cron Trigger (`*/15 * * * *`) that runs the sync in small batches.
 
 All three entrances call only `packages/core`, which reads and writes D1 through the Store interface
 and calls external APIs through Source adapters. MCP tools and dashboard views use the same analysis

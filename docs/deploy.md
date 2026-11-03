@@ -17,26 +17,26 @@ Time needed: about 30–45 minutes the first time.
 
 ## Overview
 
-| #   | Step                                                                                    | Who                                                     |
-| --- | --------------------------------------------------------------------------------------- | ------------------------------------------------------- |
-| 0   | [Choose names and gather prerequisites](#0-choose-names-and-gather-prerequisites)       | Human                                                   |
-| 1   | [Fork the repository](#1-fork-the-repository)                                           | Agent or human                                          |
-| 2   | [Authorize the Cloudflare GitHub App](#2-authorize-the-cloudflare-github-app)           | **Human, once**                                         |
-| 3   | [Create the Worker with Workers Builds](#3-create-the-worker-with-workers-builds)       | Agent or human                                          |
-| 4   | [Add a custom domain](#4-add-a-custom-domain)                                           | Agent or human                                          |
-| 5   | [Turn off workers.dev and preview URLs](#5-turn-off-workersdev-and-preview-urls)        | Agent or human                                          |
-| 6   | [Create a Zero Trust organization](#6-create-a-zero-trust-organization)                 | **Human, once**                                         |
-| 7   | [Create the Access application and policy](#7-create-the-access-application-and-policy) | Agent or human                                          |
-| 8   | [Enable Managed OAuth](#8-enable-managed-oauth)                                         | Agent or human                                          |
-| 9   | [Store the Access team domain and AUD](#9-store-the-access-team-domain-and-aud)         | Agent or human                                          |
-| 10  | [Cloudflare account ID and API token](#10-cloudflare-account-id-and-api-token)          | Human (token), agent (secrets)                          |
-| 11  | [Describe your sites (`SITES`)](#11-describe-your-sites-sites)                          | Agent or human                                          |
-| 12  | [Google Search Console service account](#12-google-search-console-service-account)      | Human, or agent with gcloud; GSC user step is **Human** |
-| 13  | [Bing Webmaster Tools API key](#13-bing-webmaster-tools-api-key)                        | **Human** (key), agent (secret)                         |
-| 14  | [Optional settings](#14-optional-settings)                                              | Agent or human                                          |
-| 15  | [Connect an MCP client](#15-connect-an-mcp-client)                                      | Human (sign-in)                                         |
-| 16  | [Verify readiness](#16-verify-readiness)                                                | Agent or human                                          |
-| 17  | [Run the first sync](#17-run-the-first-sync)                                            | Human, or agent with a browser session                  |
+| #   | Step                                                                                    | Who                                                       |
+| --- | --------------------------------------------------------------------------------------- | --------------------------------------------------------- |
+| 0   | [Choose names and gather prerequisites](#0-choose-names-and-gather-prerequisites)       | Human                                                     |
+| 1   | [Fork the repository](#1-fork-the-repository)                                           | Agent or human                                            |
+| 2   | [Authorize the Cloudflare GitHub App](#2-authorize-the-cloudflare-github-app)           | **Human, once**                                           |
+| 3   | [Create the Worker with Workers Builds](#3-create-the-worker-with-workers-builds)       | Agent or human                                            |
+| 4   | [Add a custom domain](#4-add-a-custom-domain)                                           | Agent or human                                            |
+| 5   | [Turn off workers.dev and preview URLs](#5-turn-off-workersdev-and-preview-urls)        | Agent or human                                            |
+| 6   | [Create a Zero Trust organization](#6-create-a-zero-trust-organization)                 | **Human, once**                                           |
+| 7   | [Create the Access application and policy](#7-create-the-access-application-and-policy) | Agent or human                                            |
+| 8   | [Enable Managed OAuth](#8-enable-managed-oauth)                                         | Agent or human                                            |
+| 9   | [Store the Access team domain and AUD](#9-store-the-access-team-domain-and-aud)         | Agent or human                                            |
+| 10  | [Cloudflare account ID and API token](#10-cloudflare-account-id-and-api-token)          | Human (token), agent (secrets)                            |
+| 11  | [Describe your sites (`SITES`)](#11-describe-your-sites-sites)                          | Agent or human                                            |
+| 12  | [Google Search Console service account](#12-google-search-console-service-account)      | Human, or agent with gcloud; GSC user step is **Human**   |
+| 13  | [Bing Webmaster Tools API key](#13-bing-webmaster-tools-api-key)                        | **Human** (key), agent (secret)                           |
+| 14  | [Optional settings](#14-optional-settings)                                              | Agent or human                                            |
+| 15  | [Connect an MCP client](#15-connect-an-mcp-client)                                      | Human (sign-in)                                           |
+| 16  | [Verify readiness](#16-verify-readiness)                                                | Agent or human                                            |
+| 17  | [Run the first sync](#17-run-the-first-sync)                                            | Automatic (cron), or human / agent with a browser session |
 
 Then: [Troubleshooting](#troubleshooting) · [Upgrading](#upgrading) · [Uninstalling](#uninstalling)
 
@@ -70,18 +70,27 @@ are never shown, which is expected.
 
 ### Configuration reference
 
-| Secret                  | Required | Set in step | What                                                                               |
-| ----------------------- | -------- | ----------- | ---------------------------------------------------------------------------------- |
-| `ACCESS_TEAM_DOMAIN`    | yes      | 9           | Your Access team domain, for example `myteam.cloudflareaccess.com`                 |
-| `ACCESS_AUD`            | yes      | 9           | Application Audience (AUD) tag of the Access application                           |
-| `CLOUDFLARE_ACCOUNT_ID` | yes      | 10          | Your Cloudflare account ID                                                         |
-| `CLOUDFLARE_API_TOKEN`  | yes      | 10          | Read-only API token (Account Analytics, Zone Analytics, Access: Apps and Policies) |
-| `SITES`                 | yes      | 11          | JSON array describing your sites                                                   |
-| `GSC_CLIENT_EMAIL`      | for GSC  | 12          | `client_email` from the service account key JSON                                   |
-| `GSC_PRIVATE_KEY`       | for GSC  | 12          | `private_key` from the service account key JSON                                    |
-| `BING_API_KEY`          | for Bing | 13          | Bing Webmaster Tools API key (treat it as a password)                              |
-| `BRAND_REGEX`           | optional | 14          | Default brand regex, matched case-insensitively, for example `acme\|acme\s?corp`   |
-| `ENABLE_WRITES`         | optional | 14          | `true` to enable `submit_sitemap` (requires GSC **Full** permission)               |
+| Secret                    | Required | Set in step | What                                                                                                            |
+| ------------------------- | -------- | ----------- | --------------------------------------------------------------------------------------------------------------- |
+| `ACCESS_TEAM_DOMAIN`      | yes      | 9           | Your Access team domain, for example `myteam.cloudflareaccess.com`                                              |
+| `ACCESS_AUD`              | yes      | 9           | Application Audience (AUD) tag of the Access application                                                        |
+| `CLOUDFLARE_ACCOUNT_ID`   | yes      | 10          | Your Cloudflare account ID                                                                                      |
+| `CLOUDFLARE_API_TOKEN`    | yes      | 10          | Read-only API token (Account Analytics, Zone Analytics, Access: Apps and Policies); needed for the Access check |
+| `SITES`                   | yes      | 11          | JSON array describing your sites                                                                                |
+| `GSC_CLIENT_EMAIL`        | for GSC  | 12          | `client_email` from the service account key JSON                                                                |
+| `GSC_PRIVATE_KEY`         | for GSC  | 12          | `private_key` from the service account key JSON (real line breaks or literal `\n`)                              |
+| `BING_API_KEY`            | for Bing | 13          | Bing Webmaster Tools API key (treat it as a password)                                                           |
+| `BRAND_REGEX`             | optional | 14          | Default brand regex, matched case-insensitively, for example `acme\|acme\s?corp`                                |
+| `ENABLE_WRITES`           | optional | 14          | `true` to enable `submit_sitemap` (requires GSC **Full** permission)                                            |
+| `GSC_ROWS_PER_DAY`        | optional | 14          | Max query × page rows stored per day from GSC, 100–100000. Default `2500`                                       |
+| `GSC_BACKFILL_MONTHS`     | optional | 14          | Months of GSC history to backfill, 0–16. Default `16`                                                           |
+| `SYNC_DAILY_WRITE_BUDGET` | optional | 14          | Max rows the history backfill writes per UTC day. Default `80000` (D1 Free allows 100000)                       |
+| `SYNC_MAX_CALLS_PER_RUN`  | optional | 14          | Max outbound API calls per sync pass, 5–900. Default `20`                                                       |
+
+`CLOUDFLARE_ACCOUNT_ID` and `CLOUDFLARE_API_TOKEN` are required even if you use no Cloudflare data:
+they are how Searchkeep checks your Access setup. Values that do not parse (invalid JSON in `SITES`,
+a bad regex) never crash the Worker; the dashboard's status page and `setup_status` list them as
+configuration errors. Numbers outside a setting's range are clamped.
 
 ## 0. Choose names and gather prerequisites
 
@@ -94,8 +103,9 @@ You need:
   Sites you want AI crawler data for must be proxied through Cloudflare.
 - A **GitHub account**.
 - **Google Search Console** access to your properties, as an **Owner** (only owners can add users).
-- **Bing Webmaster Tools** with your sites verified (optional but recommended; Bing provides the
-  "Cited" stage of the GEO funnel).
+- **Bing Webmaster Tools** with your sites verified (optional but recommended; its AI Performance
+  CSV export provides the "Cited" stage of the GEO funnel, see
+  [Troubleshooting](#the-cited-step-of-the-geo-funnel-is-empty)).
 - Optional, for agents or command-line use: `git`, Node.js 22, pnpm (the version in the root
   `package.json` `packageManager` field), the GitHub CLI `gh` or a GitHub MCP server, `curl`, `jq`,
   and `gcloud` for step 12. An agent working with Cloudflare needs either the Cloudflare MCP server
@@ -176,11 +186,13 @@ repository connection and the build trigger in one go.
    - **Deploy command:** `pnpm run deploy`
    - **Advanced settings** → **Root directory** (path): `apps/cloudflare`
 4. **Create and deploy**. The first build installs dependencies, builds the dashboard into the
-   Worker's static assets, creates the D1 database `searchkeep` automatically (the repository only
-   names the binding `DB`; the database ID is stored in your Cloudflare account, never in Git),
-   applies migrations and deploys.
+   Worker's static assets, deploys, and creates the D1 database `searchkeep` automatically (the
+   repository only names the binding `DB`; the database ID is stored in your Cloudflare account,
+   never in Git). The remote migration step is normally skipped on Workers Builds; see **About
+   migrations** below.
 5. Open the Worker → **Settings** → **Build**:
-   - **Build watch paths** → **Include paths:** `apps/cloudflare/**` and `packages/**`
+   - **Build watch paths** → **Include paths:** `apps/cloudflare/**`, `packages/**` and
+     `pnpm-lock.yaml`
    - **Branch control:** production branch `main`; turn **off** builds for non-production branches.
 
 **API alternative (agent):** the Workers Builds API needs the Worker to exist and the GitHub App
@@ -199,33 +211,42 @@ curl -s "https://api.cloudflare.com/client/v4/accounts/<account-id>/builds/worke
 # Fix a trigger in place
 curl -s -X PATCH "https://api.cloudflare.com/client/v4/accounts/<account-id>/builds/triggers/<trigger-uuid>" \
   -H "Authorization: Bearer $CF_DEPLOY_TOKEN" -H "Content-Type: application/json" \
-  --data '{"root_directory":"apps/cloudflare","build_command":"pnpm run build","deploy_command":"pnpm run deploy","branch_includes":["main"],"path_includes":["apps/cloudflare/**","packages/**"]}'
+  --data '{"root_directory":"apps/cloudflare","build_command":"pnpm run build","deploy_command":"pnpm run deploy","branch_includes":["main"],"path_includes":["apps/cloudflare/**","packages/**","pnpm-lock.yaml"]}'
 ```
 
 Creating everything by API uses `PUT .../builds/repos/connections`, `POST .../builds/tokens` and
 `POST .../builds/triggers` with the same fields plus `external_script_id`, `repo_connection_uuid`,
 `build_token_uuid`, `trigger_name`, `branch_excludes: []` and `path_excludes: []`.
 
-**About migrations:** the deploy command applies D1 migrations remotely and then deploys. If the
-Workers Builds build token turns out not to have permission to apply D1 migrations, the deploy still
-succeeds: the Worker applies any pending migrations itself at startup, and tracks them in the same
-`d1_migrations` table wrangler uses, so the two paths never apply a migration twice.
+**About migrations:** the deploy command (`apps/cloudflare/scripts/deploy.mjs`) tries to apply D1
+migrations remotely, deploys, then tries the migrations once more, and never fails because of them.
+The default Workers Builds build token has no D1 permission, so on Workers Builds the remote step is
+skipped with a warning (`Remote migration skipped ...`). That is expected and fine: the Worker
+applies any pending migrations itself on its first request and tracks them in the same
+`d1_migrations` table wrangler uses, so the two paths never apply a migration twice. If you want the
+build to migrate as well, add **D1 Edit** to the build token (optional).
+
+The watch paths make a change to the Worker, its packages or its dependencies trigger a build, while
+changes that only touch the docs or the website (`apps/site`) do not.
 
 **Verify:**
 
 - Workers & Pages → `searchkeep` → **Deployments** (or **Builds**) shows the latest build as
   **Success**.
 - Storage & Databases → **D1** lists a database named `searchkeep`. CLI:
-  `npx wrangler@4 d1 list` shows `searchkeep`.
+  `npx wrangler@4 d1 list` shows `searchkeep`. Its tables exist at the latest after the Worker's
+  first request (step 4).
 - The trigger shows root directory `apps/cloudflare`, build command `pnpm run build`, deploy command
-  `pnpm run deploy` and both include paths.
+  `pnpm run deploy` and all three include paths.
 
 ## 4. Add a custom domain
 
 **Who:** Agent or human.
 
-A custom domain is required: the Cache API does not work on `workers.dev`, and the Access application
-in step 7 protects this hostname.
+A custom domain is required: `wrangler.jsonc` turns off `workers.dev` and preview URLs and declares
+no routes, so the custom domain is the only way to reach the Worker, and the Access application in
+step 7 protects this hostname. Because you add the domain in the dashboard rather than in the
+repository, it survives upgrades.
 
 **Dashboard:** Workers & Pages → `searchkeep` → **Settings** → **Domains & Routes** → **Add** →
 **Custom domain** → `<your-domain>` → **Add custom domain**. (In newer dashboards: the Worker's
@@ -251,14 +272,27 @@ curl -s https://<your-domain>/healthz
 # after step 7: a redirect or 401 from Access, which is also fine
 ```
 
+Before step 7 the deployment is locked (`no_access`), and these checks confirm it:
+
+```sh
+curl -s https://<your-domain>/ | grep -o '<title>[^<]*'
+# <title>Searchkeep is locked          (the public setup page)
+
+curl -s -w ' %{http_code}\n' https://<your-domain>/api/status
+# {"error":"Searchkeep is locked: Cloudflare Access is not protecting this request.","code":"locked","state":"no_access","setup":"/setup"} 403
+
+curl -s -w ' %{http_code}\n' -X POST https://<your-domain>/mcp
+# {"jsonrpc":"2.0","error":{"code":-32001,"message":"Searchkeep is locked: https://<your-domain> is not protected by Cloudflare Access yet. See https://<your-domain>/setup."},"id":null} 403
+```
+
 ## 5. Turn off workers.dev and preview URLs
 
 **Who:** Agent or human.
 
 Searchkeep must be reachable only through `<your-domain>`, where Access protects it. (Even if another
-URL were reachable, the Worker rejects every request without a valid Access JWT for your
-application; this step removes the extra surface.) The repository's `wrangler.jsonc` keeps both
-turned off on every deploy; this step confirms it.
+URL were reachable, without a valid Access JWT for your application the Worker serves only
+`/healthz`, `/robots.txt` and the public setup guide; this step removes the extra surface.) The
+repository's `wrangler.jsonc` keeps both turned off on every deploy; this step confirms it.
 
 **Dashboard:** Workers & Pages → `searchkeep` → **Settings** → **Domains & Routes** (or the
 **Domains** tab) → **workers.dev** → **Disable**, and **Preview URLs** → **Disable**.
@@ -307,9 +341,10 @@ curl -s "https://api.cloudflare.com/client/v4/accounts/<account-id>/access/organ
 **Who:** Agent or human.
 
 The application must cover the **whole hostname**: no path, no bypass rules, no exceptions. The
-policy must allow **only your email address** (or a short explicit list). Policies that allow
-everyone, or a public email domain such as `gmail.com`, put Searchkeep into the `policy_too_broad`
-state and keep it locked.
+policy must allow **only your email address** (or a short explicit list). Policies that include
+Everyone, a public email domain such as `gmail.com`, any login method or identity provider, every
+IP address (`/0`), a whole country or any service token, and policies with the **Bypass** or
+**Service Auth** action, put Searchkeep into the `policy_too_broad` state and keep it locked.
 
 **Dashboard:**
 
@@ -429,6 +464,9 @@ another state until the remaining steps are done.
 **Who:** **[Human]** creates the token (an agent can do it only with a token that is allowed to
 create tokens; prefer the human path). Agent or human sets the secrets.
 
+Both secrets are required even if you do not use Cloudflare as a data source: the Worker uses them to
+read your Access application and policies. Without them it stays in `oauth_disabled`.
+
 **Account ID:** Cloudflare dashboard → **Workers & Pages** → **Account details** in the side panel
 (or the zone **Overview** page, **API** section) → **Account ID**. CLI: `npx wrangler@4 whoami`.
 
@@ -477,15 +515,15 @@ and `wrangler secret list` shows both names.
 ]
 ```
 
-| Field                 | What                                                                                                                                             |
-| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `id`                  | Short, stable identifier (lowercase letters, digits, dashes). Do not change it later; stored data is keyed by it.                                |
-| `domain`              | The site's hostname.                                                                                                                             |
-| `gscProperty`         | The Search Console property: `sc-domain:acme.com` for a Domain property, or the exact URL such as `https://acme.com/` for a URL-prefix property. |
-| `bingSiteUrl`         | The site URL exactly as registered in Bing Webmaster Tools, usually with a trailing slash.                                                       |
-| `cloudflareZoneId`    | The site's Cloudflare zone ID (for AI crawler data).                                                                                             |
-| `webAnalyticsSiteTag` | The Cloudflare Web Analytics site tag (for AI referral visits).                                                                                  |
-| `brandRegex`          | Optional. Overrides `BRAND_REGEX` for this site.                                                                                                 |
+| Field                 | What                                                                                                                                                                                                  |
+| --------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `id`                  | Optional. Short, stable identifier (lowercase letters, digits, dashes). Derived from the domain when omitted (`www.acme.com` becomes `acme-com`). Do not change it later; stored data is keyed by it. |
+| `domain`              | Required. The site's bare hostname, for example `acme.com` (no scheme, no path).                                                                                                                      |
+| `gscProperty`         | The Search Console property: `sc-domain:acme.com` for a Domain property, or the exact URL such as `https://acme.com/` for a URL-prefix property.                                                      |
+| `bingSiteUrl`         | The site URL exactly as registered in Bing Webmaster Tools, usually with a trailing slash.                                                                                                            |
+| `cloudflareZoneId`    | The site's Cloudflare zone ID (for AI crawler data).                                                                                                                                                  |
+| `webAnalyticsSiteTag` | The Cloudflare Web Analytics site tag (for AI referral visits and Web Vitals; also needs `CLOUDFLARE_ACCOUNT_ID`).                                                                                    |
+| `brandRegex`          | Optional. Overrides `BRAND_REGEX` for this site.                                                                                                                                                      |
 
 Leave out a source's field if you do not use that source for a site.
 
@@ -505,13 +543,14 @@ Save the JSON in a file **outside** your clone (for example `~/searchkeep-sites.
 set it as a secret:
 
 ```sh
-jq -e 'type=="array" and length>0 and all(.[]; .id and .domain)' ~/searchkeep-sites.json
+jq -e 'type=="array" and length>0 and all(.[]; .domain)' ~/searchkeep-sites.json
 pnpm exec wrangler secret put SITES < ~/searchkeep-sites.json
 ```
 
 In the dashboard, paste the JSON as the value of secret `SITES`.
 
-**Verify:** the `jq -e` check prints `true`. After step 15, the `list_sites` tool lists every site.
+**Verify:** the `jq -e` check prints `true`. After step 15, the `list_sites` tool lists every site,
+and `setup_status` reports no configuration errors for `SITES`.
 
 ## 12. Google Search Console service account
 
@@ -564,12 +603,13 @@ jq -r .private_key  ~/searchkeep-gsc-key.json | pnpm exec wrangler secret put GS
 
 In the dashboard, paste the `client_email` value into `GSC_CLIENT_EMAIL`, and the `private_key`
 value (from `-----BEGIN PRIVATE KEY-----` to `-----END PRIVATE KEY-----`) into `GSC_PRIVATE_KEY`.
+Real line breaks and the literal `\n` sequences from the JSON file both work.
 
 Then delete the local key file, or move it to a password manager: `rm ~/searchkeep-gsc-key.json`.
 
 **Verify:** in Search Console, **Users and permissions** lists the service account email with
 **Restricted** permission, and `wrangler secret list` shows both secret names. After step 15,
-`setup_status` reports GSC as working for each property.
+`setup_status` reports that the service account can read each GSC property.
 
 ## 13. Bing Webmaster Tools API key
 
@@ -602,6 +642,12 @@ The output lists your sites, including each `bingSiteUrl` from `SITES`.
 - **`ENABLE_WRITES`**: set to `true` to enable the `submit_sitemap` tool. Also change the service
   account's permission in Search Console to **Full** for the properties where you want to submit
   sitemaps. Leave it unset to stay read-only.
+- **Sync budgets**: `GSC_ROWS_PER_DAY` (default `2500`), `GSC_BACKFILL_MONTHS` (default `16`),
+  `SYNC_DAILY_WRITE_BUDGET` (default `80000`) and `SYNC_MAX_CALLS_PER_RUN` (default `20`). The
+  defaults fit the free plans: D1 Free allows 100,000 rows written per day, and Workers Free allows
+  10 ms of CPU per invocation. Change them only if you have a reason, for example a lower
+  `GSC_ROWS_PER_DAY` when sync units keep being skipped (see
+  [Troubleshooting](#sync-is-slow-or-units-are-skipped)).
 
 **Verify:** `wrangler secret list` shows the names you set. `setup_status` reports whether writes are
 enabled.
@@ -639,16 +685,23 @@ opens the Access login.
 
 Cursor opens the Access login when it first connects.
 
-**Verify:** the client lists the Searchkeep tools (13, including `setup_status`). If the client
-reports an OAuth or redirect error, see [Troubleshooting](#mcp-client-cannot-connect).
+**Verify:** the client lists the Searchkeep tools: 12, including `setup_status`, or 13 with
+`ENABLE_WRITES=true` (which adds `submit_sitemap`). If the client reports an OAuth or redirect
+error, see [Troubleshooting](#mcp-client-cannot-connect). While the deployment is not `ready`, the
+endpoint answers every request, including the tool list, with a JSON-RPC error that explains the
+lock; fix it with step 16 and reconnect.
 
 ## 16. Verify readiness
 
 **Who:** Agent or human.
 
-Ask your MCP client to call **`setup_status`**, or open `https://<your-domain>/` and look at the
-dashboard's status page. It shows the readiness state and one line per check (Access JWT, Managed
-OAuth, policy, each credential, each site and source, last sync).
+Open `https://<your-domain>/` and look at the dashboard's **Settings** (status) page, which reads
+`GET /api/status` and works in every state once you are signed in through Access. It shows the
+readiness state, one line per readiness check, and any configuration errors. Once the deployment is
+`ready`, ask your MCP client to call **`setup_status`** (or use the same page) for the full report:
+each credential, live probes of the Cloudflare token, Search Console and Bing, the last sync, and
+each site's sources and data coverage. Before `ready`, `/mcp` and every other `/api/*` route refuse
+requests with an error that names the state.
 
 | State              | Meaning                                         | Action                                      |
 | ------------------ | ----------------------------------------------- | ------------------------------------------- |
@@ -657,36 +710,53 @@ OAuth, policy, each credential, each site and source, last sync).
 | `oauth_disabled`   | Managed OAuth is off                            | [Fix `oauth_disabled`](#oauth_disabled)     |
 | `policy_too_broad` | The Access policy lets too many people in       | [Fix `policy_too_broad`](#policy_too_broad) |
 
-The Access configuration check is cached for a few minutes; reloading the dashboard refreshes it.
+The Access configuration check is cached for up to five minutes; `GET /api/status?refresh=1` (from
+an authenticated session) re-checks immediately.
+
+The first authenticated request that sees `ready` (this `setup_status` call, or opening the
+dashboard) records a ready flag in D1. The cron syncs only while that flag is set.
 
 **Verify:** `setup_status` reports `ready`, and each configured source (GSC, Bing, Cloudflare) shows
 no credential errors.
 
 ## 17. Run the first sync
 
-**Who:** **[Human]** in the dashboard, or an agent that has an authenticated browser session.
+**Who:** automatic. To start right away: **[Human]** in the dashboard, or an agent that has an
+authenticated browser session.
 
-The daily cron (03:17 UTC) syncs automatically once the deployment has reached `ready`. To start
-right away:
+The cron runs **every 15 minutes**. Once the ready flag is set (step 16), each pass first re-reads
+the Access application through the API (and locks again if Access was turned off or loosened), then
+does whatever sync work is due. To start right away instead of waiting for the next pass:
 
-- **Dashboard:** open `https://<your-domain>/` → **Sync now**.
+- **Dashboard:** open `https://<your-domain>/` → **Settings** → **Sync now**.
 - **API:** `POST https://<your-domain>/api/sync` from an authenticated session (it is behind Access
   like every other route). For example, with `cloudflared` installed:
   `cloudflared access curl https://<your-domain>/api/sync -X POST` (it opens a browser to sign in).
 
-The first sync starts the Google Search Console backfill of the last 16 months. Because a single
-Worker invocation has limited subrequests and CPU time, the backfill runs in batches across several
-cron runs and resumes from a cursor stored in D1. GSC data also arrives with a delay of a few days.
+How the sync works:
 
-**Verify:** `setup_status` (or the dashboard) shows a last-sync time for each configured source with
-no errors, and `list_sites` shows data for each site. A few days later, the GSC history reaches back
-16 months.
+- Each pass does only what fits its budgets (`SYNC_MAX_CALLS_PER_RUN` API calls, a time budget, and
+  `SYNC_DAILY_WRITE_BUDGET` rows per UTC day for the backfill), keeps its progress in D1 and resumes
+  on the next pass. A run with status `partial` and "continues next run" is normal.
+- **Daily increments first:** GSC re-pulls the last 4 days (its data lags 2–3 days) and fills gaps
+  of up to 30 days; the GSC sitemap snapshot and Bing (traffic, queries, pages, crawl issues) are
+  refreshed in full once a day; Cloudflare adds each missing day of AI crawler requests (30 days back
+  on the first run) and Web Analytics with Web Vitals (90 days back on the first run).
+- **Then the history backfill:** GSC history is backfilled one day at a time, newest first, back 16
+  months (`GSC_BACKFILL_MONTHS`). On the free D1 write quota this takes days to weeks.
+- A unit interrupted 3 times in a row (for example by the Workers Free CPU limit) is skipped, so the
+  sync never gets stuck; the run reports it as an error.
+
+**Verify:** `setup_status` (or the dashboard) shows a recent sync without errors, and `list_sites`
+shows a date range for each connected dataset. Over the following days to weeks, the GSC range
+reaches back 16 months.
 
 You are done. Keep your fork in sync to get updates ([Upgrading](#upgrading)).
 
 ## Troubleshooting
 
-Start with `setup_status` or the dashboard status page: it names the failing check.
+Start with the dashboard's status page (`GET /api/status`, available in every state once you are
+signed in), or `setup_status` once the deployment is `ready`: it names the failing check.
 
 ### `no_access`
 
@@ -709,20 +779,25 @@ The JWT is valid, but the Access application does not have Managed OAuth turned 
 cannot sign in.
 
 1. Do step 8 and check `oauth_configuration.enabled` is `true`.
-2. Check the `CLOUDFLARE_API_TOKEN` has **Access: Apps and Policies Read** and covers your account.
-   Without it the Worker cannot read the Access configuration and stays locked.
-3. Reload the dashboard to refresh the cached check.
+2. Check that `CLOUDFLARE_ACCOUNT_ID` is set and that `CLOUDFLARE_API_TOKEN` has **Access: Apps and
+   Policies Read** and covers your account. Without them the Worker cannot read the Access
+   configuration and stays locked; the check's detail says so.
+3. Re-check with `GET /api/status?refresh=1`, or wait up to five minutes for the cached check to
+   expire.
 
 ### `policy_too_broad`
 
-A policy on the application lets in everyone or a public email domain.
+A policy on the application lets in more than specific people. The check's detail names the policy
+and the reason.
 
 1. Zero Trust → **Access controls** → **Applications** → `Searchkeep` → **Policies**.
-2. Remove any policy, rule or include that uses **Everyone**, **Bypass**, an IP range only, or an
-   **Emails ending in** a public domain (gmail.com, outlook.com, hotmail.com, yahoo.com, icloud.com,
-   proton.me, qq.com and similar).
+2. Remove any policy, rule or include that uses **Everyone**, the **Bypass** or **Service Auth**
+   action, any login method, an IP range that matches every address (`0.0.0.0/0`, `::/0`), a whole
+   country, any valid service token, or **Emails ending in** a public domain (gmail.com,
+   outlook.com, hotmail.com, yahoo.com, icloud.com, proton.me, qq.com and similar). A policy with no
+   include rules, or no Allow policy at all, also counts as too broad.
 3. Keep one **Allow** policy that includes **Emails** with your address (or an explicit list).
-4. Reload the dashboard.
+4. Re-check with `GET /api/status?refresh=1`, or reload the dashboard after five minutes.
 
 ### Build fails in Workers Builds
 
@@ -730,9 +805,13 @@ A policy on the application lets in everyone or a public email domain.
 - **Wrong pnpm version or lockfile errors:** do not change the lockfile in your fork; sync the fork so
   `pnpm-lock.yaml` matches upstream.
 - **Worker name mismatch:** the Workers project name must be `searchkeep`.
-- **D1 migration step reports an authentication or permission error:** the deploy continues and
-  the Worker applies pending migrations at startup (see step 3). If the deploy itself failed, open an
+- **The log says "Remote migration skipped" or the D1 migration step reports an authentication or
+  permission error:** expected with the default build token. The deploy continues and the Worker
+  applies pending migrations on its first request (see step 3). If the deploy itself failed, open an
   issue with the build log, with any secrets removed.
+- **A sync of your fork did not trigger a build:** the change did not touch the watch paths
+  (`apps/cloudflare/**`, `packages/**`, `pnpm-lock.yaml`), so there was nothing to deploy. Check the
+  include paths if a code change did not build.
 
 ### Custom domain cannot be added
 
@@ -769,14 +848,44 @@ hostname. The zone must be active in the same Cloudflare account as the Worker.
 
 - **`InvalidApiKey` or 401:** generate a new key (step 13) and set `BING_API_KEY` again.
 - **Site not found:** `bingSiteUrl` must match the site URL in Bing Webmaster Tools exactly.
-- Bing data is weekly. Searchkeep aligns daily GSC data to weeks when comparing the two.
+- Bing data is weekly, and every call returns all of it. Queries against Bing data are aligned to
+  whole Monday–Sunday weeks.
 
 ### Cloudflare data is empty
 
 - **AI crawler data:** the site must be proxied through Cloudflare (orange cloud), and the API token's
-  zone resources must include its zone.
-- **Web Analytics:** `webAnalyticsSiteTag` must be the site tag, not the snippet token. Accounts with
-  the EU data boundary enabled cannot query Web Analytics (RUM) data through the API.
+  zone resources must include its zone. On Free plans, crawlers are identified by user agent only.
+  Cloudflare's GraphQL API keeps at least 31 days of HTTP request data, so the first sync goes back
+  30 days; older crawler traffic cannot be recovered.
+- **Web Analytics:** `webAnalyticsSiteTag` must be the site tag, not the snippet token, and
+  `CLOUDFLARE_ACCOUNT_ID` must be set. Web Analytics keeps about six months; the first sync goes back
+  90 days. Accounts with the EU data boundary enabled cannot query Web Analytics (RUM) data through
+  the API.
+
+### The "Cited" step of the GEO funnel is empty
+
+Bing AI Performance (citations in Copilot and Bing AI answers) has no API; Microsoft says one is on
+its backlog. Export the report as CSV in Bing Webmaster Tools and import it: dashboard →
+**Settings** → **Import AI citations**, or
+
+```sh
+cloudflared access curl "https://<your-domain>/api/import/ai-citations?site=<id>&date=<YYYY-MM-DD>" \
+  -X POST --data-binary @<export>.csv
+```
+
+Columns are detected by name: a URL or page column, a citations column, and an optional date column
+(without one, every row gets `date`, today by default). The response reports how many rows were
+imported and skipped.
+
+### Sync is slow or units are skipped
+
+- The GSC backfill writes up to `SYNC_DAILY_WRITE_BUDGET` rows per UTC day (80,000 by default, under
+  D1 Free's 100,000), so the full 16 months take days to weeks. That is expected.
+- A sync run that reports "Skipped ... after 3 interrupted attempts" hit a limit repeatedly, usually
+  the 10 ms CPU limit of Workers Free. Lower `GSC_ROWS_PER_DAY` (step 14), or move to Workers Paid.
+- "Nothing due." means the pass found no work; the next day's increments start after midnight UTC.
+- If no runs appear at all, the ready flag is not set: open the dashboard (or call `setup_status`)
+  once while the deployment is `ready`.
 
 ## Upgrading
 
@@ -788,7 +897,8 @@ Upstream `main` is always deployable. To upgrade:
 2. **[Agent or human]** sync your fork:
    - **Dashboard:** `https://github.com/<github-user>/searchkeep` → **Sync fork** → **Update branch**.
    - **CLI:** `gh repo sync <github-user>/searchkeep --source noobnooc/searchkeep --branch main`
-3. Workers Builds rebuilds, applies new migrations and deploys automatically.
+3. Workers Builds rebuilds and deploys automatically when the sync touched the watch paths. The
+   new Worker applies any new D1 migrations itself on its first request.
 
 If GitHub offers only **Discard commits**, your fork's `main` has commits of its own. Searchkeep keeps
 all configuration in secrets, so discarding is safe unless you changed code on purpose.

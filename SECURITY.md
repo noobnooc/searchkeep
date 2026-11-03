@@ -48,7 +48,10 @@ themselves (report those to the vendor).
 - The Bing API key can also submit URLs and remove sites. Treat it as a password.
 - Access team domain and AUD come only from secrets and are never learned from incoming requests.
   Every request's Access JWT is verified in the Worker, and the deployment locks itself if Access,
-  Managed OAuth or the policy are not set up correctly.
+  Managed OAuth or the policy are not set up correctly. The scheduled sync re-checks the Access
+  application through the Cloudflare API before every pass and locks again if it was loosened.
+- Local development mode (`SEARCHKEEP_DEV`, set by `pnpm dev`) skips Access only for requests to
+  `localhost`, `127.0.0.1` or `[::1]`; requests to any other host are treated as production.
 - External API access tokens are cached only in memory.
 
 If you suspect a credential has leaked: revoke it at its source (Cloudflare API Tokens page, the
