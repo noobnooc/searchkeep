@@ -2,3 +2,4 @@
 /.svelte-kit
 /.wrangler
 vite.config.ts.timestamp-*
+worker/files.generated.js

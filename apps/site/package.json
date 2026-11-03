@@ -6,7 +6,7 @@
   "description": "Marketing site and documentation for Searchkeep (searchkeep.dev).",
   "scripts": {
     "dev": "vite dev",
-    "build": "vite build",
+    "build": "vite build && node scripts/embed-build.mjs",
     "preview": "vite preview",
     "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
     "typecheck": "pnpm run check",

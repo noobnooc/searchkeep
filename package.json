@@ -7,7 +7,7 @@
     "node": ">=20"
   },
   "scripts": {
-    "build": "pnpm --filter @searchkeep/cloudflare run build",
+    "build": "pnpm --filter @searchkeep/cloudflare run build && pnpm --filter @searchkeep/site run build",
     "typecheck": "pnpm -r run typecheck",
     "lint": "pnpm run lint:deps && pnpm run lint:format",
     "lint:deps": "depcruise packages apps/cloudflare/src --config .dependency-cruiser.cjs",
