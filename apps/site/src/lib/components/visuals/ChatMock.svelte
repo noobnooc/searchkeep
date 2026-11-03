@@ -24,7 +24,7 @@
       <div class="tool">
         <span class="tool-icon"></span>
         <span class="tool-name">searchkeep · geo_funnel</span>
-        <code class="tool-args">stage: "crawled_not_cited", limit: 5</code>
+        <code class="tool-args">days: 28, sortBy: "crawled"</code>
         <span class="tool-ok">read-only</span>
       </div>
 
@@ -44,7 +44,7 @@
       <div class="tool small">
         <span class="tool-icon"></span>
         <span class="tool-name">searchkeep · ai_crawlers</span>
-        <code class="tool-args">path_contains: "/docs/sdk/v1"</code>
+        <code class="tool-args">pathContains: "/docs/sdk/v1", groupBy: ["crawler", "status"]</code>
       </div>
 
       <p>

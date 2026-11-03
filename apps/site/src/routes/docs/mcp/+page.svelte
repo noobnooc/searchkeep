@@ -29,8 +29,8 @@
   "name": "find_quick_wins",
   "arguments": {
     "site": "acme",
-    "start_date": "2026-08-01",
-    "end_date": "2026-10-31",
+    "start": "2026-08-01",
+    "end": "2026-10-31",
     "brand": "non_brand",
     "limit": 10
   }
@@ -44,7 +44,7 @@
     'Which docs pages have been losing clicks for the last three months, and why?',
     'Is any AI crawler getting 404s or 5xx from us? Group by crawler and path.',
     'Inspect https://acme.com/pricing in Google and tell me if it is indexed.',
-    'How much traffic did ChatGPT and Perplexity send us last week, and to which pages?',
+    'Which pages get the most visits from AI assistants, and do they also rank in search?',
   ];
 </script>
 
@@ -63,8 +63,8 @@
   </li>
   <li>
     <strong>Readiness:</strong> until your deployment is <code>ready</code> (see
-    <a href="/docs/security#readiness">Security</a>), <code>/mcp</code> returns an error that explains which check is
-    failing instead of serving tools.
+    <a href="/docs/security#readiness">Security</a>), <code>/mcp</code> returns a JSON-RPC error (HTTP 403) that explains
+    why it is locked and what to fix, instead of serving tools.
   </li>
 </ul>
 
@@ -117,16 +117,20 @@
 </Callout>
 
 <h2 id="common-parameters">Common parameters</h2>
-<p>Most tools share these parameters. All are optional unless a tool marks them required.</p>
+<p>
+  Most tools share these parameters; parameter names are camelCase. All are optional unless a tool marks them
+  required.
+</p>
 <div class="table-wrap">
   <table>
     <thead><tr><th>Parameter</th><th>Type</th><th>Meaning</th></tr></thead>
     <tbody>
-      <tr><td><code>site</code></td><td><code>string</code></td><td>Site <code>id</code> from <code>SITES</code>. May be omitted when only one site is configured.</td></tr>
-      <tr><td><code>start_date</code>, <code>end_date</code></td><td><code>YYYY-MM-DD</code></td><td>Inclusive UTC date range. Defaults to the last 28 days with complete data.</td></tr>
-      <tr><td><code>source</code></td><td><code>"gsc" | "bing"</code></td><td>Search engine for search-performance tools. Defaults to <code>gsc</code>.</td></tr>
+      <tr><td><code>site</code></td><td><code>string</code></td><td>Site <code>id</code> or domain from <code>SITES</code>. May be omitted when only one site is configured.</td></tr>
+      <tr><td><code>start</code>, <code>end</code></td><td><code>YYYY-MM-DD</code></td><td>Inclusive UTC date range. <code>end</code> defaults to the latest day with data, <code>start</code> to <code>end</code> minus <code>days</code> plus one.</td></tr>
+      <tr><td><code>days</code></td><td><code>number</code></td><td>Window length when <code>start</code> is omitted. Defaults to 28 (7 for <code>ai_crawlers</code>).</td></tr>
+      <tr><td><code>source</code></td><td><code>"gsc" | "bing"</code></td><td>Search engine for search-performance tools. Defaults to <code>gsc</code>. Bing data is weekly, so Bing ranges are aligned to whole weeks.</td></tr>
       <tr><td><code>brand</code></td><td><code>"all" | "brand" | "non_brand"</code></td><td>Brand split using the configured brand regex. Defaults to <code>all</code>.</td></tr>
-      <tr><td><code>limit</code></td><td><code>number</code></td><td>Maximum rows returned. Results are aggregated on the server and capped.</td></tr>
+      <tr><td><code>limit</code></td><td><code>number</code></td><td>Maximum rows returned (at most 500). Results are aggregated on the server and capped.</td></tr>
     </tbody>
   </table>
 </div>
@@ -135,9 +139,11 @@
 
 <h2 id="tools">Tool reference</h2>
 <p>
-  All tools are read-only and annotated as such, except <code>submit_sitemap</code>, which is off unless you
-  <a href="/docs/configuration#writes">enable writes</a>. Tools read from D1 unless noted, so they are fast and do not
-  spend your API quotas.
+  All tools are read-only and annotated as such, except <code>submit_sitemap</code>, which is not registered unless you
+  <a href="/docs/configuration#writes">enable writes</a>. Tools read from D1 unless noted (<code>inspect_url</code>,
+  <code>list_sitemaps</code> with <code>live</code>, and the probes of <code>setup_status</code> call the source APIs),
+  so they are fast and do not spend your API quotas. Every result is JSON; errors come back as
+  <code>{'{"error": "…"}'}</code> with an explanation.
 </p>
 
 {#each TOOLS as t (t.name)}

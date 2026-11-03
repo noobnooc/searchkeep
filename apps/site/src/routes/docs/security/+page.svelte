@@ -43,9 +43,10 @@ Cf-Access-Jwt-Assertion: eyJhbGciOiJSUzI1NiIsImtpZCI6Ij...
 <p>
   The policy should allow only your own email or a short list of specific emails. Searchkeep reads your Access
   application and policies through the Cloudflare API (with <strong>Access: Apps and Policies Read</strong>) and refuses
-  to serve data if a policy allows everyone or a public email domain such as <code>gmail.com</code>,
-  <code>outlook.com</code> or <code>icloud.com</code>. The result of that check is cached for a few minutes and refreshed
-  when the dashboard opens.
+  to serve data if a policy lets in Everyone, a public email domain such as <code>gmail.com</code>,
+  <code>outlook.com</code> or <code>icloud.com</code>, anyone who can log in with an identity provider, every IP address
+  or a whole country, or if it uses Bypass or Service Auth. The result of that check is cached for up to five minutes;
+  <code>GET /api/status?refresh=1</code> re-checks immediately.
 </p>
 
 <h2 id="oauth">Managed OAuth for MCP</h2>
@@ -114,24 +115,31 @@ Cf-Access-Jwt-Assertion: eyJhbGciOiJSUzI1NiIsImtpZCI6Ij...
 <h3 id="cron-flag">Locked until ready, including the cron</h3>
 <p>
   Cron Triggers are invoked by Cloudflare internally, carry no JWT and do not pass through Access. To keep the sync from
-  running on an unprotected deployment, the Worker records a <strong>ready flag</strong> in D1 the first time a request
-  is fully <code>ready</code>, and clears it whenever a check fails. The cron syncs only while the flag is set.
+  running on an unprotected deployment, the Worker records a <strong>ready flag</strong> in D1 the first time an
+  authenticated request is fully <code>ready</code>, and clears it whenever an authenticated request sees a failing
+  check. The cron syncs only while the flag is set, and every pass (every 15 minutes) re-reads the Access application
+  through the API first: if Access was turned off or the policy loosened, it clears the flag and does not sync.
+  Anonymous requests can never set or clear the flag.
 </p>
 
 <h2 id="public">Public endpoints</h2>
-<p>Two paths are served without a JWT, and neither exposes data:</p>
+<p>Three paths are served without a JWT, and none exposes data:</p>
 <div class="table-wrap">
   <table>
     <thead><tr><th>Path</th><th>Returns</th></tr></thead>
     <tbody>
       <tr><td><code>/setup</code></td><td>Generic setup steps. No data, no configuration values, no source status, and no action that writes anything.</td></tr>
       <tr><td><code>/healthz</code></td><td><code>{'{"ok":true}'}</code> and nothing else. Useful for uptime checks.</td></tr>
+      <tr><td><code>/robots.txt</code></td><td><code>Disallow: /</code> for every crawler.</td></tr>
     </tbody>
   </table>
 </div>
 <p>
-  Since Access covers the whole hostname, these are normally behind the Access login too. If you want an external
-  uptime monitor to reach <code>/healthz</code>, add an Access <strong>Bypass</strong> policy for that path only.
+  Since Access covers the whole hostname, these are behind the Access login too. Do not add a Bypass or Service Auth
+  policy to the Searchkeep application to open them up: Searchkeep treats either as too broad and locks itself
+  (<code>policy_too_broad</code>). Everything else, <code>/</code>, <code>/api/*</code> and <code>/mcp</code>, needs a
+  valid Access JWT; without one, <code>/</code> serves the same setup guide, <code>/api/*</code> returns 403 and
+  <code>/mcp</code> returns a JSON-RPC error.
 </p>
 
 <h2 id="credentials">Credentials</h2>
@@ -140,6 +148,7 @@ Cf-Access-Jwt-Assertion: eyJhbGciOiJSUzI1NiIsImtpZCI6Ij...
   <li>Searchkeep never logs secret values; <code>setup_status</code> reports presence only.</li>
   <li>The GSC service account is a <strong>Restricted</strong> user unless you opt into writes.</li>
   <li>The Cloudflare token has read permissions only.</li>
+  <li>Configuration problems are reported by <code>setup_status</code> without ever echoing a secret’s value.</li>
   <li>The Bing API key cannot be scoped down; it can submit URLs and remove sites. Treat it like a password and rotate it if exposed.</li>
   <li>Third-party API access tokens (for example Google’s OAuth access token) are cached in memory only.</li>
 </ul>

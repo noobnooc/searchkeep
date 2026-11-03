@@ -1,12 +1,12 @@
 <figure
   class="arch"
-  aria-label="Architecture diagram. Three callers reach one Worker named searchkeep in your Cloudflare account: MCP clients such as Claude, Cursor and ChatGPT call /mcp, you open the dashboard in a browser, and Cron Triggers start the daily sync. MCP and dashboard requests pass through Cloudflare Access first; the cron is triggered internally. All three entrances call the same core, which reads and writes D1 through the Store interface and calls Google Search Console, Bing Webmaster Tools and Cloudflare APIs through source adapters."
+  aria-label="Architecture diagram. Three callers reach one Worker named searchkeep in your Cloudflare account: MCP clients such as Claude, Cursor and ChatGPT call /mcp, you open the dashboard in a browser, and Cron Triggers start a sync pass every 15 minutes. MCP and dashboard requests pass through Cloudflare Access first; the cron is triggered internally. All three entrances call the same core, which reads and writes D1 through the Store interface and calls Google Search Console, Bing Webmaster Tools and Cloudflare APIs through source adapters."
 >
   <div aria-hidden="true" class="inner">
     <div class="grid3 callers">
       <div class="caller"><span class="k">MCP clients</span><span class="s">Claude · Cursor · ChatGPT</span></div>
       <div class="caller"><span class="k">You</span><span class="s">in a browser</span></div>
-      <div class="caller"><span class="k">Cron Triggers</span><span class="s">17 3 * * *</span></div>
+      <div class="caller"><span class="k">Cron Triggers</span><span class="s">*/15 * * * *</span></div>
     </div>
 
     <div class="grid3 links"><i class="v"></i><i class="v"></i><i class="v"></i></div>

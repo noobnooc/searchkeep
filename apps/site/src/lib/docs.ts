@@ -52,9 +52,10 @@ export const DOCS: DocSection[] = [
           { id: 'access', title: '6. Protect it with Access' },
           { id: 'credentials', title: '7. Add credentials' },
           { id: 'cred-cloudflare', title: 'Cloudflare', level: 3 },
+          { id: 'cred-sites', title: 'Sites', level: 3 },
           { id: 'cred-gsc', title: 'Google Search Console', level: 3 },
           { id: 'cred-bing', title: 'Bing Webmaster Tools', level: 3 },
-          { id: 'cred-sites', title: 'Sites', level: 3 },
+          { id: 'cred-optional', title: 'Optional settings', level: 3 },
           { id: 'verify', title: '8. Verify and sync' },
           { id: 'with-an-agent', title: 'Deploy with an agent' },
           { id: 'troubleshooting', title: 'Troubleshooting' },
@@ -64,13 +65,14 @@ export const DOCS: DocSection[] = [
         path: '/docs/configuration',
         title: 'Configuration',
         description:
-          'Every Worker Secret Searchkeep reads, the SITES JSON format, brand regex, write access and how to set secrets with wrangler or the dashboard.',
+          'Every Worker Secret Searchkeep reads, the SITES JSON format, brand regex, write access, sync budgets, how to set secrets with wrangler or the dashboard, and local development.',
         toc: [
           { id: 'where-config-lives', title: 'Where configuration lives' },
           { id: 'secrets', title: 'Secrets reference' },
           { id: 'sites', title: 'SITES' },
           { id: 'brand', title: 'Brand and non-brand' },
           { id: 'writes', title: 'Enabling writes' },
+          { id: 'sync-budgets', title: 'Sync budgets' },
           { id: 'setting', title: 'Setting and rotating secrets' },
           { id: 'local', title: 'Local development' },
         ],
@@ -85,7 +87,7 @@ export const DOCS: DocSection[] = [
         title: 'MCP server',
         nav: 'MCP server & tools',
         description:
-          'Connect Claude, Claude Code, Cursor, ChatGPT or any MCP client to your Searchkeep endpoint, and the full reference for all 13 tools and their parameters.',
+          'Connect Claude, Claude Code, Cursor, ChatGPT or any MCP client to your Searchkeep endpoint, and the full reference for every tool, its parameters and defaults.',
         toc: [
           { id: 'endpoint', title: 'Endpoint and auth' },
           { id: 'connect', title: 'Connect a client' },
@@ -103,13 +105,14 @@ export const DOCS: DocSection[] = [
         path: '/docs/data-sources',
         title: 'Data sources',
         description:
-          'What Searchkeep pulls from Google Search Console, Bing Webmaster Tools and Cloudflare, the credentials each needs, how syncing works and every known limitation.',
+          'What Searchkeep pulls from Google Search Console, Bing Webmaster Tools and Cloudflare, the credentials each needs, how syncing works, how AI citations are imported and every known limitation.',
         toc: [
           { id: 'overview', title: 'Overview' },
           { id: 'sync', title: 'How syncing works' },
           { id: 'gsc', title: 'Google Search Console' },
           { id: 'bing', title: 'Bing Webmaster Tools' },
           { id: 'cloudflare', title: 'Cloudflare' },
+          { id: 'ai-citations', title: 'Importing AI citations' },
           { id: 'geo-funnel', title: 'How the GEO funnel is built' },
           { id: 'caveats', title: 'Reading the numbers' },
         ],

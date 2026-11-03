@@ -42,7 +42,7 @@ export const softwareApplication: Json = {
   featureList: [
     'GEO funnel per page: crawled by AI, cited by AI, clicked from AI',
     'Unlimited history beyond the 16 months kept by Google Search Console',
-    'MCP server with 13 read-only analysis tools',
+    'MCP server with 12 read-only analysis tools and one opt-in write',
     'Dashboard for Google Search Console, Bing Webmaster Tools and Cloudflare data',
     'Self-hosted in your own Cloudflare account, protected by Cloudflare Access',
   ],
