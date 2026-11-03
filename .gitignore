@@ -1,0 +1,14 @@
+node_modules/
+dist/
+.wrangler/
+.svelte-kit/
+.dev.vars
+.dev.vars.*
+.env
+.env.*
+!.env.example
+*.log
+.DS_Store
+coverage/
+CLAUDE.md
+CLAUDE.local.md
