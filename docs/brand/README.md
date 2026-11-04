@@ -82,3 +82,12 @@ Primary buttons are Night on light and white on dark; Signal stays a point, not 
 In charts, data is drawn in ink; the Signal dot marks the latest point, and a sequential ramp (the
 GEO funnel) goes from ink to Signal at its last step. Status colors (amber for "needs a human",
 red for errors, cool blue for agent notes) stay distinct from Signal.
+
+## Third-party marks
+
+The website shows the marks of the services Searchkeep works with (Google Search Console,
+Cloudflare, Claude, Cursor) only to name those integrations. The paths come from
+[Simple Icons](https://simpleicons.org) (CC0) and live in `apps/site/src/lib/components/Icon.svelte`;
+the Microsoft Bing and OpenAI marks come from earlier Simple Icons releases (11.15.0 and 13.21.0),
+since later ones dropped them. The marks belong to their owners. Draw them in `currentColor`, at
+text size, never larger than our own mark.

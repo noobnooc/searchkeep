@@ -558,14 +558,14 @@ export const FAQS: Faq[] = [
  * docs/deploy.md, which the prompt points to. README.md carries the same prompt; scripts/embed-build.mjs
  * fails the build if they differ in anything but whitespace.
  */
-export const AGENT_PREREQS: { icon: 'github' | 'cloud'; title: string; text: string }[] = [
+export const AGENT_PREREQS: { icon: 'github' | 'cloudflare'; title: string; text: string }[] = [
   {
     icon: 'github',
     title: 'GitHub access',
     text: 'The GitHub MCP server or the gh CLI, signed in as you, so the agent can fork the repository.',
   },
   {
-    icon: 'cloud',
+    icon: 'cloudflare',
     title: 'Cloudflare access',
     text: 'The Cloudflare MCP server signed in as you, or a short-lived API token that can edit Workers Scripts, Workers Builds and Access apps and read your zones.',
   },

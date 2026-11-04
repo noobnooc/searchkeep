@@ -56,7 +56,9 @@
 
     <div class="composer">
       <span>Ask about your search data…</span>
-      <span class="send"></span>
+      <span class="send" aria-hidden="true">
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M6 11l6-6 6 6" /></svg>
+      </span>
     </div>
   </div>
 </Window>
@@ -212,12 +214,15 @@
     color: var(--text-4);
     font-size: 13px;
   }
+  /* The send button: an up arrow, ink on light and white on dark. */
   .send {
-    width: 26px;
-    height: 26px;
+    display: grid;
+    place-items: center;
+    width: 28px;
+    height: 28px;
     border-radius: 8px;
     background: var(--accent-fill);
-    opacity: 0.9;
+    color: var(--accent-ink);
   }
   @media (max-width: 480px) {
     .chat {
