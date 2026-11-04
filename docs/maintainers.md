@@ -56,8 +56,8 @@ Repository → **Settings** → **Rules** → **Rulesets** → **New ruleset** �
   - **Require review from Code Owners**.
   - **Dismiss stale pull request approvals when new commits are pushed**.
   - **Require conversation resolution before merging**.
-- **Require status checks to pass**: add the check **`ci`** (the job in
-  [`.github/workflows/ci.yml`](../.github/workflows/ci.yml); it appears in the list after the
+- **Require status checks to pass**: add the checks **`ci`** and **`workers-builds`** (the jobs in
+  [`.github/workflows/ci.yml`](../.github/workflows/ci.yml); they appear in the list after the
   workflow has run once). Turn on **Require branches to be up to date before merging**.
 - **Bypass list:** empty, or repository admins only. Never add the agent identity.
 
@@ -69,8 +69,8 @@ Also under **Settings** → **General**: allow **Squash merging**, turn on **Aut
 branches**, and under **Settings** → **Code security** enable **Private vulnerability reporting**,
 **Dependabot alerts** and **Dependabot security updates**.
 
-**Verify:** a test PR from the agent shows "Review required" from a code owner and the `ci` check as
-required, and the merge button stays disabled until both pass.
+**Verify:** a test PR from the agent shows "Review required" from a code owner and the `ci` and
+`workers-builds` checks as required, and the merge button stays disabled until they pass.
 
 ## 3. Labels
 
@@ -116,7 +116,12 @@ scheduler works. Run it at most a few times a day; once a day is the default.
 Other agents can run the same skill by following the file as a runbook.
 
 Before the first run, create the first log issue yourself or let the agent do it: title
-`Agent log: YYYY-MM` (current UTC month), label `agent-log`, pinned.
+`Agent log: YYYY-MM` (current UTC month), label `agent-log`, pinned. (`Agent log: 2026-11` already
+exists; pin it from the issue page.)
+
+The maintainer's Claude account already has a **disabled** daily scheduled task named "Searchkeep
+maintain (daily)". Enable it only after step 1: under your own identity the skill stops at step 0b
+on purpose, because a maintainer must never be the agent.
 
 **Verify:** after a run, the month's log issue has a new comment with a summary, next steps and a
 hidden `agent-state` block, and no stale lock comment remains.
@@ -159,8 +164,8 @@ people who want to pin a release.
 ## 7. The website (searchkeep.dev)
 
 The website in `apps/site` is deployed by the project, never by users: their Workers Builds watch
-paths (`apps/cloudflare/**`, `packages/**`, `pnpm-lock.yaml`) leave it out, and the workflow below
-is skipped in forks.
+paths (`apps/cloudflare/*`, `packages/*`, `pnpm-lock.yaml`) leave it out, and its Workers Builds
+connection exists only in the project's Cloudflare account.
 
 **How it is hosted.** The site is a small Worker, `searchkeep-site`
 ([`apps/site/wrangler.jsonc`](../apps/site/wrangler.jsonc)), that serves the prerendered SvelteKit
@@ -171,21 +176,15 @@ redirects `www.searchkeep.dev` and other subdomains to it, and serves canonical 
 or trailing slashes. Both hostnames are custom domains declared in `wrangler.jsonc`; `workers.dev`
 and preview URLs are off.
 
-**Automatic deploys.** [`.github/workflows/deploy-site.yml`](../.github/workflows/deploy-site.yml)
-builds and deploys the site on every push to `main` that changes `apps/site/**`, `pnpm-lock.yaml` or
-the workflow itself. It can also be started by hand: **Actions** → **Deploy website** → **Run
-workflow**. It needs two repository secrets (**Settings** → **Secrets and variables** →
-**Actions**):
+**Automatic deploys (Workers Builds).** The `searchkeep-site` Worker is connected to this
+repository with Workers Builds: root directory `apps/site`, build command `pnpm run build`, deploy
+command `npx wrangler deploy`, branch `main`, watch paths `apps/site/*` and `pnpm-lock.yaml`. Every
+push to `main` that touches those paths rebuilds and redeploys searchkeep.dev; the build status shows
+up as a check on the commit. No repository secrets are involved. To see or change it: Cloudflare
+dashboard → **Workers & Pages** → `searchkeep-site` → **Settings** → **Builds**. To redeploy by
+hand: the same page → **Deployments** → **Retry build** (or start a build for `main`).
 
-| Secret                  | Value                                                                                                                                |
-| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
-| `CLOUDFLARE_API_TOKEN`  | API token with **Workers Scripts: Edit** on the account, and **Workers Routes: Edit** and **DNS: Edit** on the `searchkeep.dev` zone |
-| `CLOUDFLARE_ACCOUNT_ID` | The account that owns the `searchkeep.dev` zone                                                                                      |
-
-Until the token is set, the job logs "CLOUDFLARE_API_TOKEN is not set; skipping the website deploy."
-and succeeds without deploying.
-
-**Manual deploy** (maintainers only, with the same token and account ID exported in the shell):
+**Manual deploy** (maintainers only, from a machine with Cloudflare credentials for the account):
 
 ```sh
 pnpm --filter @searchkeep/site run build
@@ -198,6 +197,6 @@ readiness states) live in `apps/site/src/lib/content.ts` and feed the docs pages
 `packages/core/src/config.ts` or `apps/cloudflare`, and keep `/docs/deploy` in line with
 [docs/deploy.md](deploy.md).
 
-**Verify:** the latest **Deploy website** run succeeded; `curl -sI https://searchkeep.dev/` returns
+**Verify:** the latest `searchkeep-site` build in Workers Builds succeeded; `curl -sI https://searchkeep.dev/` returns
 `200`; `curl -sI https://www.searchkeep.dev/` returns `301` with `location: https://searchkeep.dev/`;
 and `https://searchkeep.dev/llms.txt` shows the current version.

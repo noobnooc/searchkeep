@@ -145,7 +145,7 @@ cloudflared access curl https://searchkeep.example.com/api/sync -X POST`;
       <tr><td>Deploy command</td><td><code>pnpm run deploy</code></td></tr>
       <tr><td>Root directory</td><td><code>apps/cloudflare</code></td></tr>
       <tr><td>Production branch</td><td><code>main</code>; builds for other branches off</td></tr>
-      <tr><td>Build watch paths (include)</td><td><code>apps/cloudflare/**</code>, <code>packages/**</code>, <code>pnpm-lock.yaml</code></td></tr>
+      <tr><td>Build watch paths (include)</td><td><code>apps/cloudflare/*</code>, <code>packages/*</code>, <code>pnpm-lock.yaml</code></td></tr>
     </tbody>
   </table>
 </div>
