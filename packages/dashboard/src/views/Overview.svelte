@@ -51,7 +51,7 @@
 
   function seriesFor(metric: 'clicks' | 'impressions'): LineSeries[] {
     if (!split) return [];
-    const out: LineSeries[] = [{ key: 'cur', label: 'Current period', values: split.cur.map((r) => (r ? r[metric] : null)), color: 'var(--accent)', area: true }];
+    const out: LineSeries[] = [{ key: 'cur', label: 'Current period', values: split.cur.map((r) => (r ? r[metric] : null)), color: 'var(--chart)', area: true }];
     if (split.prev.some((r) => r !== null)) {
       out.push({ key: 'prev', label: 'Previous period', values: split.prev.map((r) => (r ? r[metric] : null)), color: 'var(--prev)', dates: split.prevDates });
     }
@@ -114,7 +114,7 @@
       {#snippet actions()}
         {#if hasPrev}
           <div class="legend" aria-hidden="true">
-            <span><i class="lk" style:background="var(--accent)"></i>Current</span>
+            <span><i class="lk" style:background="var(--chart)"></i>Current</span>
             <span><i class="lk" style:background="var(--prev)"></i>Previous</span>
           </div>
         {/if}

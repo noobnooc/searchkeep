@@ -221,7 +221,7 @@
   }
   .doc-head h1 {
     font-size: clamp(2rem, 1.5rem + 2vw, 2.75rem);
-    letter-spacing: -0.036em;
+    letter-spacing: -0.024em;
     line-height: 1.08;
   }
   .doc-head .lead {

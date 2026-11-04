@@ -3,6 +3,9 @@
  * generic steps — no data, no configuration values, no source status — and
  * offers no action that could write anything.
  */
+/** The Searchkeep app icon: the Horizon mark on a Night tile (docs/brand/icon.svg). */
+const MARK_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="40" height="40" aria-hidden="true"><rect width="64" height="64" rx="15" fill="#0b0c0e"/><svg x="8.96" y="8.96" width="46.08" height="46.08" viewBox="0 0 48 48" fill="none"><line x1="17" y1="7" x2="17" y2="41" stroke="#ffffff" stroke-opacity="0.4" stroke-width="2" stroke-dasharray="2.5 3"/><polyline points="5,34 11,27 17,30 24,19 31,24 38,13" stroke="#ffffff" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/><circle cx="38" cy="13" r="5" fill="#ff5b1f"/></svg></svg>`;
+
 export function setupPage(state: 'no_access' | 'oauth_disabled' | 'policy_too_broad' = 'no_access'): string {
   const title = 'Searchkeep is locked';
   const lead =
@@ -19,11 +22,13 @@ export function setupPage(state: 'no_access' | 'oauth_disabled' | 'policy_too_br
 <meta name="robots" content="noindex, nofollow">
 <title>${title}</title>
 <style>
-  :root { color-scheme: light dark; --bg:#0b0c0e; --fg:#e8e9ec; --muted:#9a9ca3; --line:#23252b; --card:#121317; --accent:#7c8cff; }
-  @media (prefers-color-scheme: light) { :root { --bg:#fafafa; --fg:#141518; --muted:#5d6068; --line:#e4e5e8; --card:#fff; --accent:#4b5cf0; } }
+  :root { color-scheme: light dark; --bg:#0b0c0e; --fg:#e8e9ec; --muted:#9a9ca3; --line:#23252b; --card:#121317; --accent:#ff7a45; }
+  @media (prefers-color-scheme: light) { :root { --bg:#f6f7f9; --fg:#0b0c0e; --muted:#5b616b; --line:#e4e6ea; --card:#fff; --accent:#c2410c; } }
   * { box-sizing: border-box; }
   body { margin:0; background:var(--bg); color:var(--fg); font:15px/1.6 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Inter, sans-serif; }
   main { max-width: 720px; margin: 0 auto; padding: 64px 20px 80px; }
+  .brandrow { display:flex; align-items:center; gap:14px; }
+  .brandrow svg { border-radius: 11px; box-shadow: 0 8px 24px -8px rgba(49,235,145,.5); }
   .badge { display:inline-flex; gap:8px; align-items:center; font-size:12px; letter-spacing:.02em; color:var(--muted); border:1px solid var(--line); border-radius:999px; padding:4px 10px; }
   .dot { width:7px; height:7px; border-radius:50%; background:#f5a524; box-shadow:0 0 0 3px rgba(245,165,36,.15); }
   h1 { font-size: 32px; letter-spacing: -0.02em; line-height:1.15; margin: 20px 0 12px; }
@@ -40,7 +45,7 @@ export function setupPage(state: 'no_access' | 'oauth_disabled' | 'policy_too_br
 </head>
 <body>
 <main>
-  <span class="badge"><span class="dot"></span>Setup required</span>
+  <div class="brandrow">${MARK_SVG}<span class="badge"><span class="dot"></span>Setup required</span></div>
   <h1>${title}</h1>
   <p class="lead">${lead}</p>
   <ol>

@@ -72,9 +72,7 @@
     padding: clamp(16px, 3vw, 32px);
     border: 1px solid var(--line);
     border-radius: var(--radius-lg);
-    background:
-      radial-gradient(60% 50% at 50% 40%, var(--accent-soft), transparent 70%),
-      var(--bg-elev);
+    background: var(--bg-elev);
     font-size: 13px;
     color: var(--text-2);
     overflow: hidden;
@@ -155,8 +153,7 @@
     width: 5px;
     height: 5px;
     border-radius: 50%;
-    background: var(--accent);
-    box-shadow: 0 0 8px var(--accent);
+    background: var(--signal);
     animation: flow 2.4s linear infinite;
     opacity: 0;
   }
@@ -260,7 +257,7 @@
   }
   .core {
     border-color: var(--accent-line);
-    background: linear-gradient(180deg, var(--accent-soft), transparent), var(--surface);
+    background: var(--surface);
   }
   .db {
     border-style: solid;

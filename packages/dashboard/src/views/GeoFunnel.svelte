@@ -152,7 +152,7 @@
     padding: 16px;
     border-radius: var(--radius);
     border: 1px solid var(--accent-line);
-    background: linear-gradient(180deg, var(--accent-wash), transparent 140%), var(--surface);
+    background: var(--surface);
     flex-wrap: wrap;
   }
   .callout-icon {

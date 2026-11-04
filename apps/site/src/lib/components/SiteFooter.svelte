@@ -75,7 +75,6 @@
     border-top: 1px solid var(--line);
     padding-block: 56px 32px;
     font-size: var(--fs-sm);
-    background: linear-gradient(180deg, transparent, light-dark(rgb(0 0 0 / 0.015), rgb(255 255 255 / 0.012)));
   }
   .top {
     display: grid;

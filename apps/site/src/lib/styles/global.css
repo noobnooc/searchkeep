@@ -6,51 +6,53 @@
 :root {
   color-scheme: dark light;
 
-  /* Surfaces */
-  --bg: light-dark(#fbfbfa, #08090a);
-  --bg-elev: light-dark(#ffffff, #0d0e10);
-  --surface: light-dark(#ffffff, #111214);
-  --surface-2: light-dark(#f4f4f2, #17181b);
-  --surface-3: light-dark(#ececea, #1e1f23);
-  --overlay: light-dark(rgb(251 251 250 / 0.72), rgb(8 9 10 / 0.66));
+  /* Surfaces: Night (#0b0c0e) and Fog (#f4f5f7), cool neutrals */
+  --bg: light-dark(#f6f7f9, #0b0c0e);
+  --bg-elev: light-dark(#ffffff, #0f1013);
+  --surface: light-dark(#ffffff, #121316);
+  --surface-2: light-dark(#eef0f3, #17191c);
+  --surface-3: light-dark(#e5e8ec, #1e2024);
+  --overlay: light-dark(rgb(246 247 249 / 0.76), rgb(11 12 14 / 0.7));
 
   /* Lines */
-  --line: light-dark(rgb(15 17 20 / 0.08), rgb(255 255 255 / 0.07));
-  --line-2: light-dark(rgb(15 17 20 / 0.13), rgb(255 255 255 / 0.11));
-  --line-3: light-dark(rgb(15 17 20 / 0.2), rgb(255 255 255 / 0.18));
+  --line: light-dark(rgb(11 12 14 / 0.08), rgb(255 255 255 / 0.07));
+  --line-2: light-dark(rgb(11 12 14 / 0.13), rgb(255 255 255 / 0.11));
+  --line-3: light-dark(rgb(11 12 14 / 0.22), rgb(255 255 255 / 0.2));
 
   /* Ink */
-  --text: light-dark(#0c0d0f, #f3f4f5);
-  --text-2: light-dark(#3f434a, #b3b7be);
-  --text-3: light-dark(#5f646d, #8b9099);
-  --text-4: light-dark(#80858e, #646973);
+  --text: light-dark(#0b0c0e, #f3f4f6);
+  --text-2: light-dark(#3d424a, #b4b8bf);
+  --text-3: light-dark(#5b616b, #8a9099);
+  --text-4: light-dark(#7d838d, #646a73);
 
-  /* Accent: a cool mint-emerald */
-  --accent: light-dark(oklch(0.5 0.12 162), oklch(0.87 0.15 162));
-  --accent-strong: light-dark(oklch(0.42 0.11 162), oklch(0.92 0.13 162));
-  --accent-fill: light-dark(oklch(0.8 0.16 160), oklch(0.86 0.17 160));
-  --accent-fill-hover: light-dark(oklch(0.76 0.17 160), oklch(0.9 0.16 160));
-  --accent-ink: #03140c;
-  --accent-soft: light-dark(oklch(0.8 0.16 160 / 0.16), oklch(0.86 0.17 160 / 0.12));
-  --accent-line: light-dark(oklch(0.55 0.13 160 / 0.35), oklch(0.86 0.17 160 / 0.3));
-  --accent-glow: light-dark(oklch(0.8 0.16 160 / 0.22), oklch(0.8 0.18 160 / 0.2));
-  --cool: light-dark(oklch(0.5 0.1 230), oklch(0.8 0.1 220));
-  --cool-glow: light-dark(oklch(0.7 0.1 230 / 0.16), oklch(0.6 0.13 250 / 0.18));
+  /* Signal: the dot at the end of the kept line. Used sparingly, never as a wash. */
+  --signal: #ff5b1f;
+  --accent: light-dark(#c2410c, #ff7a45);
+  --accent-strong: light-dark(#9a3412, #ff9b70);
+  /* Primary actions are ink on light and white on dark; the signal stays a point. */
+  --accent-fill: light-dark(#0b0c0e, #f3f4f6);
+  --accent-fill-hover: light-dark(#2a2d33, #ffffff);
+  --accent-ink: light-dark(#ffffff, #0b0c0e);
+  --accent-soft: light-dark(rgb(255 91 31 / 0.1), rgb(255 91 31 / 0.14));
+  --accent-line: light-dark(rgb(194 65 12 / 0.32), rgb(255 122 69 / 0.34));
+  --accent-glow: light-dark(rgb(11 12 14 / 0.12), rgb(0 0 0 / 0.55));
+  --cool: light-dark(oklch(0.5 0.1 245), oklch(0.8 0.09 240));
+  --cool-glow: transparent;
 
   /* Status (reserved for status only) */
   --warn: light-dark(oklch(0.55 0.14 70), oklch(0.83 0.14 80));
   --warn-soft: light-dark(oklch(0.8 0.14 80 / 0.16), oklch(0.83 0.14 80 / 0.1));
-  --bad: light-dark(oklch(0.53 0.18 25), oklch(0.74 0.15 25));
-  --bad-soft: light-dark(oklch(0.7 0.18 25 / 0.12), oklch(0.74 0.15 25 / 0.1));
+  --bad: light-dark(oklch(0.52 0.19 18), oklch(0.72 0.16 18));
+  --bad-soft: light-dark(oklch(0.7 0.18 18 / 0.12), oklch(0.72 0.16 18 / 0.1));
 
   /* Code */
-  --code-bg: light-dark(#f6f6f4, #0c0d0f);
+  --code-bg: light-dark(#f3f4f6, #0e0f12);
   --t-comment: light-dark(#7c818a, #6b717c);
-  --t-string: light-dark(oklch(0.48 0.12 162), oklch(0.85 0.12 162));
+  --t-string: light-dark(#a8420f, #ffa47a);
   --t-prop: light-dark(oklch(0.48 0.1 240), oklch(0.82 0.08 230));
   --t-keyword: light-dark(oklch(0.5 0.15 300), oklch(0.8 0.11 300));
   --t-number: light-dark(oklch(0.55 0.14 60), oklch(0.84 0.11 70));
-  --t-fn: light-dark(#0c0d0f, #f3f4f5);
+  --t-fn: light-dark(#0b0c0e, #f3f4f6);
 
   /* Elevation */
   --shadow-sm: 0 1px 2px light-dark(rgb(0 0 0 / 0.06), rgb(0 0 0 / 0.4));
@@ -60,7 +62,8 @@
 
   /* Type */
   --font-sans: 'Inter Variable', Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
-  --font-mono: 'JetBrains Mono Variable', 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --font-display: 'Inter Tight Variable', 'Inter Variable', Inter, ui-sans-serif, system-ui, sans-serif;
+  --font-mono: 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   --fs-xs: 0.75rem;
   --fs-sm: 0.875rem;
   --fs-base: 1rem;
@@ -168,8 +171,15 @@ h4 {
   text-wrap: balance;
   color: var(--text);
 }
+h1,
+h2 {
+  font-family: var(--font-display);
+}
 h1 {
-  letter-spacing: -0.038em;
+  letter-spacing: -0.022em;
+}
+h2 {
+  letter-spacing: -0.018em;
 }
 p,
 li {
@@ -283,7 +293,7 @@ hr {
 .section-head h2 {
   margin-top: 14px;
   font-size: var(--fs-3xl);
-  letter-spacing: -0.034em;
+  letter-spacing: -0.022em;
   line-height: 1.06;
 }
 .section-head p {
@@ -306,11 +316,9 @@ hr {
 .muted {
   color: var(--text-3);
 }
-.gradient-text {
-  background: linear-gradient(180deg, var(--text) 30%, light-dark(#5b6068, #8d929b));
-  -webkit-background-clip: text;
-  background-clip: text;
-  color: transparent;
+/* The signal dot: a full stop in the brand's one bright color. */
+.signal {
+  color: var(--signal);
 }
 
 /* ---------- Buttons ---------- */
@@ -349,16 +357,11 @@ hr {
   background: var(--accent-fill);
   color: var(--accent-ink);
   box-shadow:
-    0 0 0 1px light-dark(oklch(0.6 0.15 160 / 0.5), oklch(0.95 0.1 160 / 0.4)) inset,
-    0 1px 0 rgb(255 255 255 / 0.35) inset,
-    0 8px 24px -8px var(--accent-glow);
+    0 1px 0 light-dark(rgb(255 255 255 / 0.14), rgb(255 255 255 / 0.6)) inset,
+    var(--shadow-sm);
 }
 .btn-primary:hover {
   background: var(--accent-fill-hover);
-  box-shadow:
-    0 0 0 1px light-dark(oklch(0.6 0.15 160 / 0.6), oklch(0.95 0.1 160 / 0.5)) inset,
-    0 1px 0 rgb(255 255 255 / 0.4) inset,
-    0 10px 32px -8px var(--accent-glow);
 }
 .btn-secondary {
   background: var(--surface-2);
@@ -386,7 +389,7 @@ hr {
   position: relative;
   border: 1px solid var(--line);
   border-radius: var(--radius-lg);
-  background: linear-gradient(180deg, light-dark(#fff, rgb(255 255 255 / 0.025)), transparent), var(--bg-elev);
+  background: var(--bg-elev);
 }
 
 /* ---------- Pills / badges ---------- */

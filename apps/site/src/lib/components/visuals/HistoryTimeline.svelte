@@ -139,16 +139,15 @@
   }
   .backfill,
   .sw.backfill {
-    background: color-mix(in oklch, var(--accent-fill) 50%, var(--surface-3));
+    background: color-mix(in oklch, var(--accent-fill) 62%, var(--surface-3));
   }
   .kept,
   .sw.kept {
     background: var(--accent-fill);
-    box-shadow: 0 0 24px -4px var(--accent-glow);
   }
   .future {
-    background: linear-gradient(90deg, var(--accent-fill), transparent);
-    opacity: 0.55;
+    box-shadow: inset 0 0 0 1.5px var(--line-3);
+    background: none;
   }
   .marker {
     position: absolute;
@@ -170,6 +169,16 @@
     border-radius: 6px;
     background: var(--surface-2);
     border: 1px solid var(--line-2);
+  }
+  .marker.today::before {
+    content: '';
+    position: absolute;
+    top: -5px;
+    left: -5.75px;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: var(--signal);
   }
   .marker.today span {
     transform: translateX(-80%);

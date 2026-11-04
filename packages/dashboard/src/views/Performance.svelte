@@ -202,7 +202,7 @@
         {:else if chart}
           <LineChart
             dates={chart.dates}
-            series={[{ key: chartMetric, label: chartMetric === 'ctr' ? 'CTR' : chartMetric === 'position' ? 'Avg. position' : chartMetric[0]!.toUpperCase() + chartMetric.slice(1), values: chart.values, color: 'var(--accent)', area: chartMetric !== 'position' }]}
+            series={[{ key: chartMetric, label: chartMetric === 'ctr' ? 'CTR' : chartMetric === 'position' ? 'Avg. position' : chartMetric[0]!.toUpperCase() + chartMetric.slice(1), values: chart.values, color: 'var(--chart)', area: chartMetric !== 'position' }]}
             height={200}
             format={chartMetric === 'ctr' ? (n) => `${decimal(n, 1)}%` : chartMetric === 'position' ? (n) => decimal(n, 0) : compact}
             valueFormat={chartMetric === 'ctr' ? (n) => `${decimal(n, 2)}%` : chartMetric === 'position' ? (n) => decimal(n, 1) : int}

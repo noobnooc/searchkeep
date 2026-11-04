@@ -34,6 +34,13 @@ Because users sync `main` at any time, the `Unreleased` section is always accura
 
 ### Changed
 
+- New brand, "Horizon": the mark is a line that runs past a dashed 16-month horizon (what Search
+  Console keeps) and ends in an orange dot (today). Lowercase `searchkeep` wordmark in Inter Tight,
+  Inter Tight for website headings and IBM Plex Mono for labels, a cool Night/Fog palette with one
+  Signal orange, no gradients or glows. The website hero, Open Graph image and closing call to action
+  draw the same line at full width. New favicons, app icons (including a maskable icon), dashboard
+  palette and Worker setup page. Brand files and usage notes are in `docs/brand/`. The dashboard
+  still loads no web fonts: the wordmark is drawn as outlines.
 - The `SITES` secret is now optional. Sites defined there keep working and appear read-only in the
   dashboard; when both define the same `id`, the secret wins. Site definitions are validated more
   strictly: a site with an invalid `brandRegex` (or other invalid field) is now skipped and reported

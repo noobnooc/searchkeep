@@ -74,7 +74,7 @@
       sortable: true,
       width: '130px',
       text: (r) => int(r.requests),
-      bar: (r) => ({ value: r.requests, max: maxReq, color: purposeOf(r.purpose)?.color ?? 'var(--accent)' }),
+      bar: (r) => ({ value: r.requests, max: maxReq, color: purposeOf(r.purpose)?.color ?? 'var(--chart)' }),
     };
     const share: Column<CrawlerRow> = { key: 'share', label: 'Share', align: 'right', width: '72px', text: (r) => (tableTotal ? percent(r.requests / tableTotal) : '—'), hideOnMobile: true };
     switch (group) {
