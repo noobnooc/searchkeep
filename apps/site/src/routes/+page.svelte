@@ -52,8 +52,7 @@
     { row: 'Rank tracking (SERP scraping)', sk: { v: 'No, by design', no: true }, saas: { v: 'Yes', good: true } },
   ];
 
-  // The home page shows the first six questions; the docs FAQ has them all.
-  const faqs = FAQS.slice(0, 6);
+  const faqs = FAQS;
   const jsonld = [organization, website, softwareApplication, faqPage(faqs, '/')];
 </script>
 
@@ -75,7 +74,10 @@
     <h1 class="hero-title">
       Your search data,<br />kept<span class="signal">.</span>
     </h1>
-    <p class="hero-sub">SEO &amp; GEO analytics in your own Cloudflare account.</p>
+    <p class="hero-sub">
+      Self-hosted SEO &amp; GEO analytics in your own Cloudflare account. See what AI crawls, cites and clicks, keep
+      your history forever, and ask it over MCP.
+    </p>
     <div class="cta-row">
       <a class="btn btn-primary btn-lg" href="/docs/deploy">
         Deploy to your Cloudflare <Icon name="arrow" />
@@ -124,6 +126,7 @@
     <div class="section-head">
       <span class="eyebrow">The GEO funnel</span>
       <h2 id="funnel-title">Crawled. Cited. Clicked<span class="signal">.</span></h2>
+      <p class="lead">Per page: fetched by GPTBot, ClaudeBot and PerplexityBot, cited in AI answers, clicked from ChatGPT, Perplexity and Copilot.</p>
     </div>
 
     <div class="funnel-grid">
@@ -169,7 +172,8 @@
     <div class="section-head">
       <span class="eyebrow">MCP server</span>
       <h2 id="mcp-title">Ask, don’t dig.</h2>
-      <p class="endpoint"><code>https://your-domain/mcp</code><span>Claude · Cursor · ChatGPT</span></p>
+      <p class="lead">Twelve read-only MCP tools answer from your own data, so your assistant does the digging.</p>
+      <p class="endpoint"><code>https://your-domain/mcp</code><span>Claude · Claude Code · Cursor · ChatGPT</span></p>
     </div>
     <div class="mcp-grid">
       <ChatMock />
@@ -198,6 +202,7 @@
     <div class="section-head">
       <span class="eyebrow">Dashboard</span>
       <h2 id="dash-title">Or just look.</h2>
+      <p class="lead">A fast dashboard on the same Worker, running the same analysis as the MCP tools.</p>
     </div>
     <ul class="views">
       {#each dashboardViews as v (v.title)}
@@ -224,6 +229,7 @@
       <div class="section-head">
         <span class="eyebrow">Long-term history</span>
         <h2 id="history-title">Keep your history forever.</h2>
+        <p class="lead">Search Console keeps 16 months. Searchkeep backfills them, then keeps every day in D1.</p>
         <dl class="stats">
           <div><dt>Search Console</dt><dd>16 <span>months</span></dd></div>
           <div><dt>Searchkeep, two years in</dt><dd class="accent">40 <span>months, and counting</span></dd></div>
@@ -240,6 +246,7 @@
     <div class="section-head">
       <span class="eyebrow">Data sources</span>
       <h2 id="sources-title">First-party data only.</h2>
+      <p class="lead">The Google Search Console, Bing Webmaster Tools and Cloudflare APIs you already have, synced into D1 every day.</p>
     </div>
     <ul class="sources">
       {#each sources as s (s.name)}
@@ -263,6 +270,7 @@
     <div class="section-head">
       <span class="eyebrow">Ownership</span>
       <h2 id="own-title">One Worker. Your account.</h2>
+      <p class="lead">MCP, the dashboard and the sync share one Cloudflare Worker and one D1 database. No Searchkeep server.</p>
     </div>
     <div class="own-grid">
       <ArchitectureDiagram />
@@ -281,6 +289,7 @@
     <div class="section-head">
       <span class="eyebrow">Security</span>
       <h2 id="sec-title">Locked until it’s safe.</h2>
+      <p class="lead">Cloudflare Access in front, its JWT checked on every request, and no data until the setup is secure.</p>
     </div>
     <div class="sec-grid">
       <ul class="sec-list">
@@ -315,6 +324,7 @@
       <div class="section-head">
         <span class="eyebrow">Deploy with an agent</span>
         <h2 id="agent-title">Hand the runbook to your agent.</h2>
+        <p class="lead">An idempotent deploy guide an agent with GitHub and Cloudflare MCP can follow, stopping when you must click.</p>
         <ul class="human-steps">
           <li><span class="hs">You, once</span> Authorize the Cloudflare GitHub App</li>
           <li><span class="hs">You, once</span> Create your Zero Trust organization</li>
@@ -338,6 +348,7 @@
     <div class="section-head">
       <span class="eyebrow">Comparison</span>
       <h2 id="compare-title">Honest about what it isn’t.</h2>
+      <p class="lead">Your own data for your own sites. For backlinks, competitor research or rank tracking, keep a SaaS tool.</p>
 
     </div>
     <div class="table-wrap compare">
@@ -434,6 +445,12 @@
     line-height: 1;
     letter-spacing: -0.022em;
     font-weight: 620;
+  }
+  .section-head .lead {
+    margin-top: 14px;
+    font-size: var(--fs-md);
+    color: var(--text-3);
+    max-width: 560px;
   }
   .hero-sub {
     margin-top: 24px;
