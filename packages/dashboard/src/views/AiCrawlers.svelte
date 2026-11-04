@@ -115,7 +115,7 @@
   {/if}
 {/snippet}
 
-<PageHeader title="AI crawlers" description="Requests from AI bots to your site, from Cloudflare" meta={chart ? rangeLabel({ start: chart.start, end: chart.end }) : undefined} />
+<PageHeader title="AI crawlers" meta={chart ? rangeLabel({ start: chart.start, end: chart.end }) : undefined} />
 
 {#if series.error}
   <ErrorBanner error={series.error} retry={series.reload} />

@@ -80,8 +80,7 @@
 {:else if everythingEmpty}
   <Card>
     <EmptyState title={neverSynced ? `No data synced for ${ui.site?.domain} yet` : 'No data in this range yet'} icon="sync">
-      <p>Searchkeep syncs every 15 minutes once it is set up. The first passes pull recent days, then backfill up to 16 months of Search Console history in small batches.</p>
-      <p>{neverSynced ? 'Run a sync now, or check that the site’s sources are configured in Settings.' : 'Pick a longer range, or check the sync status.'}</p>
+      <p>{neverSynced ? 'Syncs every 15 minutes, then backfills 16 months. Run one now, or check Settings.' : 'Try a longer range.'}</p>
       {#snippet actions()}
         <a class="btn primary" href={href('settings', 'sync')}><Icon name="sync" size={14} /> Sync now</a>
       {/snippet}
@@ -160,7 +159,7 @@
     </Card>
 
     <div class="grid-2">
-      <Card title="GEO funnel" subtitle="From AI crawl to click, across all pages" busy={geo.loading && Boolean(geo.data)}>
+      <Card title="GEO funnel" busy={geo.loading && Boolean(geo.data)}>
         {#snippet actions()}
           <a class="head-link" href={href('geo')}>Open funnel <Icon name="arrowRight" size={12} /></a>
         {/snippet}
@@ -204,9 +203,8 @@
       {#each LINKS as l (l.title)}
         <a class="explore-card" href={href(l.view, l.sub)}>
           <span class="ex-icon"><Icon name={l.icon} size={16} /></span>
-          <span class="ex-text">
+          <span class="ex-text" title={l.text}>
             <strong>{l.title}</strong>
-            <span>{l.text}</span>
           </span>
           <Icon name="arrowRight" size={14} class="ex-arrow" />
         </a>
@@ -330,7 +328,7 @@
   }
   .explore-card {
     display: flex;
-    align-items: flex-start;
+    align-items: center;
     gap: 10px;
     padding: 12px 14px;
     border-radius: var(--radius);
@@ -368,13 +366,8 @@
     font-size: 13px;
     font-weight: 600;
   }
-  .ex-text span {
-    font-size: 12.5px;
-    color: var(--text-3);
-  }
   .explore-card :global(.ex-arrow) {
     color: var(--text-4);
-    margin-top: 6px;
   }
   .explore-card:hover :global(.ex-arrow) {
     color: var(--text-2);

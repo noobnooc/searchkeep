@@ -40,6 +40,10 @@ Because users sync `main` at any time, the `Unreleased` section is always accura
   Signal orange, no gradients or glows. The website hero, Open Graph image and closing call to action
   draw the same line at full width. New favicons, app icons (including a maskable icon), dashboard
   palette and Worker setup page. Brand files and usage notes are in `docs/brand/`.
+- Less copy, more layout: the website's sections now say it with one headline and a visual (tool
+  chips, a real dashboard screenshot, the timeline, the diagram, the comparison table); the docs
+  introduction is shorter; the dashboard drops page descriptions and restating subtitles, folds data
+  notes into one line and keeps empty states to a sentence.
 - Every docs page, the changelog and the privacy page now have their own Open Graph image, each with
   its own line; plus `favicon.ico`, a Safari pinned-tab icon and a GitHub social preview image
   (`docs/assets/social-preview.png`).

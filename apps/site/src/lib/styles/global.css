@@ -142,6 +142,11 @@ video {
   display: block;
   max-width: 100%;
 }
+/* Keep the aspect ratio of images that carry width/height attributes. */
+img,
+video {
+  height: auto;
+}
 input,
 button,
 textarea,

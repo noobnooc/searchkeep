@@ -67,7 +67,7 @@
   </span>
 {/snippet}
 
-<PageHeader title="GEO funnel" description="How AI systems find, cite and send visitors to your pages" meta={d ? rangeLabel(d.range) : undefined} />
+<PageHeader title="GEO funnel" meta={d ? rangeLabel(d.range) : undefined} />
 
 {#if geo.error}
   <ErrorBanner error={geo.error} retry={geo.reload} />
@@ -87,7 +87,7 @@
       {:else}
         <Funnel stages={funnel.stages} base={funnel.base} />
         <p class="legend-note">
-          Big numbers are totals for each step. The band and page counts follow pages through the steps: a page counts at a step only if it also reached the steps before it.
+          Totals per step. The band follows pages through every step.
         </p>
       {/if}
       {#snippet footer()}
@@ -112,7 +112,7 @@
     {/if}
 
     {#if neverCited.length}
-      <Card title="Crawled but never cited" subtitle="AI bots request these pages often, yet no AI answer cited them in this range. Make the answer they hold easy to quote: a clear heading, a direct first paragraph, facts and sources.">
+      <Card title="Crawled but never cited" subtitle="Make their answer easy to quote.">
         {#snippet actions()}<span class="muted small">AI crawler requests</span>{/snippet}
         <BarList label="Pages crawled but never cited, by AI crawler requests" items={neverCited.map((p) => ({ key: p.page, label: p.page, value: p.crawled, mono: true }))} />
       </Card>
