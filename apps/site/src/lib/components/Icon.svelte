@@ -37,6 +37,10 @@
     x: '<path d="M7 7l10 10M17 7 7 17"/>',
     minus: '<path d="M7 12h10"/>',
     user: '<circle cx="12" cy="8.5" r="3.5"/><path d="M5 20c.8-3.6 3.6-5.5 7-5.5s6.2 1.9 7 5.5"/>',
+    // The GEO funnel's three steps: an AI crawler, a citation, a click.
+    bot: '<rect x="4.5" y="8" width="15" height="11" rx="3"/><path d="M12 4.5V8M9.5 13v.5M14.5 13v.5M2.5 12.5v2M21.5 12.5v2"/>',
+    quote: '<path d="M5 6.5h5v5c0 3-1.7 5-4.5 5.5M5 6.5v5h5M14 6.5h5v5c0 3-1.7 5-4.5 5.5M14 6.5v5h5"/>',
+    pointer: '<path d="M5.5 4.5 18 10l-5.5 2-2 5.5-5-13Z"/><path d="m12.5 12 5 5"/>',
     book: '<path d="M5 4.5h9.5A2.5 2.5 0 0 1 17 7v12.5H7.5A2.5 2.5 0 0 1 5 17V4.5Z"/><path d="M5 17a2.5 2.5 0 0 1 2.5-2.5H17M19 7v12.5"/>',
   } as const;
   export type IconName = keyof typeof PATHS;
