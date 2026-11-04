@@ -40,9 +40,9 @@
     color: var(--neg);
   }
   .banner.info {
-    border-color: var(--accent-wash-2);
-    background: var(--accent-wash);
-    color: var(--accent-text);
+    border-color: var(--border-2);
+    background: var(--surface-2);
+    color: var(--text-2);
   }
   .banner > :global(.icon) {
     margin-top: 1px;

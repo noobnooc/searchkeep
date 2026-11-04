@@ -113,12 +113,13 @@
   .tool.small {
     opacity: 0.85;
   }
+  /* The Signal dot marks a Searchkeep tool call. */
   .tool-icon {
-    width: 14px;
-    height: 14px;
-    border-radius: 4px;
-    background: var(--accent-soft);
-    box-shadow: 0 0 0 1px var(--accent-line) inset;
+    width: 8px;
+    height: 8px;
+    margin-inline: 3px;
+    border-radius: 50%;
+    background: var(--signal);
   }
   .tool-name {
     font-weight: 550;

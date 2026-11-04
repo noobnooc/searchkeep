@@ -69,10 +69,11 @@
     flex: 1 1 260px;
   }
   h1 {
-    font-size: 20px;
-    line-height: 1.3;
-    font-weight: 650;
-    letter-spacing: -0.015em;
+    font-family: var(--display);
+    font-size: 22px;
+    line-height: 1.25;
+    font-weight: 600;
+    letter-spacing: -0.02em;
   }
   p {
     margin-top: 3px;

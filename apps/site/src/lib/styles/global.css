@@ -268,19 +268,21 @@ hr {
 .eyebrow {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
-  font-size: var(--fs-sm);
+  gap: 10px;
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
   font-weight: 500;
-  color: var(--accent);
-  letter-spacing: -0.005em;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-3);
 }
+/* The Signal dot: today, at the end of the kept line. */
 .eyebrow::before {
   content: '';
-  width: 6px;
-  height: 6px;
-  border-radius: 2px;
-  background: currentColor;
-  box-shadow: 0 0 12px currentColor;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--signal);
 }
 .section {
   position: relative;
@@ -408,9 +410,18 @@ hr {
   white-space: nowrap;
 }
 .pill-accent {
-  color: var(--accent);
-  border-color: var(--accent-line);
-  background: var(--accent-soft);
+  gap: 7px;
+  font-family: var(--font-mono);
+  color: var(--text);
+  border-color: var(--line-2);
+  background: var(--surface-2);
+}
+.pill-accent::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--signal);
 }
 
 /* ---------- Code tinting ---------- */

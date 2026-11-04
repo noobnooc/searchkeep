@@ -401,9 +401,10 @@
     gap: 16px;
   }
   h3 {
-    font-size: 11px;
-    font-weight: 600;
-    letter-spacing: 0.04em;
+    font-family: var(--mono);
+    font-size: 10.5px;
+    font-weight: 500;
+    letter-spacing: 0.08em;
     text-transform: uppercase;
     color: var(--text-3);
     margin-bottom: 8px;
@@ -485,8 +486,8 @@
   }
   .drop:hover,
   .drop:focus-within {
-    border-color: var(--accent);
-    background: var(--accent-wash);
+    border-color: var(--text-3);
+    background: var(--surface-2);
   }
   .drop.has {
     border-style: solid;
@@ -526,9 +527,10 @@
     flex-direction: column;
   }
   .ir-n {
+    font-family: var(--display);
     font-size: 20px;
-    font-weight: 650;
-    letter-spacing: -0.02em;
+    font-weight: 600;
+    letter-spacing: -0.015em;
   }
   .ir-l {
     font-size: 12px;

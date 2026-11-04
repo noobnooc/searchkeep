@@ -517,7 +517,7 @@
     background: currentColor;
   }
   .st.ok {
-    color: var(--accent);
+    color: var(--text-2);
   }
   .st.uncited {
     color: var(--warn);

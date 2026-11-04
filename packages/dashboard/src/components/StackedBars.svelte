@@ -174,7 +174,8 @@
   }
   text {
     fill: var(--text-3);
-    font-size: 11px;
+    font-family: var(--mono);
+    font-size: 10.5px;
     font-variant-numeric: tabular-nums;
   }
   .bar {

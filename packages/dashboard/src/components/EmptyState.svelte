@@ -37,14 +37,16 @@
     border-radius: 9px;
     display: grid;
     place-items: center;
-    color: var(--accent-text);
-    background: var(--accent-wash);
-    border: 1px solid var(--accent-wash-2);
+    color: var(--text-2);
+    background: var(--surface-2);
+    border: 1px solid var(--border-2);
     margin-bottom: 4px;
   }
   h3 {
-    font-size: 14px;
+    font-family: var(--display);
+    font-size: 15px;
     font-weight: 600;
+    letter-spacing: -0.01em;
   }
   .body {
     max-width: 460px;

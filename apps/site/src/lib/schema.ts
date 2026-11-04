@@ -8,7 +8,7 @@ export const organization: Json = {
   '@id': `${SITE.origin}/#organization`,
   name: SITE.name,
   url: `${SITE.origin}/`,
-  logo: `${SITE.origin}/icon-512.png`,
+  logo: { '@type': 'ImageObject', url: `${SITE.origin}/icon-512.png`, width: 512, height: 512 },
   sameAs: [SITE.repo],
 };
 
@@ -28,6 +28,8 @@ export const softwareApplication: Json = {
   name: SITE.name,
   description: SITE.description,
   url: `${SITE.origin}/`,
+  image: `${SITE.origin}/og.png`,
+  screenshot: `${SITE.origin}/screenshots/dashboard-overview.webp`,
   applicationCategory: 'DeveloperApplication',
   applicationSubCategory: 'SEO and GEO analytics',
   operatingSystem: 'Cloudflare Workers',

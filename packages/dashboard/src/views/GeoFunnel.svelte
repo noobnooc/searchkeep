@@ -162,8 +162,8 @@
     border-radius: 8px;
     display: grid;
     place-items: center;
-    color: var(--accent-text);
-    background: var(--accent-wash-2);
+    color: var(--text-2);
+    background: var(--surface-3);
   }
   .callout-body {
     flex: 1 1 280px;
