@@ -202,9 +202,10 @@
     gap: 1px;
   }
   .heading {
-    font-size: 11px;
-    font-weight: 600;
-    letter-spacing: 0.04em;
+    font-family: var(--mono);
+    font-size: 10.5px;
+    font-weight: 500;
+    letter-spacing: 0.08em;
     text-transform: uppercase;
     color: var(--text-4);
     padding: 0 8px 5px;
@@ -264,10 +265,11 @@
     min-width: 0;
   }
   .dev {
+    font-family: var(--mono);
     font-size: 10.5px;
-    font-weight: 600;
+    font-weight: 500;
+    letter-spacing: 0.08em;
     text-transform: uppercase;
-    letter-spacing: 0.04em;
     padding: 1px 5px;
     border-radius: 4px;
     color: var(--warn);
@@ -299,8 +301,8 @@
     padding: 12px 14px;
     margin-bottom: 20px;
     border-radius: var(--radius);
-    border: 1px solid var(--accent-wash-2);
-    background: var(--accent-wash);
+    border: 1px solid var(--border-2);
+    background: var(--surface-2);
     color: var(--accent-text);
     font-size: 13px;
     flex-wrap: wrap;

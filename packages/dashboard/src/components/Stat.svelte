@@ -74,10 +74,12 @@
     flex-wrap: wrap;
   }
   .value {
-    font-size: 24px;
+    font-family: var(--display);
+    font-size: 25px;
     line-height: 1.15;
     font-weight: 600;
-    letter-spacing: -0.02em;
+    letter-spacing: -0.015em;
+    font-variant-numeric: tabular-nums;
     color: var(--text);
   }
   .lg .value {

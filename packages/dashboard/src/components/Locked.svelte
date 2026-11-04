@@ -1,6 +1,7 @@
 <script lang="ts">
   import { dateTime } from '../lib/format';
   import type { StatusResponse } from '../lib/types';
+  import Horizon from './Horizon.svelte';
   import Icon from './Icon.svelte';
   import Logo from './Logo.svelte';
 
@@ -63,6 +64,7 @@
       <Logo />
       <span class="badge"><Icon name="lock" size={13} /> Locked</span>
     </div>
+    <div class="line"><Horizon state="paused" /><span class="label-mono">Sync paused until every check passes</span></div>
     <h1>{copy.title}</h1>
     <p class="lead">{copy.lead}</p>
 
@@ -144,10 +146,17 @@
     padding: 3px 9px;
     border-radius: 999px;
   }
+  .line {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-bottom: 24px;
+  }
   h1 {
-    font-size: 22px;
+    font-family: var(--display);
+    font-size: 24px;
     letter-spacing: -0.02em;
-    font-weight: 650;
+    font-weight: 600;
   }
   .lead {
     margin-top: 8px;
@@ -174,10 +183,11 @@
     border-radius: 50%;
     display: grid;
     place-items: center;
-    font-size: 12px;
-    font-weight: 600;
-    color: var(--accent-text);
-    background: var(--accent-wash);
+    font-family: var(--mono);
+    font-size: 11.5px;
+    font-weight: 500;
+    color: var(--text);
+    background: var(--surface-3);
     margin-top: 0.5px;
   }
   .checks {
@@ -188,11 +198,12 @@
     background: var(--surface-2);
   }
   h2 {
-    font-size: 12px;
-    font-weight: 600;
+    font-family: var(--mono);
+    font-size: 10.5px;
+    font-weight: 500;
     color: var(--text-3);
     text-transform: uppercase;
-    letter-spacing: 0.04em;
+    letter-spacing: 0.08em;
     margin-bottom: 8px;
   }
   .checks ul {

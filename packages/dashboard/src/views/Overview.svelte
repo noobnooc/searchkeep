@@ -354,8 +354,8 @@
     display: grid;
     place-items: center;
     border-radius: 7px;
-    color: var(--accent-text);
-    background: var(--accent-wash);
+    color: var(--text-2);
+    background: var(--surface-3);
   }
   .ex-text {
     flex: 1;

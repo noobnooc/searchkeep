@@ -693,9 +693,9 @@
   .s1 {
     background: color-mix(in oklch, var(--accent-fill) 72%, var(--surface-3));
   }
+  /* The click: where the funnel pays off, in Signal. */
   .s2 {
-    background: var(--accent-fill);
-    box-shadow: 0 0 16px var(--accent-glow);
+    background: var(--signal);
   }
   .stage-val {
     min-width: 76px;

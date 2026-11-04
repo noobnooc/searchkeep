@@ -6,6 +6,7 @@ import { createHash } from 'node:crypto';
 import { readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { extname, join, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { OG_PAGES, ogFile } from '../src/lib/og.ts';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 const build = join(root, 'build');
@@ -31,6 +32,12 @@ function walk(dir) {
     const p = join(dir, name);
     return statSync(p).isDirectory() ? walk(p) : [p];
   });
+}
+
+// Every page listed in src/lib/og.ts must have its OG card, or its og:image would 404.
+const missingOg = OG_PAGES.map((p) => ogFile(p.path)).filter((f) => !statSync(join(build, 'og', f), { throwIfNoEntry: false }));
+if (missingOg.length) {
+  throw new Error(`Missing OG images: ${missingOg.join(', ')}. Run: pnpm --filter @searchkeep/site run render:assets`);
 }
 
 const files = {};

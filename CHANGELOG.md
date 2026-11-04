@@ -39,8 +39,14 @@ Because users sync `main` at any time, the `Unreleased` section is always accura
   Inter Tight for website headings and IBM Plex Mono for labels, a cool Night/Fog palette with one
   Signal orange, no gradients or glows. The website hero, Open Graph image and closing call to action
   draw the same line at full width. New favicons, app icons (including a maskable icon), dashboard
-  palette and Worker setup page. Brand files and usage notes are in `docs/brand/`. The dashboard
-  still loads no web fonts: the wordmark is drawn as outlines.
+  palette and Worker setup page. Brand files and usage notes are in `docs/brand/`.
+- Every docs page, the changelog and the privacy page now have their own Open Graph image, each with
+  its own line; plus `favicon.ico`, a Safari pinned-tab icon and a GitHub social preview image
+  (`docs/assets/social-preview.png`).
+- The dashboard uses the brand type: Inter Tight for titles and figures, IBM Plex Mono for labels
+  and chart axes, bundled with the dashboard and served by your Worker (no third-party requests).
+  The locked screen and the public setup page show the horizon line, paused until every check
+  passes.
 - The `SITES` secret is now optional. Sites defined there keep working and appear read-only in the
   dashboard; when both define the same `id`, the secret wins. Site definitions are validated more
   strictly: a site with an invalid `brandRegex` (or other invalid field) is now skipped and reported

@@ -165,10 +165,11 @@
   }
   .total {
     margin-top: 6px;
+    font-family: var(--display);
     font-size: 32px;
     line-height: 1.1;
-    font-weight: 650;
-    letter-spacing: -0.03em;
+    font-weight: 600;
+    letter-spacing: -0.02em;
     color: var(--text);
   }
   .nodata .total {

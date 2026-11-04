@@ -154,10 +154,12 @@
   .group-title {
     margin-bottom: 8px;
     padding-left: 10px;
-    font-size: var(--fs-xs);
-    font-weight: 600;
-    color: var(--text);
-    letter-spacing: 0;
+    font-family: var(--font-mono);
+    font-size: 0.6875rem;
+    font-weight: 500;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--text-3);
   }
   .nav ul {
     list-style: none;
@@ -291,9 +293,12 @@
     scrollbar-width: thin;
   }
   .toc-title {
-    font-size: var(--fs-xs);
-    font-weight: 600;
-    color: var(--text);
+    font-family: var(--font-mono);
+    font-size: 0.6875rem;
+    font-weight: 500;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--text-3);
     margin-bottom: 10px;
   }
   .toc ul {

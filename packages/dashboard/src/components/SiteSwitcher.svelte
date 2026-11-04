@@ -79,11 +79,12 @@
     border-radius: 7px;
     display: grid;
     place-items: center;
-    font-size: 12.5px;
-    font-weight: 650;
-    color: var(--accent-text);
-    background: var(--accent-wash);
-    border: 1px solid var(--accent-wash-2);
+    font-family: var(--mono);
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--text);
+    background: var(--surface-3);
+    border: 1px solid var(--border-2);
     flex: none;
   }
   .avatar.sm {

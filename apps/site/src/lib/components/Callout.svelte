@@ -47,13 +47,14 @@
     --bgc: var(--bad-soft);
     --bc: light-dark(oklch(0.55 0.17 25 / 0.3), oklch(0.74 0.15 25 / 0.25));
   }
-  .agent,
-  .note {
-    --c: var(--accent);
-    --bgc: var(--accent-soft);
-    --bc: var(--accent-line);
+  /* Agent notes are cool blue, so they never read as the amber "human" step. */
+  .agent {
+    --c: var(--cool);
+    --bgc: color-mix(in oklch, var(--cool) 9%, transparent);
+    --bc: color-mix(in oklch, var(--cool) 32%, transparent);
   }
   .note {
+    --c: var(--text);
     --bgc: var(--surface-2);
     --bc: var(--line-2);
   }

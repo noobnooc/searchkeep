@@ -117,13 +117,25 @@
   }
   .ver {
     justify-self: start;
-    padding: 2px 9px;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 3px 10px;
     border-radius: 999px;
+    font-family: var(--font-mono);
     font-size: var(--fs-xs);
-    font-weight: 600;
-    color: var(--accent);
-    background: var(--accent-soft);
-    border: 1px solid var(--accent-line);
+    font-weight: 500;
+    color: var(--text);
+    background: var(--surface-2);
+    border: 1px solid var(--line-2);
+  }
+  /* The latest release carries today's dot. */
+  .release:first-child .ver::before {
+    content: '';
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--signal);
   }
   .body h2 {
     margin-top: 0;
