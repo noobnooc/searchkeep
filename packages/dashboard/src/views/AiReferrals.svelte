@@ -62,13 +62,12 @@
   <PathText path={r.path} />
 {/snippet}
 
-<PageHeader title="AI referrals" description="Visits that arrive from AI assistants, from Cloudflare Web Analytics" meta={byHost.data ? rangeLabel(byHost.data.range) : undefined} />
+<PageHeader title="AI referrals" meta={byHost.data ? rangeLabel(byHost.data.range) : undefined} />
 
 {#if notConfigured}
   <Card>
     <EmptyState title="Web Analytics is not set up for this site" icon="referral">
-      <p>AI referrals are page loads whose referrer is a known AI assistant (ChatGPT, Perplexity, Claude, Gemini, Copilot and others). Searchkeep reads them from Cloudflare Web Analytics.</p>
-      <p>Add <code>webAnalyticsSiteTag</code> to this site in the <code>SITES</code> secret, and make sure <code>CLOUDFLARE_ACCOUNT_ID</code> is set.</p>
+      <p>Connect Cloudflare Web Analytics to this site in Settings.</p>
       {#snippet actions()}
         <a class="btn" href={href('settings')}><Icon name="settings" size={14} /> Setup checks</a>
       {/snippet}
@@ -106,7 +105,7 @@
       </Card>
     </div>
 
-    <Card title="Landing pages" subtitle="Where AI assistants send people" flush busy={byPage.loading && Boolean(byPage.data)}>
+    <Card title="Landing pages" flush busy={byPage.loading && Boolean(byPage.data)}>
       {#if byPage.error}
         <div class="pad"><ErrorBanner error={byPage.error} retry={byPage.reload} /></div>
       {:else if !byPage.data}

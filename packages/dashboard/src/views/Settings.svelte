@@ -155,7 +155,7 @@
   <Pill tone={r.status === 'ok' ? 'ok' : r.status === 'error' ? 'error' : 'neutral'} title={r.message}>{r.status}</Pill>
 {/snippet}
 
-<PageHeader title="Settings" description="Sites, setup checks, sync, imports and AI client connections" range={false} />
+<PageHeader title="Settings" range={false} />
 
 <div class="stack">
   <SitesManager {reloadSites} />
@@ -195,7 +195,7 @@
     </Card>
 
     <div class="stack">
-      <Card title="Sync" subtitle="Runs automatically every 15 minutes in small batches; history backfills over several runs." id="settings-sync">
+      <Card title="Sync" subtitle="Every 15 minutes" id="settings-sync">
         {#snippet actions()}
           <button class="btn primary" onclick={syncNow} disabled={syncing}>
             <Icon name="sync" size={14} class={syncing ? 'spin' : ''} />
@@ -217,7 +217,7 @@
             {/if}
           </div>
         {:else}
-          <p class="muted">Run a pass now to pull what is due. Each pass stays within the free-tier limits and continues where the last one stopped.</p>
+          <p class="muted">Pulls what is due, within free-tier limits.</p>
         {/if}
       </Card>
 
@@ -305,7 +305,7 @@
       {/if}
     </Card>
 
-    <Card title="Connect an AI client" subtitle="Ask questions about your data from Claude, Cursor, ChatGPT and other MCP clients" id="settings-mcp">
+    <Card title="Connect an AI client" subtitle="Claude · Cursor · ChatGPT" id="settings-mcp">
       <div class="mcp">
         <div class="kv">
           <span class="k">MCP endpoint</span>
@@ -335,7 +335,7 @@
     </Card>
   </div>
 
-  <Card title="Sites and data coverage" subtitle="What each site is connected to, and how much history Searchkeep keeps" flush id="settings-coverage" busy={setup.loading && Boolean(setup.data)}>
+  <Card title="Sites and data coverage" flush id="settings-coverage" busy={setup.loading && Boolean(setup.data)}>
     {#if !setup.data}
       <div class="pad"><Skeleton kind="table" rows={5} /></div>
     {:else}

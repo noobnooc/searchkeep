@@ -154,7 +154,7 @@
           <Icon name="sync" size={16} />
           <div>
             <strong>No data synced for {ui.site?.domain} yet.</strong>
-            <span>Searchkeep syncs automatically every 15 minutes once setup is complete; the first passes backfill history in small batches.</span>
+            <span>Syncs every 15 minutes; the first passes backfill history.</span>
           </div>
           <a class="btn sm" href={href('settings', 'sync')}>Sync now <Icon name="arrowRight" size={13} /></a>
         </div>

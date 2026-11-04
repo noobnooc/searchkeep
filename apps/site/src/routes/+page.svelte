@@ -12,61 +12,31 @@
   import { organization, website, softwareApplication, faqPage } from '#lib/schema.ts';
 
   const funnel = [
-    {
-      step: 'Crawled',
-      source: 'Cloudflare AI crawler traffic',
-      text: 'Which pages GPTBot, ClaudeBot, PerplexityBot and friends actually fetch, how often, and with what status code.',
-      value: 412,
-    },
-    {
-      step: 'Cited',
-      source: 'Bing AI Performance (CSV import)',
-      text: 'Which of those pages show up as sources in AI answers, so you know crawling turned into visibility.',
-      value: 96,
-    },
-    {
-      step: 'Clicked',
-      source: 'Web Analytics · GSC · Bing',
-      text: 'Visits referred by ChatGPT, Perplexity, Copilot and others, side by side with classic search clicks.',
-      value: 38,
-    },
+    { step: 'Crawled', source: 'Cloudflare AI crawlers', value: 412 },
+    { step: 'Cited', source: 'Bing AI Performance', value: 96 },
+    { step: 'Clicked', source: 'Web Analytics · GSC · Bing', value: 38 },
   ];
 
-  const dashboardViews: { icon: IconName; title: string; text: string }[] = [
-    { icon: 'chart', title: 'Overview', text: 'Clicks, impressions and AI crawler requests for a site, against the previous period.' },
-    { icon: 'sparkle', title: 'GEO funnel', text: 'Every page’s path from crawled to cited to clicked, with crawled-but-never-cited pages flagged.' },
-    { icon: 'eye', title: 'AI crawlers & referrals', text: 'Requests by bot, operator and purpose (training, search, user), and visits sent by AI assistants.' },
-    { icon: 'globe', title: 'Performance & compare', text: 'GSC and Bing queries and pages, brand vs non-brand, by country and device, period over period.' },
-    { icon: 'zap', title: 'Opportunities', text: 'Quick wins, cannibalization, CTR anomalies and content decay, ranked.' },
-    { icon: 'shield', title: 'Technical & settings', text: 'Web Vitals, sitemaps, crawl issues and URL inspection, plus setup checks, sync runs and Sync now.' },
+  const dashboardViews: { icon: IconName; title: string }[] = [
+    { icon: 'chart', title: 'Overview' },
+    { icon: 'sparkle', title: 'GEO funnel' },
+    { icon: 'eye', title: 'AI crawlers & referrals' },
+    { icon: 'globe', title: 'Performance & compare' },
+    { icon: 'zap', title: 'Opportunities' },
+    { icon: 'shield', title: 'Technical' },
   ];
 
   const sources = [
-    {
-      name: 'Google Search Console',
-      pulls: ['Search Analytics by date, query, page, country, device', 'Sitemaps', 'Live URL Inspection'],
-      cred: 'Service account, added as a Restricted user',
-      limit: '16 months of history, a few days of delay',
-    },
-    {
-      name: 'Bing Webmaster Tools',
-      pulls: ['Traffic, query and page stats', 'Crawl issues', 'AI Performance citations, imported from its CSV export'],
-      cred: 'API key',
-      limit: 'Weekly granularity, no date filter',
-    },
-    {
-      name: 'Cloudflare',
-      pulls: ['AI crawler requests by bot, path and status', 'Web Analytics page views and referrers', 'Core Web Vitals'],
-      cred: 'Read-only API token',
-      limit: 'AI crawler data needs a proxied zone',
-    },
+    { name: 'Google Search Console', pulls: ['Search Analytics', 'Sitemaps', 'URL Inspection'] },
+    { name: 'Bing Webmaster Tools', pulls: ['Search traffic', 'Crawl issues', 'AI citations (CSV)'] },
+    { name: 'Cloudflare', pulls: ['AI crawler requests', 'Web Analytics', 'Core Web Vitals'] },
   ];
 
-  const security: { icon: IconName; title: string; text: string }[] = [
-    { icon: 'lock', title: 'Cloudflare Access in front', text: 'One self-hosted Access app guards the dashboard and the MCP endpoint. Only the emails you allow get in.' },
-    { icon: 'key', title: 'Managed OAuth for MCP', text: 'Access acts as the OAuth 2.1 server with dynamic client registration and PKCE. No client IDs to paste.' },
-    { icon: 'shield', title: 'JWT re-verified in the Worker', text: 'Every request’s Access JWT is checked against your team’s keys and AUD tag, so bypassing Access gets nothing.' },
-    { icon: 'eye', title: 'Locked until ready', text: 'Until Access, Managed OAuth and a tight policy are confirmed, data and sync stay off. Break a check later and it locks again.' },
+  const security: { icon: IconName; title: string }[] = [
+    { icon: 'lock', title: 'Cloudflare Access in front' },
+    { icon: 'key', title: 'Managed OAuth for MCP' },
+    { icon: 'shield', title: 'JWT re-verified per request' },
+    { icon: 'eye', title: 'Locks again if a check breaks' },
   ];
 
   type Cell = { v: string; good?: boolean; no?: boolean };
@@ -77,13 +47,13 @@
     { row: 'AI crawled → cited → clicked, per page', sk: { v: 'Built in', good: true }, saas: { v: 'Rare' } },
     { row: 'Ask from Claude, Cursor, ChatGPT', sk: { v: '12 read-only MCP tools', good: true }, saas: { v: 'Sometimes' } },
     { row: 'Telemetry', sk: { v: 'None', good: true }, saas: { v: 'Usually' } },
-    { row: 'Writes to your properties', sk: { v: 'Off unless you opt in', good: true }, saas: { v: 'Varies' } },
     { row: 'Backlink index', sk: { v: 'No, by design', no: true }, saas: { v: 'Yes', good: true } },
     { row: 'Competitor research', sk: { v: 'No, by design', no: true }, saas: { v: 'Yes', good: true } },
     { row: 'Rank tracking (SERP scraping)', sk: { v: 'No, by design', no: true }, saas: { v: 'Yes', good: true } },
   ];
 
-  const jsonld = [organization, website, softwareApplication, faqPage(FAQS, '/')];
+  const faqs = FAQS;
+  const jsonld = [organization, website, softwareApplication, faqPage(faqs, '/')];
 </script>
 
 <Seo
@@ -105,8 +75,8 @@
       Your search data,<br />kept<span class="signal">.</span>
     </h1>
     <p class="hero-sub">
-      SEO &amp; GEO analytics that lives in your own Cloudflare account. See which pages AI crawlers read, cite and
-      send clicks to, keep your history forever, and ask about it from Claude, Cursor or ChatGPT.
+      Self-hosted SEO &amp; GEO analytics in your own Cloudflare account. See what AI crawls, cites and clicks, keep
+      your history forever, and ask it over MCP.
     </p>
     <div class="cta-row">
       <a class="btn btn-primary btn-lg" href="/docs/deploy">
@@ -155,11 +125,8 @@
   <div class="container">
     <div class="section-head">
       <span class="eyebrow">The GEO funnel</span>
-      <h2 id="funnel-title">Crawled. Cited. Clicked.<br /><span class="muted">Finally in one place.</span></h2>
-      <p>
-        Generative engines read your site long before anyone clicks. Searchkeep joins three first-party sources per
-        page, so you can see where AI visibility leaks out, not just that it does.
-      </p>
+      <h2 id="funnel-title">Crawled. Cited. Clicked<span class="signal">.</span></h2>
+      <p class="lead">Per page: fetched by GPTBot, ClaudeBot and PerplexityBot, cited in AI answers, clicked from ChatGPT, Perplexity and Copilot.</p>
     </div>
 
     <div class="funnel-grid">
@@ -171,7 +138,6 @@
               <h3>{f.step}</h3>
               <span class="stage-src">{f.source}</span>
             </div>
-            <p>{f.text}</p>
             <div class="stage-bar" aria-hidden="true">
               <div class="track"><div class="fill s{i}"></div></div>
               <span class="stage-val">{f.value} pages</span>
@@ -189,20 +155,12 @@
         <div class="stall card">
           <span class="pill">Crawled, not cited</span>
           <h3>AI reads it, then ignores it.</h3>
-          <p>
-            Often thin or outdated pages, missing direct answers, or crawlers hitting errors. Fix the content or the
-            status code.
-          </p>
         </div>
         <div class="stall card">
           <span class="pill">Cited, not clicked</span>
           <h3>You’re the source, not the destination.</h3>
-          <p>The answer is complete without you. Add what an answer can’t: tools, data, depth, a next step.</p>
         </div>
-        <p class="fineprint">
-          The Cited step uses Bing AI Performance, which has no API yet: you import its CSV export from the
-          dashboard. Example figures are illustrative.
-        </p>
+        <p class="fineprint">Cited: Bing AI Performance, imported as CSV. Figures are illustrative.</p>
       </div>
     </div>
   </div>
@@ -214,10 +172,8 @@
     <div class="section-head">
       <span class="eyebrow">MCP server</span>
       <h2 id="mcp-title">Ask, don’t dig.</h2>
-      <p>
-        Point Claude, Claude Code, Cursor or ChatGPT at <code>https://your-domain/mcp</code>. Twelve task-shaped
-        read-only tools aggregate on the server and return compact answers, so your assistant does the digging.
-      </p>
+      <p class="lead">Twelve read-only MCP tools answer from your own data, so your assistant does the digging.</p>
+      <p class="endpoint"><code>https://your-domain/mcp</code><span>Claude · Claude Code · Cursor · ChatGPT</span></p>
     </div>
     <div class="mcp-grid">
       <ChatMock />
@@ -228,10 +184,9 @@
         </div>
         <ul>
           {#each TOOLS as t (t.name)}
-            <li>
+            <li title={t.summary} class:write={!t.readOnly}>
               <code class="tname">{t.name}</code>
-              <span class="tsum">{t.summary}</span>
-              {#if !t.readOnly}<span class="pill wtag">write · off</span>{/if}
+              {#if !t.readOnly}<span class="wtag">write · off</span>{/if}
             </li>
           {/each}
         </ul>
@@ -246,21 +201,24 @@
   <div class="container">
     <div class="section-head">
       <span class="eyebrow">Dashboard</span>
-      <h2 id="dash-title">And look, when you’d rather look.</h2>
-      <p>
-        A fast dashboard served by the same Worker. Every view runs the same analysis functions as the MCP tools, so
-        the numbers your assistant quotes are the numbers you see.
-      </p>
+      <h2 id="dash-title">Or just look.</h2>
+      <p class="lead">A fast dashboard on the same Worker, running the same analysis as the MCP tools.</p>
     </div>
     <ul class="views">
       {#each dashboardViews as v (v.title)}
-        <li class="view card">
-          <span class="view-icon"><Icon name={v.icon} size={18} /></span>
-          <h3>{v.title}</h3>
-          <p>{v.text}</p>
-        </li>
+        <li class="view"><span class="view-icon"><Icon name={v.icon} size={16} /></span>{v.title}</li>
       {/each}
     </ul>
+    <figure class="shot">
+      <img
+        src="/screenshots/dashboard-overview.webp"
+        width="1600"
+        height="1398"
+        loading="lazy"
+        decoding="async"
+        alt="The Searchkeep dashboard overview: Search Console and Bing totals, daily search performance, the GEO funnel and AI crawlers."
+      />
+    </figure>
   </div>
 </section>
 
@@ -271,11 +229,7 @@
       <div class="section-head">
         <span class="eyebrow">Long-term history</span>
         <h2 id="history-title">Keep your history forever.</h2>
-        <p>
-          Search Console forgets everything older than 16 months. Searchkeep starts backfilling those 16 months the
-          day you deploy, keeps every new day in D1 and never deletes. Comparing this quarter with the same quarter two
-          years ago just works.
-        </p>
+        <p class="lead">Search Console keeps 16 months. Searchkeep backfills them, then keeps every day in D1.</p>
         <dl class="stats">
           <div><dt>Search Console</dt><dd>16 <span>months</span></dd></div>
           <div><dt>Searchkeep, two years in</dt><dd class="accent">40 <span>months, and counting</span></dd></div>
@@ -292,10 +246,7 @@
     <div class="section-head">
       <span class="eyebrow">Data sources</span>
       <h2 id="sources-title">First-party data only.</h2>
-      <p>
-        Searchkeep reads the APIs you already have access to, for sites you own. Each source is synced into D1 once a
-        day, in small batches; live calls are reserved for things like URL inspection.
-      </p>
+      <p class="lead">The Google Search Console, Bing Webmaster Tools and Cloudflare APIs you already have, synced into D1 every day.</p>
     </div>
     <ul class="sources">
       {#each sources as s (s.name)}
@@ -306,14 +257,10 @@
               <li><Icon name="check" size={14} />{p}</li>
             {/each}
           </ul>
-          <dl class="source-meta">
-            <div><dt>Credential</dt><dd>{s.cred}</dd></div>
-            <div><dt>Keep in mind</dt><dd>{s.limit}</dd></div>
-          </dl>
         </li>
       {/each}
     </ul>
-    <a class="more" href="/docs/data-sources">Every source, permission and limitation <Icon name="arrow" size={14} /></a>
+    <a class="more" href="/docs/data-sources">Data sources <Icon name="arrow" size={14} /></a>
   </div>
 </section>
 
@@ -322,20 +269,14 @@
   <div class="container">
     <div class="section-head">
       <span class="eyebrow">Ownership</span>
-      <h2 id="own-title">One Worker. Your account.<br /><span class="muted">Nobody else in the loop.</span></h2>
-      <p>
-        MCP, the dashboard and the scheduled sync are three entrances to one Worker, sharing one core and one D1
-        database. There is no Searchkeep server to trust, pay or outlive.
-      </p>
+      <h2 id="own-title">One Worker. Your account.</h2>
+      <p class="lead">MCP, the dashboard and the sync share one Cloudflare Worker and one D1 database. No Searchkeep server.</p>
     </div>
     <div class="own-grid">
       <ArchitectureDiagram />
       <ul class="principles">
         {#each PRINCIPLES as p (p.title)}
-          <li>
-            <h3>{p.title}</h3>
-            <p>{p.body}</p>
-          </li>
+          <li><Icon name="check" size={16} /><h3>{p.title}</h3></li>
         {/each}
       </ul>
     </div>
@@ -347,21 +288,15 @@
   <div class="container">
     <div class="section-head">
       <span class="eyebrow">Security</span>
-      <h2 id="sec-title">Secure by default.<br /><span class="muted">Locked until it’s safe.</span></h2>
-      <p>
-        Search data is sensitive. Searchkeep refuses to serve any of it until Cloudflare Access is protecting it
-        properly, and it checks again on every request.
-      </p>
+      <h2 id="sec-title">Locked until it’s safe.</h2>
+      <p class="lead">Cloudflare Access in front, its JWT checked on every request, and no data until the setup is secure.</p>
     </div>
     <div class="sec-grid">
       <ul class="sec-list">
         {#each security as s (s.title)}
           <li>
             <span class="sec-icon"><Icon name={s.icon} size={18} /></span>
-            <div>
-              <h3>{s.title}</h3>
-              <p>{s.text}</p>
-            </div>
+            <h3>{s.title}</h3>
           </li>
         {/each}
       </ul>
@@ -376,7 +311,7 @@
             <span class="st-badge">{r.id === 'ready' ? 'Serving' : 'Locked'}</span>
           </li>
         {/each}
-        <li class="st-foot">Cron only syncs after <code>ready</code> is recorded, and re-checks Access before every pass.</li>
+        <li class="st-foot">Sync runs only once <code>ready</code>.</li>
       </ol>
     </div>
   </div>
@@ -389,10 +324,7 @@
       <div class="section-head">
         <span class="eyebrow">Deploy with an agent</span>
         <h2 id="agent-title">Hand the runbook to your agent.</h2>
-        <p>
-          The deploy guide is written as an idempotent runbook: every step can be re-run and comes with a check. An
-          agent with GitHub and Cloudflare MCP access can do almost all of it, and stops to ask when a human must click.
-        </p>
+        <p class="lead">An idempotent deploy guide an agent with GitHub and Cloudflare MCP can follow, stopping when you must click.</p>
         <ul class="human-steps">
           <li><span class="hs">You, once</span> Authorize the Cloudflare GitHub App</li>
           <li><span class="hs">You, once</span> Create your Zero Trust organization</li>
@@ -416,10 +348,8 @@
     <div class="section-head">
       <span class="eyebrow">Comparison</span>
       <h2 id="compare-title">Honest about what it isn’t.</h2>
-      <p>
-        Searchkeep is deliberately narrow: your own data, for your own sites. If you need backlinks, competitor research
-        or rank tracking, keep a SaaS tool for that, and use Searchkeep for everything you own.
-      </p>
+      <p class="lead">Your own data for your own sites. For backlinks, competitor research or rank tracking, keep a SaaS tool.</p>
+
     </div>
     <div class="table-wrap compare">
       <table>
@@ -451,10 +381,10 @@
     <div class="section-head">
       <span class="eyebrow">FAQ</span>
       <h2 id="faq-title">Questions, answered.</h2>
-      <p>More in the <a class="inline" href="/docs/faq">docs FAQ</a>, or open an <a class="inline" href={GITHUB.issues}>issue on GitHub</a>.</p>
+      <a class="more" href="/docs/faq">All questions <Icon name="arrow" size={14} /></a>
     </div>
     <div class="faq">
-      {#each FAQS as f, i (f.q)}
+      {#each faqs as f, i (f.q)}
         <details open={i === 0}>
           <summary><h3>{f.q}</h3><span class="plus" aria-hidden="true"></span></summary>
           <p>{f.a}</p>
@@ -468,7 +398,7 @@
 <section class="final" aria-labelledby="final-title">
   <div class="container final-inner">
     <h2 id="final-title">Start keeping your search data today<span class="signal">.</span></h2>
-    <p>Every day you wait is a day Search Console forgets. Deploying takes about 30–45 minutes.</p>
+    <p>Deploys in 30–45 minutes.</p>
     <div class="cta-row">
       <a class="btn btn-primary btn-lg" href="/docs/deploy">Deploy to your Cloudflare <Icon name="arrow" /></a>
       <a class="btn btn-secondary btn-lg" href={GITHUB.repo}><Icon name="github" /> Star on GitHub</a>
@@ -515,6 +445,12 @@
     line-height: 1;
     letter-spacing: -0.022em;
     font-weight: 620;
+  }
+  .section-head .lead {
+    margin-top: 14px;
+    font-size: var(--fs-md);
+    color: var(--text-3);
+    max-width: 560px;
   }
   .hero-sub {
     margin-top: 24px;
@@ -650,12 +586,6 @@
     border: 1px solid var(--line-2);
     border-radius: 999px;
   }
-  .stage p {
-    margin-top: 8px;
-    color: var(--text-2);
-    font-size: 0.9375rem;
-    max-width: 560px;
-  }
   .stage-bar {
     display: flex;
     align-items: center;
@@ -729,13 +659,8 @@
   }
   .stall h3 {
     margin-top: 14px;
-    font-size: 1.125rem;
-    letter-spacing: -0.018em;
-  }
-  .stall p {
-    margin-top: 6px;
-    color: var(--text-2);
-    font-size: 0.9375rem;
+    font-size: 1.25rem;
+    letter-spacing: -0.015em;
   }
   .fineprint {
     font-size: var(--fs-xs);
@@ -768,23 +693,29 @@
   }
   .tools ul {
     list-style: none;
-    padding: 0;
+    padding: 4px 12px 8px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
   }
   .tools li {
-    display: grid;
-    grid-template-columns: minmax(0, auto) 1fr;
-    grid-template-areas: 'name tag' 'sum sum';
-    gap: 2px 8px;
-    padding: 9px 12px;
-    border-radius: 9px;
-    transition: background-color 150ms;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 10px;
+    border: 1px solid var(--line-2);
+    border-radius: 8px;
+    background: var(--surface);
+    cursor: default;
+    transition: border-color 150ms;
   }
   .tools li:hover {
-    background: var(--surface-2);
+    border-color: var(--line-3);
+  }
+  .tools li.write {
+    border-style: dashed;
   }
   .tools .tname {
-    grid-area: name;
-    justify-self: start;
     font-size: 0.8125rem;
     padding: 0;
     border: 0;
@@ -792,20 +723,27 @@
     color: var(--text);
     font-weight: 500;
   }
-  .tsum {
-    grid-area: sum;
-    font-size: 0.8125rem;
-    color: var(--text-3);
-    line-height: 1.45;
-  }
   .wtag {
-    grid-area: tag;
-    justify-self: start;
-    height: 19px;
+    font-family: var(--font-mono);
     font-size: 10.5px;
     color: var(--warn);
-    border-color: transparent;
-    background: var(--warn-soft);
+  }
+  .endpoint {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 10px 14px;
+  }
+  .endpoint code {
+    font-size: 0.9375rem;
+    padding: 6px 10px;
+  }
+  .endpoint span {
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--text-3);
   }
   .tools-link,
   .more {
@@ -831,12 +769,26 @@
   .views {
     list-style: none;
     padding: 0;
-    display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: 14px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
   }
   .view {
-    padding: 24px;
+    display: inline-flex;
+    align-items: center;
+    gap: 9px;
+    padding: 6px 14px 6px 6px;
+    border: 1px solid var(--line-2);
+    border-radius: 999px;
+    background: var(--bg-elev);
+    font-size: var(--fs-sm);
+    font-weight: 500;
+    color: var(--text);
+  }
+  .view .view-icon {
+    width: 28px;
+    height: 28px;
+    border-radius: 999px;
   }
   .view-icon,
   .sec-icon {
@@ -847,17 +799,20 @@
     border-radius: 10px;
     border: 1px solid var(--line-2);
     background: var(--surface-2);
-    color: var(--accent);
+    color: var(--text-2);
   }
-  .view h3 {
-    margin-top: 18px;
-    font-size: 1.0625rem;
-    letter-spacing: -0.015em;
+  .shot {
+    margin: 28px 0 0;
+    border: 1px solid var(--line-2);
+    border-radius: var(--radius-lg);
+    overflow: hidden;
+    background: #0b0c0e;
+    box-shadow: var(--shadow-lg);
   }
-  .view p {
-    margin-top: 6px;
-    font-size: 0.9375rem;
-    color: var(--text-3);
+  .shot img {
+    display: block;
+    width: 100%;
+    height: auto;
   }
 
   /* ---------- History ---------- */
@@ -934,25 +889,6 @@
     margin-top: 3px;
     color: var(--accent);
   }
-  .source-meta {
-    margin-top: auto;
-    padding-top: 20px;
-    display: grid;
-    gap: 10px;
-  }
-  .source-meta div {
-    padding-top: 10px;
-    border-top: 1px solid var(--line);
-  }
-  .source-meta dt {
-    font-size: var(--fs-xs);
-    color: var(--text-4);
-  }
-  .source-meta dd {
-    margin: 2px 0 0;
-    font-size: var(--fs-sm);
-    color: var(--text-2);
-  }
 
   /* ---------- Ownership ---------- */
   .own-grid {
@@ -968,21 +904,23 @@
     gap: 0;
   }
   .principles li {
-    padding: 20px 0;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 18px 0;
     border-top: 1px solid var(--line);
   }
   .principles li:first-child {
     border-top: 0;
     padding-top: 0;
   }
-  .principles h3 {
-    font-size: 1.0625rem;
-    letter-spacing: -0.015em;
+  .principles li :global(svg) {
+    flex: none;
+    color: var(--signal);
   }
-  .principles p {
-    margin-top: 6px;
-    font-size: 0.9375rem;
-    color: var(--text-3);
+  .principles h3 {
+    font-size: 1.125rem;
+    letter-spacing: -0.015em;
   }
 
   /* ---------- Security ---------- */
@@ -999,15 +937,14 @@
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 32px 28px;
   }
+  .sec-list li {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+  }
   .sec-list h3 {
-    margin-top: 16px;
     font-size: 1.0625rem;
     letter-spacing: -0.015em;
-  }
-  .sec-list p {
-    margin-top: 6px;
-    font-size: 0.9375rem;
-    color: var(--text-3);
   }
   .states {
     list-style: none;
@@ -1231,12 +1168,6 @@
     color: var(--text-2);
     font-size: 0.9375rem;
     line-height: 1.7;
-  }
-  .inline {
-    color: var(--text);
-    text-decoration: underline;
-    text-decoration-color: var(--accent-line);
-    text-underline-offset: 3px;
   }
 
   /* ---------- Final ---------- */

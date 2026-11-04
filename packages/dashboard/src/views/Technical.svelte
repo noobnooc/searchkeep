@@ -201,10 +201,10 @@
   {/if}
 {/snippet}
 
-<PageHeader title="Technical" description="Web Vitals, sitemaps, crawl issues and URL inspection" meta={vitals.data ? `Web Vitals: ${rangeLabel(vitals.data.range)}` : undefined} />
+<PageHeader title="Technical" meta={vitals.data ? `Web Vitals: ${rangeLabel(vitals.data.range)}` : undefined} />
 
 <div class="stack">
-  <Card title="Core Web Vitals" subtitle="75th percentile per page from real visitors, via Cloudflare Web Analytics" busy={vitals.loading && Boolean(vitals.data)} flush>
+  <Card title="Core Web Vitals" subtitle="p75 · real visitors" busy={vitals.loading && Boolean(vitals.data)} flush>
     {#if vitals.error}
       <div class="pad"><ErrorBanner error={vitals.error} retry={vitals.reload} /></div>
     {:else if !vitals.data}
@@ -236,7 +236,7 @@
   </Card>
 
   <div class="grid-2">
-    <Card title="URL inspection" subtitle="Ask Search Console how Google sees one URL">
+    <Card title="URL inspection" subtitle="Live from Search Console">
       <form class="inspect" onsubmit={inspect}>
         <label class="sr-only" for="inspect-url">URL or path</label>
         <input id="inspect-url" class="input" type="text" inputmode="url" placeholder="/pricing or https://{ui.site?.domain ?? 'example.com'}/pricing" bind:value={inspectInput} autocomplete="off" spellcheck="false" />
@@ -270,11 +270,11 @@
           <Notes notes={inspection.notes} />
         </div>
       {:else}
-        <p class="hint">Live call to the URL Inspection API: coverage, canonical, last crawl and rich results. About 2,000 inspections per property per day.</p>
+        <p class="hint">About 2,000 inspections per property per day.</p>
       {/if}
     </Card>
 
-    <Card title="Bing crawl issues" subtitle="Latest snapshot from Bing Webmaster Tools" flush busy={issues.loading && Boolean(issues.data)}>
+    <Card title="Bing crawl issues" subtitle="Bing Webmaster Tools" flush busy={issues.loading && Boolean(issues.data)}>
       {#if issues.error}
         <div class="pad"><ErrorBanner error={issues.error} retry={issues.reload} /></div>
       {:else if !issues.data}
@@ -305,7 +305,7 @@
       <div class="pad"><Skeleton kind="table" rows={3} /></div>
     {:else if maps.sitemaps.length === 0}
       <EmptyState compact title="No sitemaps on record" icon="file">
-        <p>Submit a sitemap in Search Console, then refresh. Searchkeep is read-only by default and does not submit sitemaps unless <code>ENABLE_WRITES</code> is on.</p>
+        <p>Submit one in Search Console, then refresh.</p>
       </EmptyState>
     {:else}
       <DataTable label="Sitemaps" rows={maps.sitemaps} columns={sitemapCols} rowKey={(r) => r.path} />

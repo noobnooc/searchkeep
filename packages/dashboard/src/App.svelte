@@ -98,7 +98,7 @@
   <Shell>
     {#if ui.sites.length === 0 && router.view !== 'settings'}
       <EmptyState title="Add your first site" icon="globe">
-        <p>Tell Searchkeep which site to analyse. You only need its domain; Search Console, Bing and Cloudflare can be connected in the same form.</p>
+        <p>Just the domain. Connect sources in the same form.</p>
         {#snippet actions()}
           <a class="btn primary" href={href('settings', 'sites')}><Icon name="plus" size={14} /> Add a site</a>
         {/snippet}

@@ -145,7 +145,7 @@
   <PathText path={r.page} />
 {/snippet}
 
-<PageHeader title="Performance" description="Explore clicks, impressions, CTR and position" meta={d ? rangeLabel(d.range) : undefined} source brand />
+<PageHeader title="Performance" meta={d ? rangeLabel(d.range) : undefined} source brand />
 
 <div class="stack">
   <div class="toolbar" role="group" aria-label="Breakdown and filters">
@@ -176,7 +176,7 @@
   </div>
 
   {#if isBreakdown && (ui.brand !== 'all' || queryText || pageText)}
-    <p class="hint"><Icon name="info" size={13} /> Country and device totals cannot be combined with brand, query or page filters, so those filters are ignored here.</p>
+    <p class="hint"><Icon name="info" size={13} /> Brand, query and page filters don’t apply to country and device.</p>
   {/if}
 
   {#if perf.error}
@@ -209,7 +209,7 @@
             xLabel={dim === 'month' ? (x) => monthLabel(x) : undefined}
             tipTitle={dim === 'week' ? (x) => `Week of ${shortDate(x, true)}` : dim === 'month' ? (x) => monthLabel(x) : undefined}
             label="{chartMetric} by {dim}" />
-          {#if chartMetric === 'position'}<p class="hint small">Lower is better: position 1 is the top result.</p>{/if}
+          {#if chartMetric === 'position'}<p class="hint small">Lower is better.</p>{/if}
         {:else}
           <EmptyState compact title="Not enough points to draw a trend" icon="performance" />
         {/if}
@@ -221,7 +221,7 @@
         <div class="pad"><Skeleton kind="table" rows={10} /></div>
       {:else if rows.length === 0}
         <EmptyState compact title="No rows for these filters" icon="search">
-          <p>Try a longer date range or clear the filters. New data arrives with each sync.</p>
+          <p>Try a longer range or fewer filters.</p>
         </EmptyState>
       {:else}
         <DataTable label="Search performance by {dim}" {rows} {columns} {sort} onsort={(s) => (sort = s)} limit={100} rowKey={(r, i) => `${dimText(r)}|${i}`} />

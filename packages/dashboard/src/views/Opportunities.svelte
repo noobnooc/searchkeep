@@ -125,7 +125,6 @@
 
 <PageHeader
   title="Opportunities"
-  description="Ranked lists of what to improve next"
   meta={range ? rangeLabel(range) : undefined}
   source={tab === 'cannibalization' ? 'gsc-only' : true}
   brand

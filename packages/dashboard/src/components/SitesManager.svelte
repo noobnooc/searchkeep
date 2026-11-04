@@ -191,7 +191,7 @@
             <Icon name="sparkle" size={14} /> {discovering ? 'Looking…' : 'Auto-fill'}
           </button>
         </div>
-        <p class="hint">The hostname you want to analyse, without https://. For a subdomain (blog.example.com) add it as its own site.</p>
+        <p class="hint">Without https://. Add each subdomain as its own site.</p>
       </div>
 
       <div class="grid">
@@ -201,7 +201,7 @@
           <datalist id="sf-gsc-list">
             {#if discovery?.gscProperties.ok}{#each discovery.gscProperties.items as p (p.siteUrl)}<option value={p.siteUrl}>{p.permissionLevel}</option>{/each}{/if}
           </datalist>
-          <p class="hint">{discovery && !discovery.gscProperties.ok ? discovery.gscProperties.reason : 'A domain property (sc-domain:…) or a URL-prefix property (https://…/).'}</p>
+          <p class="hint">{discovery && !discovery.gscProperties.ok ? discovery.gscProperties.reason : 'sc-domain:example.com or https://example.com/'}</p>
         </div>
         <div class="row">
           <label for="sf-bing">Bing site URL</label>
@@ -234,7 +234,7 @@
         <div class="row">
           <label for="sf-brand">Brand regex</label>
           <input id="sf-brand" class="input mono" placeholder="acme|acme\s?corp" bind:value={form.brandRegex} autocomplete="off" spellcheck="false" />
-          <p class="hint">Optional. Queries matching it count as brand queries (case-insensitive).</p>
+          <p class="hint">Optional. Matching queries count as brand.</p>
         </div>
       </div>
 
@@ -251,7 +251,7 @@
     {#if configs.data.sites.length === 0}
       {#if !form}
         <EmptyState compact title="No sites yet" icon="globe">
-          <p>Add the first site you want to analyse. You only need its domain; connect Search Console, Bing and Cloudflare as you go.</p>
+          <p>Just the domain. Connect sources as you go.</p>
           {#snippet actions()}<button class="btn primary sm" onclick={openCreate}><Icon name="plus" size={14} /> Add site</button>{/snippet}
         </EmptyState>
       {/if}
