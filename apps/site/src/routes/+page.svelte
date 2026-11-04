@@ -16,14 +16,14 @@
   const worksWith: Record<'sources' | 'clients', { icon: IconName; name: string; color?: string }[]> = {
     sources: [
       { icon: 'searchconsole', name: 'Google Search Console', color: '#458cf5' },
-      { icon: 'bing', name: 'Bing Webmaster Tools' },
+      { icon: 'bing', name: 'Bing Webmaster Tools', color: '#258ffa' },
       { icon: 'cloudflare', name: 'Cloudflare AI crawlers', color: '#f38020' },
       { icon: 'cloudflare', name: 'Cloudflare Web Analytics', color: '#f38020' },
     ],
     clients: [
       { icon: 'claude', name: 'Claude', color: '#d97757' },
       { icon: 'cursor', name: 'Cursor' },
-      { icon: 'chat', name: 'ChatGPT' },
+      { icon: 'openai', name: 'ChatGPT' },
     ],
   };
 

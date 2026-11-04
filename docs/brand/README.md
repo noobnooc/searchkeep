@@ -88,5 +88,6 @@ red for errors, cool blue for agent notes) stay distinct from Signal.
 The website shows the marks of the services Searchkeep works with (Google Search Console,
 Cloudflare, Claude, Cursor) only to name those integrations. The paths come from
 [Simple Icons](https://simpleicons.org) (CC0) and live in `apps/site/src/lib/components/Icon.svelte`;
-the marks belong to their owners. Simple Icons does not carry Bing or OpenAI marks, so those two
-use neutral glyphs. Draw them in `currentColor`, at text size, never larger than our own mark.
+the Microsoft Bing and OpenAI marks come from earlier Simple Icons releases (11.15.0 and 13.21.0),
+since later ones dropped them. The marks belong to their owners. Draw them in `currentColor`, at
+text size, never larger than our own mark.

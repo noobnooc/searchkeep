@@ -185,7 +185,16 @@
     color: var(--text);
     font-weight: 550;
     background: var(--surface-2);
-    box-shadow: inset 2px 0 0 var(--accent);
+  }
+  /* "You are here": the Signal dot that ends the mark's line. */
+  .nav a[aria-current='page']::after {
+    content: '';
+    flex: none;
+    width: 5px;
+    height: 5px;
+    margin-left: auto;
+    border-radius: 50%;
+    background: var(--signal);
   }
 
   .content {
