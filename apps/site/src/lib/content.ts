@@ -571,7 +571,7 @@ export const AGENT_PREREQS: { icon: 'github' | 'cloud'; title: string; text: str
   },
 ];
 
-export const AGENT_RUNBOOK_URL = 'https://raw.githubusercontent.com/noobnooc/searchkeep/main/docs/deploy.md';
-
-export const AGENT_PROMPT = `Deploy Searchkeep to my Cloudflare account by following this runbook:
-${AGENT_RUNBOOK_URL}`;
+// A repository path, not a URL: the agent reads it with its GitHub access, so it works while the
+// repository is private as well as once it is public.
+export const AGENT_PROMPT = `Deploy Searchkeep to my Cloudflare account by following docs/deploy.md
+in the GitHub repository noobnooc/searchkeep.`;
