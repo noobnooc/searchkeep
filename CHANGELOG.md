@@ -49,6 +49,15 @@ Because users sync `main` at any time, the `Unreleased` section is always accura
 - The website's GEO funnel section is now a ribbon that narrows from crawled to cited to clicked.
   Dots stand for pages: stalled ones fade where they drop off, and clicked ones turn Signal. Each
   step shows its icon and its sources' marks. Motion is off for reduced-motion users.
+- More of the website explains with visuals instead of lists:
+  - Data sources: the three sources, with their marks and what each pulls, wired into the D1
+    database in your account.
+  - Security: a request passes Cloudflare Access, the JWT check and the setup checks on its way to
+    your data, while another is refused at Access. The readiness states follow as a short stepper.
+  - Ownership: each principle is a small picture (your account and no vendor server, the write
+    switch that is off, usage under the free plan, GitHub's Sync fork). The full architecture
+    diagram stays in the docs.
+  - MCP: the tools are grouped by what they answer, and the two the chat calls are marked.
 - Install with an AI agent: a two-line prompt to copy into Claude Code, Cursor, Codex or another
   agent, pointing it at `docs/deploy.md` in the repository (read with the agent's GitHub access), which now opens with the rules for agents (check GitHub and
   Cloudflare access, ask for the names, stop at [Human] steps, keep secrets out of chat). Shown as a

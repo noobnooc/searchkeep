@@ -4,13 +4,15 @@
   import DashboardMock from '#lib/components/visuals/DashboardMock.svelte';
   import ChatMock from '#lib/components/visuals/ChatMock.svelte';
   import HistoryTimeline from '#lib/components/visuals/HistoryTimeline.svelte';
-  import ArchitectureDiagram from '#lib/components/visuals/ArchitectureDiagram.svelte';
+  import SourcesFlow from '#lib/components/visuals/SourcesFlow.svelte';
+  import AccessGate from '#lib/components/visuals/AccessGate.svelte';
+  import Principles from '#lib/components/visuals/Principles.svelte';
   import AgentTranscript from '#lib/components/visuals/AgentTranscript.svelte';
   import HorizonLine from '#lib/components/visuals/HorizonLine.svelte';
   import GeoFunnelFlow from '#lib/components/visuals/GeoFunnelFlow.svelte';
   import AgentPrompt from '#lib/components/AgentPrompt.svelte';
   import { SITE, GITHUB } from '#lib/site.ts';
-  import { TOOLS, PRINCIPLES, FAQS, READINESS } from '#lib/content.ts';
+  import { TOOLS, FAQS } from '#lib/content.ts';
   import { organization, website, softwareApplication, faqPage } from '#lib/schema.ts';
 
   // Monochrome marks; each takes its brand color on hover.
@@ -37,18 +39,20 @@
     { icon: 'shield', title: 'Technical' },
   ];
 
-  const sources = [
-    { name: 'Google Search Console', pulls: ['Search Analytics', 'Sitemaps', 'URL Inspection'] },
-    { name: 'Bing Webmaster Tools', pulls: ['Search traffic', 'Crawl issues', 'AI citations (CSV)'] },
-    { name: 'Cloudflare', pulls: ['AI crawler requests', 'Web Analytics', 'Core Web Vitals'] },
+  // MCP tools, grouped by what they answer. The chat above calls the two marked as used.
+  const toolGroups: { icon: IconName; label: string; names: string[] }[] = [
+    { icon: 'chart', label: 'Search', names: ['query_performance', 'compare_periods'] },
+    { icon: 'zap', label: 'Opportunities', names: ['find_quick_wins', 'find_cannibalization', 'find_ctr_anomalies', 'find_content_decay'] },
+    { icon: 'bot', label: 'AI & GEO', names: ['geo_funnel', 'ai_crawlers'] },
+    { icon: 'globe', label: 'Site', names: ['inspect_url', 'list_sitemaps', 'submit_sitemap'] },
+    { icon: 'plug', label: 'Setup', names: ['list_sites', 'setup_status'] },
   ];
-
-  const security: { icon: IconName; title: string }[] = [
-    { icon: 'lock', title: 'Cloudflare Access in front' },
-    { icon: 'key', title: 'Managed OAuth for MCP' },
-    { icon: 'shield', title: 'JWT re-verified per request' },
-    { icon: 'eye', title: 'Locks again if a check breaks' },
-  ];
+  const grouped = new Set(toolGroups.flatMap((g) => g.names));
+  const groups = [
+    ...toolGroups.map((g) => ({ ...g, tools: TOOLS.filter((t) => g.names.includes(t.name)) })),
+    { icon: 'plug' as IconName, label: 'Other', names: [], tools: TOOLS.filter((t) => !grouped.has(t.name)) },
+  ].filter((g) => g.tools.length);
+  const usedInChat = new Set(['geo_funnel', 'ai_crawlers']);
 
   type Cell = { v: string; good?: boolean; no?: boolean };
   const comparison: { row: string; sk: Cell; saas: Cell }[] = [
@@ -159,14 +163,22 @@
           <span>13 tools</span>
           <span class="muted">12 read-only · 1 opt-in write</span>
         </div>
-        <ul>
-          {#each TOOLS as t (t.name)}
-            <li title={t.summary} class:write={!t.readOnly}>
-              <code class="tname">{t.name}</code>
-              {#if !t.readOnly}<span class="wtag">write · off</span>{/if}
-            </li>
+        <div class="groups">
+          {#each groups as g (g.label)}
+            <div class="group">
+              <span class="g-label"><Icon name={g.icon} size={14} />{g.label}</span>
+              <ul>
+                {#each g.tools as t (t.name)}
+                  <li title={t.summary} class:write={!t.readOnly} class:used={usedInChat.has(t.name)}>
+                    <code class="tname">{t.name}</code>
+                    {#if !t.readOnly}<span class="wtag">write · off</span>{/if}
+                  </li>
+                {/each}
+              </ul>
+            </div>
           {/each}
-        </ul>
+        </div>
+        <p class="used-note"><span class="used-dot"></span>Called in the chat</p>
         <a class="tools-link" href="/docs/mcp">Tool reference <Icon name="arrow" size={14} /></a>
       </div>
     </div>
@@ -223,20 +235,9 @@
     <div class="section-head">
       <span class="eyebrow">Data sources</span>
       <h2 id="sources-title">First-party data only.</h2>
-      <p class="lead">The Google Search Console, Bing Webmaster Tools and Cloudflare APIs you already have, synced into D1 every day.</p>
+      <p class="lead">The Google Search Console, Bing Webmaster Tools and Cloudflare APIs you already have, synced into a D1 database you own.</p>
     </div>
-    <ul class="sources">
-      {#each sources as s (s.name)}
-        <li class="source card">
-          <h3>{s.name}</h3>
-          <ul class="pulls">
-            {#each s.pulls as p (p)}
-              <li><Icon name="check" size={14} />{p}</li>
-            {/each}
-          </ul>
-        </li>
-      {/each}
-    </ul>
+    <SourcesFlow />
     <a class="more" href="/docs/data-sources">Data sources <Icon name="arrow" size={14} /></a>
   </div>
 </section>
@@ -249,14 +250,8 @@
       <h2 id="own-title">One Worker. Your account.</h2>
       <p class="lead">MCP, the dashboard and the sync share one Cloudflare Worker and one D1 database. No Searchkeep server.</p>
     </div>
-    <div class="own-grid">
-      <ArchitectureDiagram />
-      <ul class="principles">
-        {#each PRINCIPLES as p (p.title)}
-          <li><Icon name="check" size={16} /><h3>{p.title}</h3></li>
-        {/each}
-      </ul>
-    </div>
+    <Principles />
+    <a class="more" href="/docs/architecture">How it fits together <Icon name="arrow" size={14} /></a>
   </div>
 </section>
 
@@ -268,29 +263,7 @@
       <h2 id="sec-title">Locked until it’s safe.</h2>
       <p class="lead">Cloudflare Access in front, its JWT checked on every request, and no data until the setup is secure.</p>
     </div>
-    <div class="sec-grid">
-      <ul class="sec-list">
-        {#each security as s (s.title)}
-          <li>
-            <span class="sec-icon"><Icon name={s.icon} size={18} /></span>
-            <h3>{s.title}</h3>
-          </li>
-        {/each}
-      </ul>
-      <ol class="states card" aria-label="Readiness states">
-        {#each READINESS as r, i (r.id)}
-          <li class:ready={r.id === 'ready'}>
-            <span class="st-n">{i + 1}</span>
-            <div>
-              <code>{r.id}</code>
-              <span class="st-label">{r.label}</span>
-            </div>
-            <span class="st-badge">{r.id === 'ready' ? 'Serving' : 'Locked'}</span>
-          </li>
-        {/each}
-        <li class="st-foot">Sync runs only once <code>ready</code>.</li>
-      </ol>
-    </div>
+    <AccessGate />
   </div>
 </section>
 
@@ -553,9 +526,34 @@
     font-weight: 400;
     font-size: var(--fs-xs);
   }
-  .tools ul {
+  .groups {
+    display: grid;
+    padding: 2px 12px 4px;
+  }
+  .group {
+    display: grid;
+    grid-template-columns: 124px minmax(0, 1fr);
+    align-items: start;
+    gap: 12px;
+    padding: 12px 0;
+    border-top: 1px solid var(--line);
+  }
+  .g-label {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    height: 30px;
+    font-size: var(--fs-xs);
+    font-weight: 550;
+    color: var(--text-3);
+  }
+  .g-label :global(svg) {
+    color: var(--text-4);
+  }
+  .group ul {
     list-style: none;
-    padding: 4px 12px 8px;
+    margin: 0;
+    padding: 0;
     display: flex;
     flex-wrap: wrap;
     gap: 6px;
@@ -564,7 +562,8 @@
     display: inline-flex;
     align-items: center;
     gap: 8px;
-    padding: 6px 10px;
+    height: 30px;
+    padding: 0 10px;
     border: 1px solid var(--line-2);
     border-radius: 8px;
     background: var(--surface);
@@ -576,6 +575,28 @@
   }
   .tools li.write {
     border-style: dashed;
+  }
+  /* The tools the chat calls carry the Signal dot. */
+  .tools li.used {
+    border-color: var(--accent-line);
+  }
+  .tools li.used::after,
+  .used-dot {
+    content: '';
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--signal);
+  }
+  .used-note {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 4px 12px 0;
+    padding-top: 12px;
+    border-top: 1px solid var(--line);
+    font-size: var(--fs-xs);
+    color: var(--text-3);
   }
   .tools .tname {
     font-size: 0.8125rem;
@@ -652,8 +673,7 @@
     height: 28px;
     border-radius: 999px;
   }
-  .view-icon,
-  .sec-icon {
+  .view-icon {
     display: grid;
     place-items: center;
     width: 36px;
@@ -713,172 +733,6 @@
   }
   .stats dd.accent {
     color: var(--accent);
-  }
-
-  /* ---------- Sources ---------- */
-  .sources {
-    list-style: none;
-    padding: 0;
-    display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: 14px;
-  }
-  .source {
-    padding: 24px;
-    display: flex;
-    flex-direction: column;
-  }
-  .source h3 {
-    font-size: 1.125rem;
-    letter-spacing: -0.018em;
-  }
-  .pulls {
-    list-style: none;
-    padding: 0;
-    margin-top: 16px;
-    display: grid;
-    gap: 8px;
-    font-size: 0.9375rem;
-    color: var(--text-2);
-  }
-  .pulls li {
-    display: grid;
-    grid-template-columns: 14px 1fr;
-    gap: 10px;
-    line-height: 1.45;
-  }
-  .pulls :global(svg) {
-    margin-top: 3px;
-    color: var(--accent);
-  }
-
-  /* ---------- Ownership ---------- */
-  .own-grid {
-    display: grid;
-    grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr);
-    gap: 40px;
-    align-items: center;
-  }
-  .principles {
-    list-style: none;
-    padding: 0;
-    display: grid;
-    gap: 0;
-  }
-  .principles li {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    padding: 18px 0;
-    border-top: 1px solid var(--line);
-  }
-  .principles li:first-child {
-    border-top: 0;
-    padding-top: 0;
-  }
-  .principles li :global(svg) {
-    flex: none;
-    color: var(--signal);
-  }
-  .principles h3 {
-    font-size: 1.125rem;
-    letter-spacing: -0.015em;
-  }
-
-  /* ---------- Security ---------- */
-  .sec-grid {
-    display: grid;
-    grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr);
-    gap: 40px;
-    align-items: start;
-  }
-  .sec-list {
-    list-style: none;
-    padding: 0;
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 32px 28px;
-  }
-  .sec-list li {
-    display: flex;
-    flex-direction: column;
-    gap: 14px;
-  }
-  .sec-list h3 {
-    font-size: 1.0625rem;
-    letter-spacing: -0.015em;
-  }
-  .states {
-    list-style: none;
-    padding: 8px;
-  }
-  .states li {
-    display: grid;
-    grid-template-columns: 28px minmax(0, 1fr) auto;
-    align-items: center;
-    gap: 14px;
-    padding: 14px 14px;
-    border-radius: 10px;
-  }
-  .states li + li {
-    border-top: 1px solid var(--line);
-    border-radius: 0;
-  }
-  .st-n {
-    display: grid;
-    place-items: center;
-    width: 28px;
-    height: 28px;
-    border-radius: 8px;
-    border: 1px solid var(--line-2);
-    font-size: var(--fs-xs);
-    font-weight: 600;
-    color: var(--text-3);
-    font-variant-numeric: tabular-nums;
-  }
-  .states code {
-    font-size: 0.8125rem;
-    padding: 0;
-    border: 0;
-    background: none;
-    color: var(--text);
-  }
-  .st-label {
-    display: block;
-    font-size: var(--fs-xs);
-    color: var(--text-3);
-  }
-  .st-badge {
-    font-size: 11px;
-    font-weight: 600;
-    padding: 3px 9px;
-    border-radius: 999px;
-    color: var(--text-3);
-    border: 1px solid var(--line-2);
-    background: var(--surface-2);
-  }
-  .states li.ready {
-    background: var(--accent-soft);
-    border-radius: 10px;
-    border-top-color: transparent;
-  }
-  .states li.ready .st-n {
-    border-color: var(--accent-line);
-    color: var(--accent);
-  }
-  .states li.ready .st-badge {
-    color: var(--accent-ink);
-    background: var(--accent-fill);
-    border-color: transparent;
-  }
-  .states .st-foot {
-    display: block;
-    font-size: var(--fs-xs);
-    color: var(--text-3);
-    line-height: 1.55;
-  }
-  .states .st-foot code {
-    font-size: 0.95em;
   }
 
   /* ---------- Agent ---------- */
@@ -1040,8 +894,6 @@
   @media (max-width: 1000px) {
     .mcp-grid,
     .history-grid,
-    .own-grid,
-    .sec-grid,
     .agent-grid,
     .faq-grid {
       grid-template-columns: minmax(0, 1fr);
@@ -1051,20 +903,14 @@
     .faq-grid {
       gap: 32px;
     }
-    .views,
-    .sources {
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-    }
   }
   @media (max-width: 640px) {
-    .views,
-    .sources,
-    .sec-list {
+    .group {
       grid-template-columns: minmax(0, 1fr);
+      gap: 6px;
     }
-    .view,
-    .source {
-      padding: 20px;
+    .g-label {
+      height: auto;
     }
     .stats {
       gap: 28px;
