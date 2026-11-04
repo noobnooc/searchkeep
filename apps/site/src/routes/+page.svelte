@@ -12,6 +12,21 @@
   import { TOOLS, PRINCIPLES, FAQS, READINESS } from '#lib/content.ts';
   import { organization, website, softwareApplication, faqPage } from '#lib/schema.ts';
 
+  // Monochrome marks; each takes its brand color on hover.
+  const worksWith: Record<'sources' | 'clients', { icon: IconName; name: string; color?: string }[]> = {
+    sources: [
+      { icon: 'searchconsole', name: 'Google Search Console', color: '#458cf5' },
+      { icon: 'bing', name: 'Bing Webmaster Tools' },
+      { icon: 'cloudflare', name: 'Cloudflare AI crawlers', color: '#f38020' },
+      { icon: 'cloudflare', name: 'Cloudflare Web Analytics', color: '#f38020' },
+    ],
+    clients: [
+      { icon: 'claude', name: 'Claude', color: '#d97757' },
+      { icon: 'cursor', name: 'Cursor' },
+      { icon: 'chat', name: 'ChatGPT' },
+    ],
+  };
+
   const funnel = [
     { step: 'Crawled', source: 'Cloudflare AI crawlers', value: 412 },
     { step: 'Cited', source: 'Bing AI Performance', value: 96 },
@@ -109,14 +124,13 @@
   <div class="container strip-inner">
     <h2 id="works-with" class="strip-title">Built on data you already own</h2>
     <ul>
-      <li>Google Search Console</li>
-      <li>Bing Webmaster Tools</li>
-      <li>Cloudflare AI crawler traffic</li>
-      <li>Cloudflare Web Analytics</li>
+      {#each worksWith.sources as w (w.name)}
+        <li style:--brand={w.color}><Icon name={w.icon} size={17} />{w.name}</li>
+      {/each}
       <li class="sep" aria-hidden="true"></li>
-      <li>Claude</li>
-      <li>Cursor</li>
-      <li>ChatGPT</li>
+      {#each worksWith.clients as w (w.name)}
+        <li style:--brand={w.color}><Icon name={w.icon} size={17} />{w.name}</li>
+      {/each}
     </ul>
   </div>
 </section>
@@ -517,6 +531,19 @@
     font-weight: 600;
     letter-spacing: -0.02em;
     color: var(--text-2);
+  }
+  .strip li {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .strip li :global(svg) {
+    flex: none;
+    color: var(--text-3);
+    transition: color 200ms var(--ease);
+  }
+  .strip li:hover :global(svg) {
+    color: var(--brand, var(--text));
   }
   .strip .sep {
     width: 1px;

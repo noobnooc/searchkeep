@@ -40,6 +40,9 @@ Because users sync `main` at any time, the `Unreleased` section is always accura
   Signal orange, no gradients or glows. The website hero, Open Graph image and closing call to action
   draw the same line at full width. New favicons, app icons (including a maskable icon), dashboard
   palette and Worker setup page. Brand files and usage notes are in `docs/brand/`.
+- The website's "Built on data you already own" strip shows each source's and client's mark
+  (monochrome, brand color on hover), and the agent panel uses the Cloudflare logo. Marks come from
+  Simple Icons; Bing and ChatGPT, which it does not carry, use neutral glyphs.
 - Install with an AI agent: a two-line prompt to copy into Claude Code, Cursor, Codex or another
   agent, pointing it at `docs/deploy.md` in the repository (read with the agent's GitHub access), which now opens with the rules for agents (check GitHub and
   Cloudflare access, ask for the names, stop at [Human] steps, keep secrets out of chat). Shown as a
