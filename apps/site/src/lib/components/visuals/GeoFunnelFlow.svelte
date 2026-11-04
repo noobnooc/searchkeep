@@ -106,7 +106,7 @@
 <div class="flow card">
   <ol class="cols">
     {#each steps as s, i (s.step)}
-      <li style:--n={s.value}>
+      <li>
         <div class="head">
           <span class="ico t{i}"><Icon name={s.icon} size={18} /></span>
           <h3>{s.step}</h3>
@@ -158,8 +158,8 @@
 
   <div class="stalls">
     <p class="fineprint">Figures are illustrative. Cited comes from Bing AI Performance, imported as CSV.</p>
-    {#each stalls as st, i (st.pill)}
-      <div class="stall" style:--i={i}>
+    {#each stalls as st (st.pill)}
+      <div class="stall">
         <span class="pill">{st.pill}</span>
         <h3>{st.title}</h3>
         <span class="lost"><strong>{st.pages}</strong> pages stall here</span>
@@ -171,7 +171,6 @@
 <style>
   .flow {
     padding: 26px 28px 24px;
-    timeline-scope: --ribbon;
   }
   .cols,
   .stalls {
@@ -216,8 +215,7 @@
     margin-top: 14px;
     font-variant-numeric: tabular-nums;
   }
-  .count,
-  .count::before {
+  .count {
     font-family: var(--font-display);
     font-size: clamp(1.75rem, 1.2rem + 1.6vw, 2.5rem);
     font-weight: 600;
@@ -263,7 +261,6 @@
     height: auto;
     margin-top: 18px;
     overflow: visible;
-    view-timeline-name: --ribbon;
   }
   .drop-line {
     stroke: var(--line-2);
@@ -343,13 +340,8 @@
     color: var(--text-4);
   }
 
-  /* Motion, tied to scroll where it can be: the ribbon unrolls, the counts climb with it, the
-     stalls arrive in turn, and the end of the ribbon pings like today's dot in the hero. */
-  @property --count {
-    syntax: '<integer>';
-    inherits: false;
-    initial-value: 0;
-  }
+  /* Motion: pages flow through the ribbon, and its end pings like today's dot in the hero.
+     Both are off for reduced motion. */
   @media (prefers-reduced-motion: reduce) {
     .dots {
       display: none;
@@ -358,48 +350,6 @@
   @media (prefers-reduced-motion: no-preference) {
     .ring {
       animation: ping 2.6s var(--ease) infinite;
-    }
-    .ribbon {
-      animation: unroll linear both;
-      animation-timeline: view();
-      animation-range: entry 0% entry 100%;
-    }
-    .stall {
-      animation: rise linear both;
-      animation-timeline: view();
-      animation-range: entry calc(20% + var(--i) * 25%) entry calc(80% + var(--i) * 20%);
-    }
-    @supports (animation-timeline: view()) {
-      .count {
-        font-size: 0;
-      }
-      .count::before {
-        --count: var(--n);
-        counter-reset: c var(--count);
-        content: counter(c);
-        animation: count linear both;
-        animation-timeline: --ribbon;
-        animation-range: entry 0% entry 100%;
-      }
-    }
-  }
-  @keyframes unroll {
-    from {
-      clip-path: inset(-20px 100% -20px 0);
-    }
-    to {
-      clip-path: inset(-20px -20px -20px 0);
-    }
-  }
-  @keyframes count {
-    from {
-      --count: 0;
-    }
-  }
-  @keyframes rise {
-    from {
-      opacity: 0;
-      transform: translateY(8px);
     }
   }
   @keyframes ping {
