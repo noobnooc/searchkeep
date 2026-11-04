@@ -66,8 +66,8 @@ Not included, by design: backlink data, competitor data, rank tracking and SERP 
 Paste this into Claude Code, Cursor, Codex or any agent that can use MCP or a terminal:
 
 ```text
-Deploy Searchkeep to my Cloudflare account by following this runbook:
-https://raw.githubusercontent.com/noobnooc/searchkeep/main/docs/deploy.md
+Deploy Searchkeep to my Cloudflare account by following docs/deploy.md
+in the GitHub repository noobnooc/searchkeep.
 ```
 
 **Required:** the agent needs GitHub access and Cloudflare access (an MCP server or CLI for each,

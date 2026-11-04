@@ -41,7 +41,7 @@ Because users sync `main` at any time, the `Unreleased` section is always accura
   draw the same line at full width. New favicons, app icons (including a maskable icon), dashboard
   palette and Worker setup page. Brand files and usage notes are in `docs/brand/`.
 - Install with an AI agent: a two-line prompt to copy into Claude Code, Cursor, Codex or another
-  agent, pointing it at `docs/deploy.md`, which now opens with the rules for agents (check GitHub and
+  agent, pointing it at `docs/deploy.md` in the repository (read with the agent's GitHub access), which now opens with the rules for agents (check GitHub and
   Cloudflare access, ask for the names, stop at [Human] steps, keep secrets out of chat). Shown as a
   compact panel with the required GitHub and Cloudflare access on the website, and in the README.
   The site build checks that the README and the website show the same prompt.
