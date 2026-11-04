@@ -40,6 +40,12 @@ export interface Store {
   // ---- sites --------------------------------------------------------------
   /** Make sure every configured site exists (by id). Existing data is kept. */
   syncSites(sites: SiteConfig[]): Promise<void>;
+  /** Sites managed in the dashboard (the SITES secret is not stored). */
+  listSiteConfigs(): Promise<SiteConfig[]>;
+  /** Creates or replaces a dashboard-managed site. */
+  saveSiteConfig(site: SiteConfig): Promise<void>;
+  /** Removes a dashboard-managed site's configuration; its data is kept. */
+  deleteSiteConfig(id: string): Promise<boolean>;
 
   // ---- writes -------------------------------------------------------------
   writeSearchFacts(siteId: string, source: SearchSource, rows: SearchFactInput[]): Promise<number>;

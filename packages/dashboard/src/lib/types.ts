@@ -406,3 +406,27 @@ export interface ImportResponse {
   rowsWritten: number;
   columns: { page: string; citations: string; date: string | null };
 }
+
+export interface SiteConfig {
+  id: string;
+  domain: string;
+  gscProperty?: string;
+  bingSiteUrl?: string;
+  cloudflareZoneId?: string;
+  webAnalyticsSiteTag?: string;
+  brandRegex?: string;
+  origin: 'secret' | 'dashboard';
+}
+
+export interface SiteConfigsResponse {
+  sites: SiteConfig[];
+}
+
+export type Discovery<T> = { ok: true; items: T[] } | { ok: false; reason: string };
+
+export interface DiscoverResponse {
+  gscProperties: Discovery<{ siteUrl: string; permissionLevel: string }>;
+  bingSites: Discovery<{ url: string; verified: boolean }>;
+  zones: Discovery<{ id: string; name: string }>;
+  webAnalytics: Discovery<{ siteTag: string; host: string | null }>;
+}

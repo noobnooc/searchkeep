@@ -24,6 +24,29 @@ Because users sync `main` at any time, the `Unreleased` section is always accura
 
 ## [Unreleased]
 
+### Added
+
+- Manage sites in the dashboard: **Settings → Sites** adds, edits and removes the sites Searchkeep
+  analyses. Sites are stored in D1 (`site_configs` table). **Auto-fill** looks the domain up in
+  Search Console, Bing Webmaster Tools and Cloudflare with the configured credentials and fills in
+  the identifiers it finds. New API: `GET`/`POST /api/site-configs`,
+  `DELETE /api/site-configs/:id`, `GET /api/discover`.
+
+### Changed
+
+- The `SITES` secret is now optional. Sites defined there keep working and appear read-only in the
+  dashboard; when both define the same `id`, the secret wins. Site definitions are validated more
+  strictly: a site with an invalid `brandRegex` (or other invalid field) is now skipped and reported
+  by `setup_status` instead of being loaded without the field.
+
+### Upgrade notes
+
+- Nothing is required. The new table is created automatically on the first request after syncing.
+- Optional: to pick Cloudflare zones and Web Analytics sites from a list when adding a site, edit the
+  API token in `CLOUDFLARE_API_TOKEN` (Cloudflare dashboard → **My Profile** or **Account** →
+  **API Tokens** → your token → **Edit**) and add **Zone: Read** and **Account Settings: Read**.
+  Without them you type the zone ID and site tag yourself.
+
 ## [0.1.0] - 2026-11-03
 
 First release.

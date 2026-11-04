@@ -295,6 +295,25 @@ export function storeContract(name: string, makeStore: () => Promise<Store>): vo
       ]);
     });
 
+    it('stores dashboard-managed site configs', async () => {
+      await store.saveSiteConfig({ id: 'blog', domain: 'blog.example.com', gscProperty: 'sc-domain:example.com' });
+      await store.saveSiteConfig({ id: 'blog', domain: 'blog.example.com', bingSiteUrl: 'https://blog.example.com/' });
+      await store.saveSiteConfig({
+        id: 'shop',
+        domain: 'shop.example.com',
+        cloudflareZoneId: 'zone2',
+        webAnalyticsSiteTag: 'tag2',
+        brandRegex: 'shop',
+      });
+      expect(await store.listSiteConfigs()).toEqual([
+        { id: 'blog', domain: 'blog.example.com', bingSiteUrl: 'https://blog.example.com/' },
+        { id: 'shop', domain: 'shop.example.com', cloudflareZoneId: 'zone2', webAnalyticsSiteTag: 'tag2', brandRegex: 'shop' },
+      ]);
+      expect(await store.deleteSiteConfig('blog')).toBe(true);
+      expect(await store.deleteSiteConfig('blog')).toBe(false);
+      expect((await store.listSiteConfigs()).map((s) => s.id)).toEqual(['shop']);
+    });
+
     it('records sync runs', async () => {
       const id = await store.startSyncRun({ startedAt: '2026-10-01T00:00:00.000Z', trigger: 'manual', status: 'running', rowsWritten: 0 });
       await store.finishSyncRun(id, { status: 'ok', rowsWritten: 5, finishedAt: '2026-10-01T00:00:01.000Z', details: [] });

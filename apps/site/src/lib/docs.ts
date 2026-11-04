@@ -69,7 +69,7 @@ export const DOCS: DocSection[] = [
         toc: [
           { id: 'where-config-lives', title: 'Where configuration lives' },
           { id: 'secrets', title: 'Secrets reference' },
-          { id: 'sites', title: 'SITES' },
+          { id: 'sites', title: 'Sites' },
           { id: 'brand', title: 'Brand and non-brand' },
           { id: 'writes', title: 'Enabling writes' },
           { id: 'sync-budgets', title: 'Sync budgets' },

@@ -23,7 +23,7 @@ export interface Tool {
 const site: ToolParam = {
   name: 'site',
   type: 'string',
-  description: 'Site `id` or domain from `SITES`. Optional when only one site is configured; see `list_sites`.',
+  description: 'Site `id` or domain (see `list_sites`). Optional when only one site is configured.',
 };
 const start: ToolParam = {
   name: 'start',
@@ -62,7 +62,7 @@ export const TOOLS: Tool[] = [
     name: 'list_sites',
     summary: 'Configured sites, their connected sources and stored date ranges.',
     description:
-      'Lists every site in `SITES` with the sources connected for it (GSC, Bing, Cloudflare AI crawlers, Web Analytics) and, for each dataset, the first and last date stored in D1. Start here.',
+      'Lists every configured site (added in the dashboard or the `SITES` secret) with the sources connected for it (GSC, Bing, Cloudflare AI crawlers, Web Analytics) and, for each dataset, the first and last date stored in D1. Start here.',
     readOnly: true,
     params: [],
     example: 'Which sites are connected, and how far back does each one’s data go?',
@@ -340,8 +340,9 @@ export const SECRETS: Secret[] = [
   },
   {
     name: 'SITES',
-    required: 'yes',
-    description: 'JSON array describing each site and the identifiers it has in every source.',
+    required: 'optional',
+    description:
+      'Optional JSON array describing each site and its identifiers in every source. Easier: add sites in the dashboard (Settings → Sites), which auto-fills the identifiers it can find.',
   },
   {
     name: 'GSC_CLIENT_EMAIL',

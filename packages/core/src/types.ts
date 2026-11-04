@@ -26,6 +26,8 @@ export interface SiteConfig {
   webAnalyticsSiteTag?: string;
   /** Overrides the global brand regex for this site. */
   brandRegex?: string;
+  /** Where the site is defined: the SITES secret (read-only) or the dashboard. */
+  origin?: 'secret' | 'dashboard';
 }
 
 export interface DateRange {

@@ -97,10 +97,10 @@
 {:else}
   <Shell>
     {#if ui.sites.length === 0 && router.view !== 'settings'}
-      <EmptyState title="No sites configured" icon="globe">
-        <p>Add your sites to the <code>SITES</code> Worker secret (a JSON array with a domain plus the Search Console, Bing and Cloudflare identifiers you use), then reload.</p>
+      <EmptyState title="Add your first site" icon="globe">
+        <p>Tell Searchkeep which site to analyse. You only need its domain; Search Console, Bing and Cloudflare can be connected in the same form.</p>
         {#snippet actions()}
-          <a class="btn" href={href('settings')}><Icon name="settings" size={14} /> Open setup checks</a>
+          <a class="btn primary" href={href('settings', 'sites')}><Icon name="plus" size={14} /> Add a site</a>
         {/snippet}
       </EmptyState>
     {:else}

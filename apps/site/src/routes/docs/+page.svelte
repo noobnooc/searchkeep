@@ -6,7 +6,7 @@
   const cards = [
     { href: '/docs/deploy', title: 'Deploy', text: 'Fork, connect Workers Builds, add Access and credentials. About 30–45 minutes.' },
     { href: '/docs/mcp', title: 'Connect an AI client', text: 'Add your /mcp endpoint to Claude, Cursor or ChatGPT and browse the tools.' },
-    { href: '/docs/configuration', title: 'Configuration', text: 'Every secret, the SITES format, brand regex and write access.' },
+    { href: '/docs/configuration', title: 'Configuration', text: 'Every secret, adding sites, brand regex and write access.' },
     { href: '/docs/architecture', title: 'Architecture', text: 'One Worker, three entrances, one core and one D1 database.' },
   ];
 </script>

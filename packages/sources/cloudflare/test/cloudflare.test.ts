@@ -58,6 +58,32 @@ describe('cloudflare', () => {
     ]);
   });
 
+  it('lists zones and Web Analytics sites across pages', async () => {
+    const cf = createCloudflareClient({
+      apiToken: 't',
+      fetch: (async (url: string) => {
+        if (url.includes('/zones')) {
+          const page = Number(new URL(url).searchParams.get('page'));
+          return Response.json({
+            success: true,
+            result: [{ id: `z${page}`, name: `site${page}.com` }],
+            result_info: { page, total_pages: 2 },
+          });
+        }
+        return Response.json({
+          success: true,
+          result: [{ site_tag: 'abc', host: null, ruleset: { zone_name: 'acme.com' } }],
+          result_info: { page: 1, total_pages: 1 },
+        });
+      }) as unknown as typeof fetch,
+    });
+    expect(await cf.listZones!('acct')).toEqual([
+      { id: 'z1', name: 'site1.com' },
+      { id: 'z2', name: 'site2.com' },
+    ]);
+    expect(await cf.listWebAnalyticsSites!('acct')).toEqual([{ siteTag: 'abc', host: 'acme.com' }]);
+  });
+
   it('surfaces GraphQL errors', async () => {
     const cf = createCloudflareClient({
       apiToken: 't',

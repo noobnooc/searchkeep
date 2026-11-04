@@ -150,6 +150,40 @@ export class D1Store implements Store {
       .run();
   }
 
+  async listSiteConfigs(): Promise<SiteConfig[]> {
+    const rows = await this.orm.select().from(schema.siteConfigs).orderBy(schema.siteConfigs.id).all();
+    return rows.map((r) => {
+      const site: SiteConfig = { id: r.id, domain: r.domain };
+      if (r.gscProperty) site.gscProperty = r.gscProperty;
+      if (r.bingSiteUrl) site.bingSiteUrl = r.bingSiteUrl;
+      if (r.cloudflareZoneId) site.cloudflareZoneId = r.cloudflareZoneId;
+      if (r.webAnalyticsSiteTag) site.webAnalyticsSiteTag = r.webAnalyticsSiteTag;
+      if (r.brandRegex) site.brandRegex = r.brandRegex;
+      return site;
+    });
+  }
+
+  async saveSiteConfig(site: SiteConfig): Promise<void> {
+    const values = {
+      domain: site.domain,
+      gscProperty: site.gscProperty ?? null,
+      bingSiteUrl: site.bingSiteUrl ?? null,
+      cloudflareZoneId: site.cloudflareZoneId ?? null,
+      webAnalyticsSiteTag: site.webAnalyticsSiteTag ?? null,
+      brandRegex: site.brandRegex ?? null,
+    };
+    await this.orm
+      .insert(schema.siteConfigs)
+      .values({ id: site.id, ...values })
+      .onConflictDoUpdate({ target: schema.siteConfigs.id, set: { ...values, updatedAt: new Date().toISOString() } })
+      .run();
+  }
+
+  async deleteSiteConfig(id: string): Promise<boolean> {
+    const res = await this.db.prepare('DELETE FROM site_configs WHERE id = ?1').bind(id).run();
+    return (res.meta?.changes ?? 0) > 0;
+  }
+
   // ---------------------------------------------------------------- writes
 
   async writeSearchFacts(siteId: string, source: SearchSource, rows: SearchFactInput[]): Promise<number> {

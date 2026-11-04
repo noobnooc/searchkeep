@@ -293,9 +293,16 @@ cloudflared access curl https://searchkeep.example.com/api/sync -X POST`;
 
 <h3 id="cred-sites">Sites</h3>
 <p>
-  Describe the sites to analyze in a JSON array and store it in the <code>SITES</code> secret. Only
-  <code>domain</code> is required; leave out the fields of sources you do not use. The full format, and where to find
-  each identifier, is in <a href="/docs/configuration#sites">Configuration</a>. Keep the file outside your clone.
+  <strong>Easiest:</strong> once the dashboard opens, go to <strong>Settings → Sites → Add site</strong>, type the
+  domain and press <strong>Auto-fill</strong>. Searchkeep looks the domain up in Search Console, Bing and Cloudflare with
+  the credentials above and fills in the identifiers it finds; you can also type them yourself. Sites added there are
+  stored in your D1 database and can be edited or removed on the same page.
+</p>
+<p>
+  <strong>Scripted setups and agents</strong> can instead describe the sites in a JSON array and store it in the
+  <code>SITES</code> secret (sites from the secret show up read-only in the dashboard). Only <code>domain</code> is
+  required; leave out the fields of sources you do not use. The full format, and where to find each identifier, is in
+  <a href="/docs/configuration#sites">Configuration</a>. Keep the file outside your clone.
 </p>
 <CodeBlock lang="json" title="sites.json" code={SITES_EXAMPLE} />
 <CodeBlock lang="bash" code={sitesSecret} />

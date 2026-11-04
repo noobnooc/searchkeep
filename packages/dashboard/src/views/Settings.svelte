@@ -9,6 +9,7 @@
   import PageHeader from '../components/PageHeader.svelte';
   import Pill from '../components/Pill.svelte';
   import Segmented from '../components/Segmented.svelte';
+  import SitesManager from '../components/SitesManager.svelte';
   import Skeleton from '../components/Skeleton.svelte';
   import { apiUrl, request } from '../lib/api';
   import { dateTime, int, isoDate, shortDate, timeAgo } from '../lib/format';
@@ -154,9 +155,11 @@
   <Pill tone={r.status === 'ok' ? 'ok' : r.status === 'error' ? 'error' : 'neutral'} title={r.message}>{r.status}</Pill>
 {/snippet}
 
-<PageHeader title="Settings" description="Setup checks, sync, imports and AI client connections" range={false} />
+<PageHeader title="Settings" description="Sites, setup checks, sync, imports and AI client connections" range={false} />
 
 <div class="stack">
+  <SitesManager {reloadSites} />
+
   <div class="grid-2">
     <Card title="Setup checks" id="settings-checks" busy={setup.loading && Boolean(setup.data)}>
       {#snippet actions()}

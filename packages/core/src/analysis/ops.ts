@@ -27,6 +27,7 @@ export async function listSites(ctx: OpsContext) {
     sites: ctx.config.sites.map((site) => ({
       id: site.id,
       domain: site.domain,
+      origin: site.origin ?? 'secret',
       sources: sourcesOf(ctx, site),
       data: coverage.filter((c) => c.siteId === site.id).map(({ siteId: _s, ...rest }) => rest),
     })),
@@ -91,9 +92,9 @@ export async function setupStatus(ctx: OpsContext, p: { readiness: ReadinessRepo
   for (const e of config.errors) add({ id: 'config', label: 'Configuration', status: 'error', detail: e });
   add({
     id: 'config.sites',
-    label: 'SITES has at least one site',
+    label: 'At least one site is configured',
     status: config.sites.length > 0 ? 'ok' : 'error',
-    ...(config.sites.length ? {} : { detail: 'Set the SITES secret (JSON array).' }),
+    ...(config.sites.length ? {} : { detail: 'Add a site in the dashboard (Settings → Sites), or set the SITES secret.' }),
   });
   add({ id: 'config.cloudflare_account', label: 'CLOUDFLARE_ACCOUNT_ID is set', status: config.cloudflare.accountId ? 'ok' : 'error' });
   add({ id: 'config.cloudflare_token', label: 'CLOUDFLARE_API_TOKEN is set', status: config.cloudflare.apiToken ? 'ok' : 'error' });
@@ -234,4 +235,35 @@ export async function overview(ctx: OpsContext, p: CommonParams) {
     crawlers: { total: crawlers.totalRequests, top: crawlers.rows },
     notes: r.notes,
   };
+}
+
+type Discovery<T> = { ok: true; items: T[] } | { ok: false; reason: string };
+
+async function discover<T>(enabled: boolean, reason: string, fn: () => Promise<T[]>): Promise<Discovery<T>> {
+  if (!enabled) return { ok: false, reason };
+  try {
+    return { ok: true, items: await fn() };
+  } catch (err) {
+    return { ok: false, reason: safeMessage(err) };
+  }
+}
+
+/**
+ * Lists what the configured credentials can see, so the dashboard can offer
+ * choices instead of asking for identifiers. Every part degrades gracefully.
+ */
+export async function discoverSources(ctx: OpsContext) {
+  const { gsc, bing, cloudflare } = ctx.clients;
+  const accountId = ctx.config.cloudflare.accountId;
+  const [gscProperties, bingSites, zones, webAnalytics] = await Promise.all([
+    discover(Boolean(gsc), 'Search Console credentials (GSC_CLIENT_EMAIL, GSC_PRIVATE_KEY) are not set.', () => gsc!.listProperties()),
+    discover(Boolean(bing), 'BING_API_KEY is not set.', () => bing!.getUserSites()),
+    discover(Boolean(cloudflare?.listZones && accountId), 'CLOUDFLARE_API_TOKEN or CLOUDFLARE_ACCOUNT_ID is not set.', () =>
+      cloudflare!.listZones!(accountId!),
+    ),
+    discover(Boolean(cloudflare?.listWebAnalyticsSites && accountId), 'CLOUDFLARE_API_TOKEN or CLOUDFLARE_ACCOUNT_ID is not set.', () =>
+      cloudflare!.listWebAnalyticsSites!(accountId!),
+    ),
+  ]);
+  return { gscProperties, bingSites, zones, webAnalytics };
 }

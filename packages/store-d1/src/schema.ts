@@ -190,3 +190,16 @@ export const syncRuns = sqliteTable(
   },
   (t) => [index('sync_runs_started').on(t.startedAt)],
 );
+
+/** Sites managed in the dashboard. Sites from the SITES secret are not stored here. */
+export const siteConfigs = sqliteTable('site_configs', {
+  id: text('id').primaryKey(),
+  domain: text('domain').notNull(),
+  gscProperty: text('gsc_property'),
+  bingSiteUrl: text('bing_site_url'),
+  cloudflareZoneId: text('cloudflare_zone_id'),
+  webAnalyticsSiteTag: text('web_analytics_site_tag'),
+  brandRegex: text('brand_regex'),
+  createdAt: text('created_at').notNull().default(now),
+  updatedAt: text('updated_at').notNull().default(now),
+});
