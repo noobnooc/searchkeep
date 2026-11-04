@@ -21,7 +21,7 @@ jobs:
       contents: read
       issues: write
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           sparse-checkout: .github/labels.yml
           sparse-checkout-cone-mode: false
@@ -31,7 +31,7 @@ jobs:
         run: yq -o=json '.' .github/labels.yml > "$RUNNER_TEMP/labels.json"
 
       - name: Create or update labels
-        uses: actions/github-script@v8
+        uses: actions/github-script@v9
         env:
           LABELS_FILE: ${{ runner.temp }}/labels.json
         with:
