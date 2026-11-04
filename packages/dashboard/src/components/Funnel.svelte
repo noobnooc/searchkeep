@@ -43,30 +43,40 @@
   const hold = $derived(col * 0.22);
   const half = $derived(shares.map((s) => (s > 0 ? Math.max(1.5, (H / 2 - 2) * s) : 0)));
 
+  // The ribbon draws its own rounded ends (no clip mask, which would cut the outline at the
+  // corners) and stays half a stroke inside the SVG so the outline is never clipped.
+  const R = 6;
+  const IN = 0.75;
   const ribbon = $derived.by(() => {
     const n = stages.length;
     if (width === 0 || n === 0) return '';
     const cy = H / 2;
-    const end = (i: number) => (i === n - 1 ? width : xs[i]! + hold);
-    let d = `M0,${cy - half[0]!}`;
+    const x0 = IN;
+    const xe = width - IN;
+    const end = (i: number) => (i === n - 1 ? xe : xs[i]! + hold);
+    const h0 = half[0]!;
+    const hn = half[n - 1]!;
+    const r0 = Math.min(R, h0, (end(0) - x0) / 2);
+    const rn = Math.min(R, hn, (xe - Math.max(x0, xs[n - 1]!)) / 2);
+    let d = `M${x0},${cy - h0 + r0}Q${x0},${cy - h0} ${x0 + r0},${cy - h0}`;
     for (let i = 0; i < n; i++) {
-      d += `L${end(i)},${cy - half[i]!}`;
+      d += `L${i === n - 1 ? xe - rn : end(i)},${cy - half[i]!}`;
       if (i < n - 1) {
         const x1 = xs[i + 1]!;
         const mx = (end(i) + x1) / 2;
         d += `C${mx},${cy - half[i]!} ${mx},${cy - half[i + 1]!} ${x1},${cy - half[i + 1]!}`;
       }
     }
-    d += `L${width},${cy + half[n - 1]!}`;
+    d += `Q${xe},${cy - hn} ${xe},${cy - hn + rn}L${xe},${cy + hn - rn}Q${xe},${cy + hn} ${xe - rn},${cy + hn}`;
     for (let i = n - 1; i >= 0; i--) {
-      d += `L${xs[i]!},${cy + half[i]!}`;
+      d += `L${i === 0 ? x0 + r0 : xs[i]!},${cy + half[i]!}`;
       if (i > 0) {
-        const x0 = end(i - 1);
-        const mx = (xs[i]! + x0) / 2;
-        d += `C${mx},${cy + half[i]!} ${mx},${cy + half[i - 1]!} ${x0},${cy + half[i - 1]!}`;
+        const x0i = end(i - 1);
+        const mx = (xs[i]! + x0i) / 2;
+        d += `C${mx},${cy + half[i]!} ${mx},${cy + half[i - 1]!} ${x0i},${cy + half[i - 1]!}`;
       }
     }
-    return `${d}Z`;
+    return `${d}Q${x0},${cy + h0} ${x0},${cy + h0 - r0}Z`;
   });
 
   function conversion(i: number): string | null {
@@ -111,17 +121,14 @@
             <stop offset={width ? (xs[i]! + hold / 2) / width : 0} style:stop-color={s.color} />
           {/each}
         </linearGradient>
-        <clipPath id="{uid}-c"><rect {width} height={H} rx="8" /></clipPath>
       </defs>
-      <g clip-path="url(#{uid}-c)">
-        <path d={ribbon} fill="url(#{uid}-g)" fill-opacity="0.24" />
-        <path d={ribbon} fill="none" stroke="url(#{uid}-g)" stroke-opacity="0.75" stroke-width="1.25" />
-        {#each stages as s, i (s.key)}
-          {#if half[i]! > 0 && i > 0}
-            <rect x={xs[i]! - 1} y={H / 2 - half[i]!} width="2" height={half[i]! * 2} style:fill={s.pages === null ? 'var(--text-4)' : s.color} />
-          {/if}
-        {/each}
-      </g>
+      <path d={ribbon} fill="url(#{uid}-g)" fill-opacity="0.24" />
+      <path d={ribbon} fill="none" stroke="url(#{uid}-g)" stroke-opacity="0.75" stroke-width="1.25" />
+      {#each stages as s, i (s.key)}
+        {#if half[i]! > 0 && i > 0}
+          <rect x={xs[i]! - 1} y={H / 2 - half[i]!} width="2" height={half[i]! * 2} style:fill={s.pages === null ? 'var(--text-4)' : s.color} />
+        {/if}
+      {/each}
     </svg>
   {/if}
 </div>
