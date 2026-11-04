@@ -44,6 +44,12 @@ Because users sync `main` at any time, the `Unreleased` section is always accura
   (monochrome, brand color on hover), and the agent panel uses the Cloudflare logo. Marks come from
   Simple Icons (the Microsoft Bing and OpenAI marks from its earlier releases).
 - The docs sidebar marks the current page with a Signal dot instead of an accent bar.
+- Dashboard: the GEO funnel draws its own rounded ends instead of being clipped at the corners,
+  and the Overview icon is an even grid of rounded squares.
+- The website's GEO funnel section is now a ribbon that narrows from crawled to cited to clicked.
+  Dots stand for pages: stalled ones fade where they drop off, and clicked ones turn Signal. Each
+  step shows its icon and its sources' marks, and the counts climb as the ribbon unrolls. Motion is
+  off for reduced-motion users.
 - Install with an AI agent: a two-line prompt to copy into Claude Code, Cursor, Codex or another
   agent, pointing it at `docs/deploy.md` in the repository (read with the agent's GitHub access), which now opens with the rules for agents (check GitHub and
   Cloudflare access, ask for the names, stop at [Human] steps, keep secrets out of chat). Shown as a

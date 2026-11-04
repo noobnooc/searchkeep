@@ -7,6 +7,7 @@
   import ArchitectureDiagram from '#lib/components/visuals/ArchitectureDiagram.svelte';
   import AgentTranscript from '#lib/components/visuals/AgentTranscript.svelte';
   import HorizonLine from '#lib/components/visuals/HorizonLine.svelte';
+  import GeoFunnelFlow from '#lib/components/visuals/GeoFunnelFlow.svelte';
   import AgentPrompt from '#lib/components/AgentPrompt.svelte';
   import { SITE, GITHUB } from '#lib/site.ts';
   import { TOOLS, PRINCIPLES, FAQS, READINESS } from '#lib/content.ts';
@@ -26,12 +27,6 @@
       { icon: 'openai', name: 'ChatGPT' },
     ],
   };
-
-  const funnel = [
-    { step: 'Crawled', source: 'Cloudflare AI crawlers', value: 412 },
-    { step: 'Cited', source: 'Bing AI Performance', value: 96 },
-    { step: 'Clicked', source: 'Web Analytics · GSC · Bing', value: 38 },
-  ];
 
   const dashboardViews: { icon: IconName; title: string }[] = [
     { icon: 'chart', title: 'Overview' },
@@ -144,40 +139,7 @@
       <p class="lead">Per page: fetched by GPTBot, ClaudeBot and PerplexityBot, cited in AI answers, clicked from ChatGPT, Perplexity and Copilot.</p>
     </div>
 
-    <div class="funnel-grid">
-      <ol class="funnel">
-        {#each funnel as f, i (f.step)}
-          <li class="stage card" style="--w: {(f.value / funnel[0]!.value) * 100}%; --i: {i}">
-            <div class="stage-top">
-              <span class="stage-n">0{i + 1}</span>
-              <h3>{f.step}</h3>
-              <span class="stage-src">{f.source}</span>
-            </div>
-            <div class="stage-bar" aria-hidden="true">
-              <div class="track"><div class="fill s{i}"></div></div>
-              <span class="stage-val">{f.value} pages</span>
-            </div>
-            {#if i < funnel.length - 1}
-              <span class="conv" aria-hidden="true">
-                {Math.round((funnel[i + 1]!.value / f.value) * 100)}%
-              </span>
-            {/if}
-          </li>
-        {/each}
-      </ol>
-
-      <div class="stalls">
-        <div class="stall card">
-          <span class="pill">Crawled, not cited</span>
-          <h3>AI reads it, then ignores it.</h3>
-        </div>
-        <div class="stall card">
-          <span class="pill">Cited, not clicked</span>
-          <h3>You’re the source, not the destination.</h3>
-        </div>
-        <p class="fineprint">Cited: Bing AI Performance, imported as CSV. Figures are illustrative.</p>
-      </div>
-    </div>
+    <GeoFunnelFlow />
   </div>
 </section>
 
@@ -566,127 +528,6 @@
   .card:hover {
     border-color: var(--line-3);
     box-shadow: 0 20px 48px -28px var(--accent-glow);
-  }
-
-  /* ---------- Funnel ---------- */
-  .funnel-grid {
-    display: grid;
-    grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr);
-    gap: 24px;
-    align-items: start;
-  }
-  .funnel {
-    list-style: none;
-    padding: 0;
-    display: grid;
-    gap: 14px;
-  }
-  .stage {
-    padding: 22px 24px;
-  }
-  .stage-top {
-    display: flex;
-    align-items: baseline;
-    gap: 12px;
-    flex-wrap: wrap;
-  }
-  .stage-n {
-    font-family: var(--font-mono);
-    font-size: var(--fs-xs);
-    color: var(--text-4);
-  }
-  .stage h3 {
-    font-size: 1.375rem;
-    letter-spacing: -0.025em;
-  }
-  .stage-src {
-    margin-left: auto;
-    font-size: var(--fs-xs);
-    color: var(--text-3);
-    padding: 2px 8px;
-    border: 1px solid var(--line-2);
-    border-radius: 999px;
-  }
-  .stage-bar {
-    display: flex;
-    align-items: center;
-    gap: 14px;
-    margin-top: 16px;
-  }
-  .track {
-    flex: 1;
-    height: 10px;
-    border-radius: 5px;
-    background: var(--surface-2);
-    overflow: hidden;
-  }
-  .fill {
-    width: var(--w);
-    height: 100%;
-    border-radius: 5px;
-    transform-origin: left;
-  }
-  @media (prefers-reduced-motion: no-preference) {
-    .fill {
-      animation: grow linear both;
-      animation-timeline: view();
-      animation-range: entry 10% cover 40%;
-    }
-  }
-  @keyframes grow {
-    from {
-      transform: scaleX(0);
-    }
-  }
-  .s0 {
-    background: color-mix(in oklch, var(--accent-fill) 45%, var(--surface-3));
-  }
-  .s1 {
-    background: color-mix(in oklch, var(--accent-fill) 72%, var(--surface-3));
-  }
-  /* The click: where the funnel pays off, in Signal. */
-  .s2 {
-    background: var(--signal);
-  }
-  .stage-val {
-    min-width: 76px;
-    text-align: right;
-    font-size: var(--fs-sm);
-    font-weight: 600;
-    color: var(--text);
-    font-variant-numeric: tabular-nums;
-  }
-  .conv {
-    position: absolute;
-    left: 50%;
-    bottom: -14px;
-    z-index: 2;
-    transform: translateX(-50%);
-    padding: 2px 9px;
-    border-radius: 999px;
-    border: 1px solid var(--line-2);
-    background: var(--bg);
-    font-size: 11px;
-    font-weight: 600;
-    color: var(--text-3);
-    font-variant-numeric: tabular-nums;
-  }
-  .stalls {
-    display: grid;
-    gap: 14px;
-  }
-  .stall {
-    padding: 22px 24px;
-  }
-  .stall h3 {
-    margin-top: 14px;
-    font-size: 1.25rem;
-    letter-spacing: -0.015em;
-  }
-  .fineprint {
-    font-size: var(--fs-xs);
-    color: var(--text-4);
-    padding-inline: 4px;
   }
 
   /* ---------- MCP ---------- */
@@ -1197,7 +1038,6 @@
 
   /* ---------- Responsive ---------- */
   @media (max-width: 1000px) {
-    .funnel-grid,
     .mcp-grid,
     .history-grid,
     .own-grid,
@@ -1222,17 +1062,9 @@
     .sec-list {
       grid-template-columns: minmax(0, 1fr);
     }
-    .stage,
-    .stall,
     .view,
     .source {
       padding: 20px;
-    }
-    .stage-src {
-      margin-left: 0;
-      flex-basis: 100%;
-      width: max-content;
-      max-width: max-content;
     }
     .stats {
       gap: 28px;
