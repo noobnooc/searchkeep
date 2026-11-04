@@ -551,3 +551,31 @@ export const FAQS: Faq[] = [
     a: 'Open your fork on GitHub and click “Sync fork”. Workers Builds notices the new commit, builds and deploys, and the Worker applies any new D1 migrations itself on its next request. Your configuration lives in Worker Secrets, never in the repo, so upstream changes do not conflict with it.',
   },
 ];
+
+/**
+ * Deploying with an AI agent: what the agent must be able to reach, and the prompt to paste.
+ * README.md carries the same prompt (wrapped at 80 columns); scripts/embed-build.mjs fails the build if
+ * the two differ in anything but whitespace.
+ */
+export const AGENT_PREREQS: { icon: 'github' | 'key'; title: string; text: string }[] = [
+  {
+    icon: 'github',
+    title: 'GitHub access',
+    text: 'The GitHub MCP server or the gh CLI, signed in as you, so the agent can fork the repository.',
+  },
+  {
+    icon: 'key',
+    title: 'Cloudflare access',
+    text: 'The Cloudflare MCP server signed in as you, or a short-lived API token that can edit Workers Scripts, Workers Builds and Access apps and read your zones.',
+  },
+];
+
+export const AGENT_PROMPT = `Deploy Searchkeep (https://github.com/noobnooc/searchkeep) into my Cloudflare account.
+
+Follow docs/deploy.md in that repository step by step, and run each step's "Verify" check before moving on.
+
+- My GitHub username: <github-username>
+- Hostname for Searchkeep: <searchkeep.example.com>
+- The only email allowed through Cloudflare Access: <you@example.com>
+
+Use your GitHub access to fork the repository and your Cloudflare access for Workers Builds, the custom domain and the Access application. Stop and tell me exactly what to do at every step marked [Human]. Never ask me to paste API keys or private keys into this chat: set secrets with wrangler secret put or the Cloudflare API. Finish by showing me the result of the setup checks.`;

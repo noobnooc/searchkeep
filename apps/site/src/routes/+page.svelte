@@ -7,8 +7,9 @@
   import ArchitectureDiagram from '#lib/components/visuals/ArchitectureDiagram.svelte';
   import AgentTranscript from '#lib/components/visuals/AgentTranscript.svelte';
   import HorizonLine from '#lib/components/visuals/HorizonLine.svelte';
+  import CodeBlock from '#lib/components/CodeBlock.svelte';
   import { SITE, GITHUB } from '#lib/site.ts';
-  import { TOOLS, PRINCIPLES, FAQS, READINESS } from '#lib/content.ts';
+  import { TOOLS, PRINCIPLES, FAQS, READINESS, AGENT_PROMPT, AGENT_PREREQS } from '#lib/content.ts';
   import { organization, website, softwareApplication, faqPage } from '#lib/schema.ts';
 
   const funnel = [
@@ -338,6 +339,24 @@
         </div>
       </div>
       <AgentTranscript />
+    </div>
+
+    <div class="agent-start" id="agent-prompt">
+      <div class="prereqs">
+        <h3 class="prereqs-title">Before you paste: your agent needs</h3>
+        <ul>
+          {#each AGENT_PREREQS as p (p.title)}
+            <li class="prereq card">
+              <span class="prereq-icon"><Icon name={p.icon} size={18} /></span>
+              <div>
+                <h4>{p.title} <span class="req">Required</span></h4>
+                <p>{p.text}</p>
+              </div>
+            </li>
+          {/each}
+        </ul>
+      </div>
+      <CodeBlock code={AGENT_PROMPT} lang="text" title="Copy into Claude Code, Cursor or Codex" wrap />
     </div>
   </div>
 </section>
@@ -1053,6 +1072,69 @@
     background: var(--warn-soft);
   }
 
+  .agent-start {
+    margin-top: clamp(2.5rem, 2rem + 2vw, 3.5rem);
+    display: grid;
+    grid-template-columns: minmax(0, 0.95fr) minmax(0, 1.2fr);
+    gap: 48px;
+    align-items: start;
+  }
+  .prereqs-title {
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    font-weight: 500;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--text-3);
+  }
+  .prereqs ul {
+    list-style: none;
+    padding: 0;
+    margin-top: 14px;
+    display: grid;
+    gap: 12px;
+  }
+  .prereq {
+    display: flex;
+    gap: 14px;
+    padding: 18px 20px;
+  }
+  .prereq-icon {
+    flex: none;
+    display: grid;
+    place-items: center;
+    width: 36px;
+    height: 36px;
+    border-radius: 10px;
+    border: 1px solid var(--line-2);
+    background: var(--surface-2);
+    color: var(--text);
+  }
+  .prereq h4 {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 1rem;
+    letter-spacing: -0.01em;
+  }
+  .req {
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+    font-weight: 500;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    padding: 2px 7px;
+    border-radius: 6px;
+    color: var(--warn);
+    background: var(--warn-soft);
+  }
+  .prereq p {
+    margin-top: 4px;
+    font-size: 0.875rem;
+    color: var(--text-3);
+    line-height: 1.5;
+  }
+
   /* ---------- Compare ---------- */
   .compare table {
     font-size: 0.9375rem;
@@ -1201,6 +1283,7 @@
     .own-grid,
     .sec-grid,
     .agent-grid,
+    .agent-start,
     .faq-grid {
       grid-template-columns: minmax(0, 1fr);
     }

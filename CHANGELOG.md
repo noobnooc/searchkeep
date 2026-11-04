@@ -40,6 +40,11 @@ Because users sync `main` at any time, the `Unreleased` section is always accura
   Signal orange, no gradients or glows. The website hero, Open Graph image and closing call to action
   draw the same line at full width. New favicons, app icons (including a maskable icon), dashboard
   palette and Worker setup page. Brand files and usage notes are in `docs/brand/`.
+- Install with an AI agent: the README, the website (home page and Deploy docs) and `llms.txt` now
+  have a prompt to copy into Claude Code, Cursor, Codex or another agent, with the prerequisites
+  spelled out: the agent needs GitHub access (GitHub MCP server or `gh`) and Cloudflare access
+  (Cloudflare MCP server or a short-lived deploy token). The site build checks that the README and
+  the website show the same prompt.
 - Less copy, more layout: the website's sections now say it with one headline, one short lead line
   (kept for search engines) and a visual (tool chips, a real dashboard screenshot, the timeline, the
   diagram, the comparison table); the docs

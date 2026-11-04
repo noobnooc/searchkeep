@@ -13,6 +13,11 @@ can execute it directly and a non-technical person can follow it by hand.
 - Values in angle brackets are yours to substitute, for example `<your-domain>`.
 - Never paste secrets into issues, pull requests, chat logs or commits. Your fork is public.
 
+Want an AI agent to do it? Copy the prompt in the README,
+[Install with an AI agent](../README.md#install-with-an-ai-agent). The agent needs access to GitHub
+(the GitHub MCP server or `gh`) and to Cloudflare (the Cloudflare MCP server or a deploy token, see
+[step 0](#0-choose-names-and-gather-prerequisites)).
+
 Time needed: about 30–45 minutes the first time.
 
 ## Overview
