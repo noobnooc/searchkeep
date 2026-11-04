@@ -116,9 +116,7 @@
     display: grid;
     place-items: center;
     padding: 32px 16px;
-    background:
-      radial-gradient(800px 400px at 50% -10%, var(--accent-wash), transparent 70%),
-      var(--bg);
+    background: var(--bg);
   }
   .panel {
     width: 100%;

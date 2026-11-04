@@ -4,8 +4,8 @@
   "description": "SEO & GEO analytics that lives in your Cloudflare account.",
   "start_url": "/",
   "display": "browser",
-  "background_color": "#08090a",
-  "theme_color": "#08090a",
+  "background_color": "#0b0c0e",
+  "theme_color": "#0b0c0e",
   "icons": [
     {
       "src": "/icon-192.png",

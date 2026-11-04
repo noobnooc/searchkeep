@@ -128,8 +128,8 @@
           <svg viewBox="0 0 {W} {H}" preserveAspectRatio="none" class="plot">
             <defs>
               <linearGradient id="dash-area" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0" stop-color="var(--accent-fill)" stop-opacity="0.28" />
-                <stop offset="1" stop-color="var(--accent-fill)" stop-opacity="0" />
+                <stop offset="0" stop-color="var(--text)" stop-opacity="0.06" />
+                <stop offset="1" stop-color="var(--text)" stop-opacity="0.06" />
               </linearGradient>
             </defs>
             {#each [0.25, 0.5, 0.75] as g (g)}
@@ -199,7 +199,7 @@
     width: 16px;
     height: 16px;
     border-radius: 5px;
-    background: linear-gradient(135deg, oklch(0.75 0.12 260), oklch(0.6 0.15 300));
+    background: var(--text-3);
   }
   .chev {
     margin-left: auto;
@@ -249,7 +249,7 @@
     width: 6px;
     height: 6px;
     border-radius: 50%;
-    background: var(--accent-fill);
+    background: var(--signal);
     box-shadow: 0 0 0 3px var(--accent-soft);
   }
 
@@ -332,7 +332,7 @@
   }
   .k-spark polyline {
     fill: none;
-    stroke: var(--accent);
+    stroke: var(--text-2);
     stroke-width: 1.5;
     vector-effect: non-scaling-stroke;
     stroke-linecap: round;
@@ -435,7 +435,7 @@
   }
   .plot .stroke {
     fill: none;
-    stroke: var(--accent);
+    stroke: var(--text);
     stroke-width: 2;
     vector-effect: non-scaling-stroke;
     stroke-linejoin: round;
@@ -449,7 +449,7 @@
     width: 8px;
     height: 8px;
     border-radius: 50%;
-    background: var(--accent);
+    background: var(--signal);
     box-shadow: 0 0 0 2px var(--surface), 0 0 0 5px var(--accent-soft);
     transform: translate(-50%, -50%);
   }

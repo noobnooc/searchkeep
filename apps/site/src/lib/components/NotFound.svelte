@@ -38,12 +38,9 @@
   .code {
     font-size: clamp(5rem, 3rem + 10vw, 9rem);
     font-weight: 700;
-    letter-spacing: -0.06em;
+    letter-spacing: -0.048em;
     line-height: 1;
-    background: linear-gradient(180deg, var(--accent), transparent 90%);
-    -webkit-background-clip: text;
-    background-clip: text;
-    color: transparent;
+    color: var(--text);
   }
   h1 {
     margin-top: 12px;

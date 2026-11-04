@@ -6,6 +6,7 @@
   import HistoryTimeline from '#lib/components/visuals/HistoryTimeline.svelte';
   import ArchitectureDiagram from '#lib/components/visuals/ArchitectureDiagram.svelte';
   import AgentTranscript from '#lib/components/visuals/AgentTranscript.svelte';
+  import HorizonLine from '#lib/components/visuals/HorizonLine.svelte';
   import { SITE, GITHUB } from '#lib/site.ts';
   import { TOOLS, PRINCIPLES, FAQS, READINESS } from '#lib/content.ts';
   import { organization, website, softwareApplication, faqPage } from '#lib/schema.ts';
@@ -94,7 +95,6 @@
 
 <!-- Hero -->
 <section class="hero">
-  <div class="hero-bg" aria-hidden="true"></div>
   <div class="container hero-inner">
     <a class="announce" href="/changelog">
       <span class="pill pill-accent">v{SITE.version}</span>
@@ -102,7 +102,7 @@
       <Icon name="arrow" size={14} />
     </a>
     <h1 class="hero-title">
-      Your search data,<br /><span class="gradient-text">kept.</span>
+      Your search data,<br />kept<span class="signal">.</span>
     </h1>
     <p class="hero-sub">
       SEO &amp; GEO analytics that lives in your own Cloudflare account. See which pages AI crawlers read, cite and
@@ -124,8 +124,11 @@
     </ul>
   </div>
 
+  <div class="container hero-line">
+    <HorizonLine />
+  </div>
+
   <div class="container hero-visual">
-    <div class="glow" aria-hidden="true"></div>
     <DashboardMock />
   </div>
 </section>
@@ -463,14 +466,14 @@
 
 <!-- Final CTA -->
 <section class="final" aria-labelledby="final-title">
-  <div class="final-bg" aria-hidden="true"></div>
   <div class="container final-inner">
-    <h2 id="final-title">Start keeping your search data today.</h2>
+    <h2 id="final-title">Start keeping your search data today<span class="signal">.</span></h2>
     <p>Every day you wait is a day Search Console forgets. Deploying takes about 30–45 minutes.</p>
     <div class="cta-row">
       <a class="btn btn-primary btn-lg" href="/docs/deploy">Deploy to your Cloudflare <Icon name="arrow" /></a>
       <a class="btn btn-secondary btn-lg" href={GITHUB.repo}><Icon name="github" /> Star on GitHub</a>
     </div>
+    <div class="final-line"><HorizonLine labels={false} /></div>
   </div>
 </section>
 
@@ -481,16 +484,8 @@
     padding-top: clamp(3.5rem, 2rem + 6vw, 7rem);
     overflow: hidden;
   }
-  .hero-bg {
-    position: absolute;
-    inset: 0;
-    z-index: -1;
-    background:
-      radial-gradient(48% 38% at 50% 0%, var(--accent-glow), transparent 70%),
-      radial-gradient(40% 30% at 85% 10%, var(--cool-glow), transparent 70%),
-      linear-gradient(var(--line) 1px, transparent 1px) 0 0 / 56px 56px,
-      linear-gradient(90deg, var(--line) 1px, transparent 1px) 0 0 / 56px 56px;
-    mask-image: radial-gradient(70% 60% at 50% 20%, #000 30%, transparent 75%);
+  .hero-line {
+    margin-top: clamp(2.5rem, 1.5rem + 3vw, 4rem);
   }
   .hero-inner {
     display: flex;
@@ -518,8 +513,8 @@
     margin-top: 28px;
     font-size: var(--fs-display);
     line-height: 1;
-    letter-spacing: -0.045em;
-    font-weight: 640;
+    letter-spacing: -0.022em;
+    font-weight: 620;
   }
   .hero-sub {
     margin-top: 24px;
@@ -557,17 +552,9 @@
   }
   .hero-visual {
     position: relative;
-    margin-top: clamp(3rem, 2rem + 4vw, 5rem);
+    margin-top: 28px;
     max-width: calc(1120px + var(--gutter) * 2);
     mask-image: linear-gradient(180deg, #000 70%, transparent);
-  }
-  .glow {
-    position: absolute;
-    inset: 10% 10% auto;
-    height: 60%;
-    background: radial-gradient(closest-side, var(--accent-glow), transparent);
-    filter: blur(40px);
-    z-index: -1;
   }
 
   /* ---------- Strip ---------- */
@@ -608,7 +595,8 @@
   }
 
   .alt {
-    background: linear-gradient(180deg, transparent, light-dark(rgb(0 0 0 / 0.018), rgb(255 255 255 / 0.014)) 30%, transparent);
+    background: light-dark(rgb(11 12 14 / 0.018), rgb(255 255 255 / 0.012));
+    border-block: 1px solid var(--line);
   }
   .section :global(:not(pre) > code) {
     font-size: 0.82em;
@@ -618,26 +606,9 @@
   .card {
     transition: border-color 200ms var(--ease), box-shadow 300ms var(--ease), transform 300ms var(--ease);
   }
-  .card::before {
-    content: '';
-    position: absolute;
-    inset: -1px;
-    border-radius: inherit;
-    padding: 1px;
-    background: linear-gradient(180deg, var(--accent-line), transparent 60%);
-    -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
-    -webkit-mask-composite: xor;
-    mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
-    mask-composite: exclude;
-    opacity: 0;
-    transition: opacity 250ms var(--ease);
-    pointer-events: none;
-  }
   .card:hover {
+    border-color: var(--line-3);
     box-shadow: 0 20px 48px -28px var(--accent-glow);
-  }
-  .card:hover::before {
-    opacity: 1;
   }
 
   /* ---------- Funnel ---------- */
@@ -912,7 +883,7 @@
     margin: 4px 0 0;
     font-size: 2.5rem;
     font-weight: 620;
-    letter-spacing: -0.04em;
+    letter-spacing: -0.02em;
     line-height: 1;
     color: var(--text);
     font-variant-numeric: tabular-nums;
@@ -1173,7 +1144,7 @@
     color: var(--text-3);
   }
   .compare td:nth-child(2) {
-    background: light-dark(oklch(0.8 0.16 160 / 0.06), oklch(0.86 0.17 160 / 0.035));
+    background: light-dark(rgb(11 12 14 / 0.025), rgb(255 255 255 / 0.025));
   }
   .compare td:first-child {
     color: var(--text-3);
@@ -1276,19 +1247,12 @@
     border-top: 1px solid var(--line);
     text-align: center;
   }
-  .final-bg {
-    position: absolute;
-    inset: 0;
-    z-index: -1;
-    background:
-      radial-gradient(50% 60% at 50% 100%, var(--accent-glow), transparent 70%),
-      linear-gradient(var(--line) 1px, transparent 1px) 0 0 / 56px 56px,
-      linear-gradient(90deg, var(--line) 1px, transparent 1px) 0 0 / 56px 56px;
-    mask-image: radial-gradient(60% 70% at 50% 100%, #000 20%, transparent 75%);
+  .final-line {
+    margin-top: clamp(3rem, 2rem + 4vw, 5rem);
   }
   .final h2 {
     font-size: var(--fs-3xl);
-    letter-spacing: -0.038em;
+    letter-spacing: -0.02em;
     max-width: 760px;
     margin-inline: auto;
   }

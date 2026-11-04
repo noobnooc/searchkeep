@@ -137,6 +137,13 @@
       {#each drawn as d (d.s.key)}
         <path d={d.line} fill="none" style:stroke={d.s.color} stroke-width="2" stroke-linejoin="round" stroke-linecap="round" />
       {/each}
+      {#if n > 1 && hover === null}
+        {@const s0 = series[0]}
+        {@const v0 = s0?.values[n - 1]}
+        {#if v0 !== null && v0 !== undefined}
+          <circle class="latest" cx={x(n - 1)} cy={y(v0)} r="3.5" />
+        {/if}
+      {/if}
       {#if n === 1}
         {#each series as s (s.key)}
           {#if s.values[0] !== null && s.values[0] !== undefined}
@@ -171,6 +178,11 @@
 </div>
 
 <style>
+  .latest {
+    fill: var(--signal);
+    stroke: var(--surface);
+    stroke-width: 2;
+  }
   .chart {
     position: relative;
     width: 100%;

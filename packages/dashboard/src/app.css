@@ -1,12 +1,13 @@
 /*
  * Searchkeep dashboard — design tokens and base styles.
  * Dark first; light via prefers-color-scheme or the stored toggle (data-theme).
- * The accent is the brand mint shared with searchkeep.dev. No web fonts: the
+ * Brand: Horizon, shared with searchkeep.dev (docs/brand). Ink lines, one Signal
+ * orange point; the accent is that orange as text. No web fonts: the
  * stack prefers a locally installed Inter, then the system UI font.
  *
  * Chart palettes were checked with a colour-vision validator against the card
  * surface in each mode: the four crawler purposes (categorical) and the four
- * GEO funnel stages (ordinal, one hue).
+ * GEO funnel stages (ordinal: an ink ramp that ends in Signal, the click).
  */
 
 :root {
@@ -14,29 +15,34 @@
   --font: 'Inter', 'InterVariable', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
   --mono: ui-monospace, 'SF Mono', 'JetBrains Mono', 'Cascadia Code', Menlo, Consolas, monospace;
 
-  --bg: #08090a;
-  --bg-side: #0b0c0e;
-  --surface: #111214;
+  --bg: #0b0c0e;
+  --bg-side: #0e0f12;
+  --surface: #121316;
   --surface-2: #17181b;
   --surface-3: #1e1f23;
   --border: rgba(255, 255, 255, 0.07);
   --border-2: rgba(255, 255, 255, 0.11);
   --border-3: rgba(255, 255, 255, 0.18);
 
-  --text: #f3f4f5;
-  --text-2: #b3b7be;
-  --text-3: #8b9099;
-  --text-4: #646973;
+  --text: #f3f4f6;
+  --text-2: #b4b8bf;
+  --text-3: #8a9099;
+  --text-4: #646a73;
 
-  /* Brand mint: oklch(0.87 0.15 162) for text and lines, oklch(0.86 0.17 160) as a fill. */
-  --accent: #67f3b6;
-  --accent-text: #67f3b6;
-  --accent-fill: #4ef2aa;
-  --accent-fill-hover: #6cfeb9;
-  --accent-ink: #03140c;
-  --accent-wash: rgba(78, 242, 170, 0.1);
-  --accent-wash-2: rgba(78, 242, 170, 0.18);
-  --accent-line: rgba(78, 242, 170, 0.3);
+  /* Signal #ff5b1f is the dot; accent text is Flare #ff7a45. Primary buttons are white on dark. */
+  --signal: #ff5b1f;
+  --accent: #ff7a45;
+  --accent-text: #ff7a45;
+  --accent-fill: #f3f4f6;
+  --accent-fill-hover: #ffffff;
+  --accent-ink: #0b0c0e;
+  --accent-wash: rgba(255, 91, 31, 0.1);
+  --accent-wash-2: rgba(255, 91, 31, 0.18);
+  --accent-line: rgba(255, 122, 69, 0.32);
+  /* Data is drawn in ink; the Signal dot marks the latest point. */
+  --chart: #e6e8eb;
+  --chart-wash: rgba(255, 255, 255, 0.06);
+  --chart-wash-2: rgba(255, 255, 255, 0.1);
   --cool: #6ccdea;
 
   --pos: #5ed476;
@@ -55,10 +61,10 @@
   --series-search: #2b88c0;
   --series-user: #d47421;
   --series-other: #b357ad;
-  --stage-1: #67f3b6;
-  --stage-2: #3ed196;
-  --stage-3: #33ae7c;
-  --stage-4: #288b63;
+  --stage-1: #e6e8eb;
+  --stage-2: #aeb3ba;
+  --stage-3: #7d838d;
+  --stage-4: #ff5b1f;
   --vital-good: #5ed476;
   --vital-ni: #f7bc50;
   --vital-poor: #fb817a;
@@ -73,26 +79,29 @@
 @media (prefers-color-scheme: light) {
   :root:not([data-theme='dark']) {
     color-scheme: light;
-    --bg: #f7f7f6;
-    --bg-side: #fafaf9;
+    --bg: #f6f7f9;
+    --bg-side: #fbfbfc;
     --surface: #ffffff;
-    --surface-2: #f4f4f2;
-    --surface-3: #ececea;
-    --border: rgba(15, 17, 20, 0.08);
-    --border-2: rgba(15, 17, 20, 0.13);
-    --border-3: rgba(15, 17, 20, 0.2);
-    --text: #0c0d0f;
-    --text-2: #3f434a;
-    --text-3: #5f646d;
-    --text-4: #80858e;
-    --accent: #00774d;
-    --accent-text: #00774d;
-    --accent-fill: #43dd9a;
-    --accent-fill-hover: #0fd18b;
-    --accent-ink: #03140c;
-    --accent-wash: rgba(67, 221, 154, 0.16);
-    --accent-wash-2: rgba(67, 221, 154, 0.28);
-    --accent-line: rgba(0, 140, 90, 0.35);
+    --surface-2: #eef0f3;
+    --surface-3: #e5e8ec;
+    --border: rgba(11, 12, 14, 0.08);
+    --border-2: rgba(11, 12, 14, 0.13);
+    --border-3: rgba(11, 12, 14, 0.2);
+    --text: #0b0c0e;
+    --text-2: #3d424a;
+    --text-3: #5b616b;
+    --text-4: #7d838d;
+    --accent: #c2410c;
+    --accent-text: #c2410c;
+    --accent-fill: #0b0c0e;
+    --accent-fill-hover: #2a2d33;
+    --accent-ink: #ffffff;
+    --accent-wash: rgba(255, 91, 31, 0.1);
+    --accent-wash-2: rgba(255, 91, 31, 0.18);
+    --accent-line: rgba(194, 65, 12, 0.32);
+    --chart: #0b0c0e;
+    --chart-wash: rgba(11, 12, 14, 0.055);
+    --chart-wash-2: rgba(11, 12, 14, 0.09);
     --cool: #006d91;
     --pos: #0a7e3a;
     --pos-wash: rgba(10, 126, 58, 0.09);
@@ -100,19 +109,19 @@
     --neg-wash: rgba(190, 46, 49, 0.08);
     --warn: #a45f00;
     --warn-wash: rgba(214, 145, 20, 0.12);
-    --neutral-wash: rgba(15, 17, 20, 0.05);
-    --grid: rgba(15, 17, 20, 0.065);
-    --axis: rgba(15, 17, 20, 0.2);
+    --neutral-wash: rgba(11, 12, 14, 0.05);
+    --grid: rgba(11, 12, 14, 0.065);
+    --axis: rgba(11, 12, 14, 0.2);
     --prev: #b0b4bb;
     --spark: #a6aab2;
     --series-training: #009162;
     --series-search: #036eae;
     --series-user: #d66919;
     --series-other: #aa4298;
-    --stage-1: #005d3c;
-    --stage-2: #007d53;
-    --stage-3: #199e6e;
-    --stage-4: #47be8b;
+    --stage-1: #0b0c0e;
+    --stage-2: #4a4f57;
+    --stage-3: #8a9099;
+    --stage-4: #ff5b1f;
     --vital-good: #16955a;
     --vital-ni: #d08a10;
     --vital-poor: #d64545;
@@ -123,26 +132,29 @@
 
 :root[data-theme='light'] {
   color-scheme: light;
-  --bg: #f7f7f6;
-  --bg-side: #fafaf9;
+  --bg: #f6f7f9;
+  --bg-side: #fbfbfc;
   --surface: #ffffff;
-  --surface-2: #f4f4f2;
-  --surface-3: #ececea;
-  --border: rgba(15, 17, 20, 0.08);
-  --border-2: rgba(15, 17, 20, 0.13);
-  --border-3: rgba(15, 17, 20, 0.2);
-  --text: #0c0d0f;
-  --text-2: #3f434a;
-  --text-3: #5f646d;
-  --text-4: #80858e;
-  --accent: #00774d;
-  --accent-text: #00774d;
-  --accent-fill: #43dd9a;
-  --accent-fill-hover: #0fd18b;
-  --accent-ink: #03140c;
-  --accent-wash: rgba(67, 221, 154, 0.16);
-  --accent-wash-2: rgba(67, 221, 154, 0.28);
-  --accent-line: rgba(0, 140, 90, 0.35);
+  --surface-2: #eef0f3;
+  --surface-3: #e5e8ec;
+  --border: rgba(11, 12, 14, 0.08);
+  --border-2: rgba(11, 12, 14, 0.13);
+  --border-3: rgba(11, 12, 14, 0.2);
+  --text: #0b0c0e;
+  --text-2: #3d424a;
+  --text-3: #5b616b;
+  --text-4: #7d838d;
+  --accent: #c2410c;
+  --accent-text: #c2410c;
+  --accent-fill: #0b0c0e;
+  --accent-fill-hover: #2a2d33;
+  --accent-ink: #ffffff;
+  --accent-wash: rgba(255, 91, 31, 0.1);
+  --accent-wash-2: rgba(255, 91, 31, 0.18);
+  --accent-line: rgba(194, 65, 12, 0.32);
+  --chart: #0b0c0e;
+  --chart-wash: rgba(11, 12, 14, 0.055);
+  --chart-wash-2: rgba(11, 12, 14, 0.09);
   --cool: #006d91;
   --pos: #0a7e3a;
   --pos-wash: rgba(10, 126, 58, 0.09);
@@ -150,19 +162,19 @@
   --neg-wash: rgba(190, 46, 49, 0.08);
   --warn: #a45f00;
   --warn-wash: rgba(214, 145, 20, 0.12);
-  --neutral-wash: rgba(15, 17, 20, 0.05);
-  --grid: rgba(15, 17, 20, 0.065);
-  --axis: rgba(15, 17, 20, 0.2);
+  --neutral-wash: rgba(11, 12, 14, 0.05);
+  --grid: rgba(11, 12, 14, 0.065);
+  --axis: rgba(11, 12, 14, 0.2);
   --prev: #b0b4bb;
   --spark: #a6aab2;
   --series-training: #009162;
   --series-search: #036eae;
   --series-user: #d66919;
   --series-other: #aa4298;
-  --stage-1: #005d3c;
-  --stage-2: #007d53;
-  --stage-3: #199e6e;
-  --stage-4: #47be8b;
+  --stage-1: #0b0c0e;
+  --stage-2: #4a4f57;
+  --stage-3: #8a9099;
+  --stage-4: #ff5b1f;
   --vital-good: #16955a;
   --vital-ni: #d08a10;
   --vital-poor: #d64545;

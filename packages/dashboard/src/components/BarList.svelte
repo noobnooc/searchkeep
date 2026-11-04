@@ -61,11 +61,11 @@
     position: absolute;
     inset: 0 auto 0 0;
     border-radius: 5px;
-    background: var(--accent-wash);
+    background: var(--chart-wash);
     transition: width 240ms ease;
   }
   li:hover .fill {
-    background: var(--accent-wash-2);
+    background: var(--chart-wash-2);
   }
   .label {
     position: relative;

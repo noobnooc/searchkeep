@@ -90,7 +90,7 @@
   .page-head h1 {
     margin-top: 14px;
     font-size: var(--fs-3xl);
-    letter-spacing: -0.04em;
+    letter-spacing: -0.028em;
   }
   .page-head .lead {
     margin-top: 14px;

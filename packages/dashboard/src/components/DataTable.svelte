@@ -94,7 +94,7 @@
               {/if}
               {#if bar}
                 <span class="cell-bar" aria-hidden="true"
-                  ><span style:width="{bar.max > 0 ? Math.max(bar.value > 0 ? 3 : 0, (bar.value / bar.max) * 100) : 0}%" style:background={bar.color ?? 'var(--accent)'}></span></span>
+                  ><span style:width="{bar.max > 0 ? Math.max(bar.value > 0 ? 3 : 0, (bar.value / bar.max) * 100) : 0}%" style:background={bar.color ?? 'var(--text-4)'}></span></span>
               {/if}
             </td>
           {/each}

@@ -3,8 +3,8 @@
  * generic steps — no data, no configuration values, no source status — and
  * offers no action that could write anything.
  */
-/** The Searchkeep tile mark (docs/brand/icon.svg). */
-const MARK_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="40" height="40" aria-hidden="true"><defs><linearGradient id="sk-setup-g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#a3ffb9"/><stop offset=".55" stop-color="#31eb91"/><stop offset="1" stop-color="#00cb87"/></linearGradient></defs><rect width="64" height="64" rx="16.64" fill="url(#sk-setup-g)"/><path transform="translate(10.24 10.24) scale(0.68)" fill="#04140c" d="M13 27H51V50.5a4.5 4.5 0 0 1 -4.5 4.5H37.5V45a5.5 5.5 0 0 0 -11 0V55H17.5a4.5 4.5 0 0 1 -4.5 -4.5zM13 24V21a3 3 0 0 1 3 -3H19.87a3 3 0 0 1 3 3V24zM27.07 24V15a3 3 0 0 1 3 -3H33.93a3 3 0 0 1 3 3V24zM41.13 24V9a3 3 0 0 1 3 -3H48a3 3 0 0 1 3 3V24z"/></svg>`;
+/** The Searchkeep app icon: the Horizon mark on a Night tile (docs/brand/icon.svg). */
+const MARK_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="40" height="40" aria-hidden="true"><rect width="64" height="64" rx="15" fill="#0b0c0e"/><svg x="8.96" y="8.96" width="46.08" height="46.08" viewBox="0 0 48 48" fill="none"><line x1="17" y1="7" x2="17" y2="41" stroke="#ffffff" stroke-opacity="0.4" stroke-width="2" stroke-dasharray="2.5 3"/><polyline points="5,34 11,27 17,30 24,19 31,24 38,13" stroke="#ffffff" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/><circle cx="38" cy="13" r="5" fill="#ff5b1f"/></svg></svg>`;
 
 export function setupPage(state: 'no_access' | 'oauth_disabled' | 'policy_too_broad' = 'no_access'): string {
   const title = 'Searchkeep is locked';
@@ -22,8 +22,8 @@ export function setupPage(state: 'no_access' | 'oauth_disabled' | 'policy_too_br
 <meta name="robots" content="noindex, nofollow">
 <title>${title}</title>
 <style>
-  :root { color-scheme: light dark; --bg:#0b0c0e; --fg:#e8e9ec; --muted:#9a9ca3; --line:#23252b; --card:#121317; --accent:#31eb91; }
-  @media (prefers-color-scheme: light) { :root { --bg:#fafafa; --fg:#141518; --muted:#5d6068; --line:#e4e5e8; --card:#fff; --accent:#00995f; } }
+  :root { color-scheme: light dark; --bg:#0b0c0e; --fg:#e8e9ec; --muted:#9a9ca3; --line:#23252b; --card:#121317; --accent:#ff7a45; }
+  @media (prefers-color-scheme: light) { :root { --bg:#f6f7f9; --fg:#0b0c0e; --muted:#5b616b; --line:#e4e6ea; --card:#fff; --accent:#c2410c; } }
   * { box-sizing: border-box; }
   body { margin:0; background:var(--bg); color:var(--fg); font:15px/1.6 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Inter, sans-serif; }
   main { max-width: 720px; margin: 0 auto; padding: 64px 20px 80px; }

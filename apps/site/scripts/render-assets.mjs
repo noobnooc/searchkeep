@@ -1,79 +1,78 @@
-// Renders static/og.png and the PNG icons from the brand geometry with Playwright.
+// Renders static/og.png, the PNG icons and static/favicon.svg from the brand geometry with Playwright.
 // Playwright is not a dependency of this package; run with a global install:
 //   pnpm --filter @searchkeep/site run render:assets
-// Brand source: docs/brand (geometry mirrored in src/lib/brand.ts).
+// Brand source: docs/brand (geometry in src/lib/brand.ts, imported directly: Node strips the types).
 import { createRequire } from 'node:module';
-import { readFileSync } from 'node:fs';
+import { writeFileSync } from 'node:fs';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { dirname, resolve } from 'node:path';
+import { NIGHT, SIGNAL, WORDMARK, WORDMARK_VIEWBOX, markSvg } from '../src/lib/brand.ts';
 
 const require = createRequire(import.meta.url);
 const { chromium } = require('playwright');
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const out = (f) => resolve(root, 'static', f);
-const font = (f) => pathToFileURL(resolve(root, 'node_modules/@fontsource-variable', f)).href;
+const font = (f) => pathToFileURL(resolve(root, 'node_modules', f)).href;
 
-// Read the brand constants from src/lib/brand.ts without a TS toolchain.
-const brandTs = readFileSync(resolve(root, 'src/lib/brand.ts'), 'utf8');
-const constant = (name) => brandTs.match(new RegExp(`export const ${name} = '([^']+)'`))[1];
-const MARK = constant('MARK');
-const MARK_SMALL = constant('MARK_SMALL');
-const WORDMARK = constant('WORDMARK');
-const WORDMARK_VIEWBOX = constant('WORDMARK_VIEWBOX');
-const INK = '#04140c';
-const GRAD = (id) =>
-  `<linearGradient id="${id}" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#a3ffb9"/><stop offset=".55" stop-color="#31eb91"/><stop offset="1" stop-color="#00cb87"/></linearGradient>`;
-
-/** The tile: rounded (default) or full-bleed square; `inset` is the padding around the glyph. */
-const tile = ({ d = MARK, rounded = true, inset = 0.16 } = {}) => {
+/** The app icon: the mark in white on a Night tile, rounded (default) or full-bleed; `inset` pads the glyph. */
+const tile = ({ cut = 'full', rounded = true, inset = 0.14 } = {}) => {
   const t = 64 * inset;
-  const s = 1 - 2 * inset;
-  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="100%" height="100%"><defs>${GRAD('g')}</defs><rect width="64" height="64" ${rounded ? 'rx="16.6"' : ''} fill="url(#g)"/><path transform="translate(${t} ${t}) scale(${s})" fill="${INK}" d="${d}"/></svg>`;
+  const s = 64 - 2 * t;
+  const glyph = markSvg({ cut, ink: '#ffffff' }).replace('<svg ', `<svg x="${t}" y="${t}" width="${s}" height="${s}" `);
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="100%" height="100%"><rect width="64" height="64" ${rounded ? 'rx="15"' : ''} fill="${NIGHT}"/>${glyph}</svg>`;
 };
 
+// The OG image's line: same shape as the site's hero line, on a 1200 × 200 band.
+const ys = [
+  178, 182, 172, 176, 166, 169, 160, 164, 155, 159, 148, 152, 144, 138, 142, 132, 136, 127, 130, 120, 124, 114, 118, 108, 112, 102, 105, 96,
+  98, 88, 80,
+];
+const pts = ys.map((y, i) => `${Math.round((i * 1124) / (ys.length - 1))},${y - 60}`).join(' ');
+const end = { x: 1124, y: ys.at(-1) - 60 };
+
 const fonts = `
-@font-face { font-family: 'Inter'; font-weight: 100 900; src: url('${font('inter/files/inter-latin-opsz-normal.woff2')}') format('woff2'); }
-@font-face { font-family: 'Funnel'; font-weight: 300 800; src: url('${font('funnel-display/files/funnel-display-latin-wght-normal.woff2')}') format('woff2'); }
+@font-face { font-family: 'Inter'; font-weight: 100 900; src: url('${font('@fontsource-variable/inter/files/inter-latin-opsz-normal.woff2')}') format('woff2'); }
+@font-face { font-family: 'Inter Tight'; font-weight: 100 900; src: url('${font('@fontsource-variable/inter-tight/files/inter-tight-latin-wght-normal.woff2')}') format('woff2'); }
+@font-face { font-family: 'Plex Mono'; font-weight: 400; src: url('${font('@fontsource/ibm-plex-mono/files/ibm-plex-mono-latin-400-normal.woff2')}') format('woff2'); }
 `;
 
 const og = `<!doctype html><html><head><style>
 ${fonts}
 * { margin: 0; box-sizing: border-box; }
 html, body { width: 1200px; height: 630px; }
-body { font-family: 'Inter', sans-serif; color: #f3f4f5; background: #08090a; overflow: hidden; position: relative; -webkit-font-smoothing: antialiased; }
-.bg { position: absolute; inset: 0;
-  background:
-    radial-gradient(38% 60% at 80% 52%, rgb(49 235 145 / 0.22), transparent 70%),
-    radial-gradient(30% 40% at 100% 0%, rgb(90 120 255 / 0.14), transparent 70%),
-    linear-gradient(rgb(255 255 255 / 0.045) 1px, transparent 1px) 0 0 / 40px 40px,
-    linear-gradient(90deg, rgb(255 255 255 / 0.045) 1px, transparent 1px) 0 0 / 40px 40px;
-  -webkit-mask-image: radial-gradient(85% 95% at 72% 50%, #000 25%, transparent 80%);
-}
-.wrap { position: absolute; inset: 0; padding: 68px 76px; display: flex; flex-direction: column; }
-.brand { display: flex; align-items: center; gap: 18px; }
-.brand .tile { width: 52px; height: 52px; border-radius: 14px; box-shadow: 0 10px 30px -8px rgb(49 235 145 / 0.55), 0 0 0 1px rgb(255 255 255 / .1); overflow: hidden; }
-.brand .word { height: 40px; }
-h1 { margin-top: 92px; font-family: 'Funnel', sans-serif; font-size: 86px; line-height: 0.98; letter-spacing: -0.045em; font-weight: 640; }
-h1 span { background: linear-gradient(180deg, #f3f4f5 10%, #9aa0a8); -webkit-background-clip: text; color: transparent; }
-p { margin-top: 26px; font-size: 27px; line-height: 1.38; color: #b3b7be; letter-spacing: -0.012em; max-width: 590px; }
-.foot { margin-top: auto; display: flex; gap: 14px; font-size: 20px; color: #8b9099; align-items: center; }
-.foot b { color: #f3f4f5; font-weight: 600; }
-.dot { width: 5px; height: 5px; border-radius: 50%; background: #4f545c; }
-.keep { position: absolute; right: 78px; top: 118px; width: 360px; height: 360px; }
-.keep svg { width: 100%; height: 100%; overflow: visible; filter: drop-shadow(0 0 40px rgb(49 235 145 / 0.45)) drop-shadow(0 30px 60px rgb(0 0 0 / 0.6)); }
-.ground { position: absolute; right: 30px; top: 428px; width: 456px; height: 1px; background: linear-gradient(90deg, transparent, rgb(105 248 165 / 0.55), transparent); }
-.floor { position: absolute; right: 88px; top: 410px; width: 340px; height: 60px; border-radius: 50%; background: radial-gradient(closest-side, rgb(49 235 145 / 0.28), transparent); filter: blur(6px); }
+body { font-family: 'Inter', sans-serif; color: #f3f4f6; background: ${NIGHT}; overflow: hidden; position: relative; -webkit-font-smoothing: antialiased; }
+.wrap { position: absolute; inset: 0; padding: 60px 76px; }
+.top { display: flex; align-items: center; justify-content: space-between; }
+.brand { display: flex; align-items: center; gap: 14px; }
+.brand .mark { width: 46px; height: 46px; }
+.brand .word { height: 38px; }
+.domain { font-family: 'Plex Mono', monospace; font-size: 22px; color: #8a9099; }
+h1 { margin-top: 58px; font-family: 'Inter Tight', sans-serif; font-size: 88px; line-height: 0.98; letter-spacing: -0.04em; font-weight: 600; }
+h1 i { font-style: normal; color: ${SIGNAL}; }
+p { margin-top: 22px; font-size: 27px; line-height: 1.35; color: #a4a9b1; letter-spacing: -0.01em; }
+.band { position: absolute; left: 0; right: 0; bottom: 0; height: 200px; }
+.band svg { position: absolute; inset: 0; overflow: visible; }
+.label { position: absolute; top: 6px; font-family: 'Plex Mono', monospace; font-size: 17px; color: #8a9099; white-space: nowrap; }
 </style></head><body>
-<div class="bg"></div>
-<div class="keep"><svg viewBox="0 0 64 64"><defs>${GRAD('k')}</defs><path fill="url(#k)" d="${MARK}"/></svg></div>
-<div class="floor"></div>
-<div class="ground"></div>
 <div class="wrap">
-  <div class="brand"><div class="tile">${tile()}</div><svg class="word" viewBox="${WORDMARK_VIEWBOX}"><path fill="#f3f4f5" d="${WORDMARK}"/></svg></div>
-  <h1>Your search data,<br/><span>kept.</span></h1>
-  <p>SEO &amp; GEO analytics that lives in your own Cloudflare account.</p>
-  <div class="foot"><b>searchkeep.dev</b><i class="dot"></i>Open source · MIT<i class="dot"></i>MCP + dashboard</div>
+  <div class="top">
+    <div class="brand">${markSvg({ cut: 'full', ink: '#ffffff' }).replace('<svg ', '<svg class="mark" ')}<svg class="word" viewBox="${WORDMARK_VIEWBOX}"><path fill="#f3f4f6" d="${WORDMARK}"/></svg></div>
+    <div class="domain">searchkeep.dev</div>
+  </div>
+  <h1>Your search data,<br/>kept<i>.</i></h1>
+  <p>SEO &amp; GEO analytics in your own Cloudflare account.</p>
+</div>
+<div class="band">
+  <svg width="1200" height="200" viewBox="0 0 1200 200" fill="none">
+    <line x1="0" y1="199.5" x2="1200" y2="199.5" stroke="#23262c"/>
+    <line x1="520" y1="0" x2="520" y2="200" stroke="#5b616b" stroke-width="1.5" stroke-dasharray="4 6"/>
+    <polyline points="${pts}" stroke="#ffffff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+    <circle cx="${end.x}" cy="${end.y}" r="20" stroke="${SIGNAL}" stroke-opacity="0.45" stroke-width="2"/>
+    <circle cx="${end.x}" cy="${end.y}" r="9" fill="${SIGNAL}"/>
+  </svg>
+  <span class="label" style="right: ${1200 - 508}px">← kept by Searchkeep</span>
+  <span class="label" style="left: 532px">Search Console’s 16-month window →</span>
 </div>
 </body></html>`;
 
@@ -81,11 +80,15 @@ const icon = (size, opts) => `<!doctype html><html><head><style>
 * { margin: 0; } html, body { width: ${size}px; height: ${size}px; background: transparent; overflow: hidden; }
 </style></head><body>${tile(opts)}</body></html>`;
 
+// The SVG favicon: browsers show it at 16 px, so it uses the tiny cut with a larger glyph.
+writeFileSync(out('favicon.svg'), tile({ cut: 'tiny', inset: 0.1 }).replace(' width="100%" height="100%"', '') + '\n');
+console.log('wrote favicon.svg');
+
 const browser = await chromium.launch();
 try {
   const shots = [
     { file: 'og.png', html: og, w: 1200, h: 630 },
-    { file: 'favicon-32.png', html: icon(32, { d: MARK_SMALL }), w: 32, h: 32, transparent: true },
+    { file: 'favicon-32.png', html: icon(32, { cut: 'small', inset: 0.12 }), w: 32, h: 32, transparent: true },
     { file: 'icon-192.png', html: icon(192, {}), w: 192, h: 192, transparent: true },
     { file: 'icon-512.png', html: icon(512, {}), w: 512, h: 512, transparent: true },
     // iOS rounds the corners itself: full-bleed square.

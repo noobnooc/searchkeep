@@ -90,7 +90,7 @@
           </div>
           {#if trend}
             <div class="trend">
-              <LineChart dates={trend.dates} series={[{ key: 'visits', label: 'AI visits', values: trend.values, color: 'var(--accent)', area: true }]} height={150} label="AI referral visits per day" />
+              <LineChart dates={trend.dates} series={[{ key: 'visits', label: 'AI visits', values: trend.values, color: 'var(--chart)', area: true }]} height={150} label="AI referral visits per day" />
             </div>
           {/if}
         {/if}
