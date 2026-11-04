@@ -5,11 +5,14 @@ import {
   clearJwksCache,
   evaluateReadiness,
   loadConfig,
+  normalizeDomain,
   normalizePage,
   OidcVerifier,
   parseAiCitationsCsv,
   safeMessage,
+  validateSite,
   weekStart,
+  withStoredSites,
 } from '../src/index.js';
 
 function b64url(bytes: ArrayBuffer | Uint8Array | string): string {
@@ -115,12 +118,44 @@ describe('config', () => {
       GSC_PRIVATE_KEY: '-----BEGIN PRIVATE KEY-----\\nabc\\n-----END PRIVATE KEY-----',
       ACCESS_TEAM_DOMAIN: 'https://team.cloudflareaccess.com/',
     });
-    expect(c.sites.map((s) => s.id)).toEqual(['acme-com', 'b']);
+    expect(c.sites.map((s) => s.id)).toEqual(['acme-com']);
+    expect(c.sites[0]!.origin).toBe('secret');
     expect(c.errors).toHaveLength(2);
     expect(c.gsc.privateKey).toContain('\n');
     expect(c.access.teamDomain).toBe('team.cloudflareaccess.com');
     expect(c.enableWrites).toBe(false);
     expect(loadConfig({ SITES: 'nope' }).errors[0]).toMatch(/JSON/);
+  });
+});
+
+describe('sites', () => {
+  it('validates and normalizes a site from the dashboard', () => {
+    const res = validateSite({
+      domain: 'https://www.Example.com/blog?x=1',
+      bingSiteUrl: 'example.com',
+      gscProperty: 'sc-domain:example.com',
+    });
+    expect(res).toEqual({
+      site: { id: 'example-com', domain: 'www.example.com', gscProperty: 'sc-domain:example.com', bingSiteUrl: 'https://example.com/' },
+    });
+    expect(validateSite({ domain: 'not a domain' })).toHaveProperty('error');
+    expect(validateSite({ domain: 'a.com', gscProperty: 'example.com' })).toHaveProperty('error');
+    expect(validateSite({ domain: 'a.com', brandRegex: '(' })).toHaveProperty('error');
+    expect(validateSite({ domain: 'a.com', cloudflareZoneId: 'x y' })).toHaveProperty('error');
+    expect(normalizeDomain(' HTTPS://Docs.Acme.com:443/path ')).toBe('docs.acme.com');
+  });
+
+  it('merges dashboard sites, secret wins on id conflicts', () => {
+    const c = loadConfig({ SITES: JSON.stringify([{ id: 'acme', domain: 'acme.com' }]) });
+    const merged = withStoredSites(c, [
+      { id: 'acme', domain: 'other.com' },
+      { id: 'blog', domain: 'blog.acme.com' },
+    ]);
+    expect(merged.sites).toEqual([
+      { id: 'acme', domain: 'acme.com', origin: 'secret' },
+      { id: 'blog', domain: 'blog.acme.com', origin: 'dashboard' },
+    ]);
+    expect(withStoredSites(c, [])).toBe(c);
   });
 });
 

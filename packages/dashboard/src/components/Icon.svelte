@@ -40,6 +40,9 @@
     file: 'M6 3.5h8l4 4V20.5H6zM14 3.5V8h4',
     trendDown: 'M4 7l6 6 4-4 6 6M20 10v5h-5',
     dot: 'M12 12.01v-.01',
+    plus: 'M12 5v14M5 12h14',
+    trash: 'M5 7h14M10 11v6M14 11v6M6.5 7l1 13h9l1-13M9.5 7V4.5h5V7',
+    edit: 'M4 20h4L18.5 9.5a2.1 2.1 0 0 0-3-3L5 17v3zM13.5 8.5l2 2',
   } as const;
   export type IconName = keyof typeof PATHS;
 </script>

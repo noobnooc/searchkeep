@@ -217,6 +217,18 @@ export function createCloudflareClient(opts: CloudflareClientOptions): Cloudflar
       return { active: false, message: lastMessage };
     },
 
+    async listZones(accountId) {
+      const zones = await restAll<{ id: string; name: string; status?: string }>(`/zones?account.id=${encodeURIComponent(accountId)}`);
+      return zones.filter((z) => z.status !== 'deleted').map((z) => ({ id: z.id, name: z.name }));
+    },
+
+    async listWebAnalyticsSites(accountId) {
+      const sites = await restAll<{ site_tag: string; host?: string | null; ruleset?: { zone_name?: string | null } | null }>(
+        `/accounts/${accountId}/rum/site_info/list`,
+      );
+      return sites.map((s) => ({ siteTag: s.site_tag, host: s.host ?? s.ruleset?.zone_name ?? null }));
+    },
+
     async findAccessAppByAud(accountId, aud) {
       try {
         const apps = await rest<AccessApp[]>(`/accounts/${accountId}/access/apps?aud=${encodeURIComponent(aud)}`);

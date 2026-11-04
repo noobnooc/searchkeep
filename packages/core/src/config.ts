@@ -53,6 +53,71 @@ function int(env: RawEnv, key: string, fallback: number, min: number, max: numbe
   return Math.min(max, Math.max(min, n));
 }
 
+const HOST_RE = /^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z][a-z0-9-]{0,62}$/;
+
+/** Accepts `example.com`, `https://www.example.com/path` etc. and returns the bare hostname. */
+export function normalizeDomain(input: string): string {
+  let d = input.trim().toLowerCase();
+  d = d.replace(/^[a-z][a-z0-9+.-]*:\/\//, '');
+  d = d.split(/[/?#]/)[0] ?? '';
+  d = d.replace(/:\d+$/, '').replace(/\.$/, '');
+  return d;
+}
+
+export function siteIdFromDomain(domain: string): string {
+  return domain
+    .replace(/^www\./, '')
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-|-$/g, '')
+    .slice(0, 63);
+}
+
+/**
+ * Validates one site definition (from the SITES secret or the dashboard).
+ * Returns the normalized site or a human-readable error.
+ */
+export function validateSite(input: unknown, label = 'site'): { site: SiteConfig } | { error: string } {
+  if (typeof input !== 'object' || input === null || Array.isArray(input)) return { error: `${label} must be an object.` };
+  const o = input as Record<string, unknown>;
+  const domain = typeof o.domain === 'string' ? normalizeDomain(o.domain) : '';
+  if (!domain || !HOST_RE.test(domain)) return { error: `${label}.domain must be a hostname like "example.com".` };
+  const id = typeof o.id === 'string' && o.id.trim() !== '' ? o.id.trim() : siteIdFromDomain(domain);
+  if (!SITE_ID_RE.test(id)) return { error: `${label}.id "${id}" must use lowercase letters, digits and dashes.` };
+  const opt = (k: string) => (typeof o[k] === 'string' && (o[k] as string).trim() !== '' ? (o[k] as string).trim() : undefined);
+  const site: SiteConfig = { id, domain };
+  const gscProperty = opt('gscProperty');
+  if (gscProperty) {
+    if (!/^sc-domain:[a-z0-9.-]+$/i.test(gscProperty) && !/^https?:\/\/[^\s]+\/$/i.test(gscProperty)) {
+      return { error: `${label}.gscProperty must look like "sc-domain:example.com" or "https://example.com/".` };
+    }
+    site.gscProperty = gscProperty;
+  }
+  const bingSiteUrl = opt('bingSiteUrl');
+  if (bingSiteUrl) {
+    const url = /^https?:\/\//i.test(bingSiteUrl) ? bingSiteUrl : `https://${normalizeDomain(bingSiteUrl)}/`;
+    if (!/^https?:\/\/[^\s/]+(\/[^\s]*)?$/i.test(url)) return { error: `${label}.bingSiteUrl must be a URL like "https://example.com/".` };
+    site.bingSiteUrl = url.endsWith('/') ? url : `${url}/`;
+  }
+  const zone = opt('cloudflareZoneId');
+  if (zone) {
+    if (!/^[A-Za-z0-9_-]{1,64}$/.test(zone))
+      return { error: `${label}.cloudflareZoneId must be the zone ID (32 characters, from the zone's Overview page).` };
+    site.cloudflareZoneId = zone;
+  }
+  const tag = opt('webAnalyticsSiteTag');
+  if (tag) {
+    if (!/^[A-Za-z0-9_-]{1,64}$/.test(tag))
+      return { error: `${label}.webAnalyticsSiteTag must be the Web Analytics site tag (32 characters).` };
+    site.webAnalyticsSiteTag = tag;
+  }
+  const brand = opt('brandRegex');
+  if (brand) {
+    if (!compileBrandRegex(brand)) return { error: `${label}.brandRegex is not a valid regular expression.` };
+    site.brandRegex = brand;
+  }
+  return { site };
+}
+
 export function parseSites(raw: string | null, errors: string[]): SiteConfig[] {
   if (!raw) return [];
   let parsed: unknown;
@@ -69,50 +134,30 @@ export function parseSites(raw: string | null, errors: string[]): SiteConfig[] {
   const out: SiteConfig[] = [];
   const seen = new Set<string>();
   parsed.forEach((item, i) => {
-    if (typeof item !== 'object' || item === null) {
-      errors.push(`SITES[${i}] must be an object.`);
+    const res = validateSite(item, `SITES[${i}]`);
+    if ('error' in res) {
+      errors.push(res.error);
       return;
     }
-    const o = item as Record<string, unknown>;
-    const domain = typeof o.domain === 'string' ? o.domain.trim().toLowerCase() : '';
-    if (!domain || domain.includes('/')) {
-      errors.push(`SITES[${i}].domain must be a bare hostname like "example.com".`);
+    if (seen.has(res.site.id)) {
+      errors.push(`SITES[${i}].id "${res.site.id}" is duplicated.`);
       return;
     }
-    const id =
-      typeof o.id === 'string' && o.id.trim() !== ''
-        ? o.id.trim()
-        : domain
-            .replace(/^www\./, '')
-            .replace(/[^a-z0-9]+/g, '-')
-            .replace(/^-|-$/g, '');
-    if (!SITE_ID_RE.test(id)) {
-      errors.push(`SITES[${i}].id "${id}" must use lowercase letters, digits and dashes.`);
-      return;
-    }
-    if (seen.has(id)) {
-      errors.push(`SITES[${i}].id "${id}" is duplicated.`);
-      return;
-    }
-    seen.add(id);
-    const opt = (k: string) => (typeof o[k] === 'string' && (o[k] as string).trim() !== '' ? (o[k] as string).trim() : undefined);
-    const site: SiteConfig = { id, domain };
-    const gscProperty = opt('gscProperty');
-    if (gscProperty) site.gscProperty = gscProperty;
-    const bingSiteUrl = opt('bingSiteUrl');
-    if (bingSiteUrl) site.bingSiteUrl = bingSiteUrl;
-    const zone = opt('cloudflareZoneId');
-    if (zone) site.cloudflareZoneId = zone;
-    const tag = opt('webAnalyticsSiteTag');
-    if (tag) site.webAnalyticsSiteTag = tag;
-    const brand = opt('brandRegex');
-    if (brand) {
-      if (compileBrandRegex(brand)) site.brandRegex = brand;
-      else errors.push(`SITES[${i}].brandRegex is not a valid regular expression.`);
-    }
-    out.push(site);
+    seen.add(res.site.id);
+    out.push({ ...res.site, origin: 'secret' });
   });
   return out;
+}
+
+/**
+ * Adds the sites managed in the dashboard (stored in the database) to the
+ * configuration. Sites from the SITES secret win on id conflicts.
+ */
+export function withStoredSites(config: SearchkeepConfig, stored: SiteConfig[]): SearchkeepConfig {
+  const ids = new Set(config.sites.map((s) => s.id));
+  const extra = stored.filter((s) => !ids.has(s.id)).map((s) => ({ ...s, origin: 'dashboard' as const }));
+  if (extra.length === 0) return config;
+  return { ...config, sites: [...config.sites, ...extra] };
 }
 
 export function compileBrandRegex(source: string | null | undefined): RegExp | null {
@@ -168,7 +213,11 @@ export function brandRegexFor(config: SearchkeepConfig, site: SiteConfig): strin
 }
 
 export function findSite(config: SearchkeepConfig, siteId?: string): SiteConfig {
-  if (config.sites.length === 0) throw new SearchkeepError('not_configured', 'No sites configured. Set the SITES secret.');
+  if (config.sites.length === 0)
+    throw new SearchkeepError(
+      'not_configured',
+      'No sites configured yet. Add one in the dashboard (Settings → Sites) or set the SITES secret.',
+    );
   if (!siteId) {
     if (config.sites.length === 1) return config.sites[0]!;
     throw new SearchkeepError(

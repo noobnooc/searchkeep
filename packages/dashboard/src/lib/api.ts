@@ -39,7 +39,7 @@ export function apiUrl(path: string, params: Params = {}): string {
 }
 
 interface RequestOptions {
-  method?: 'GET' | 'POST';
+  method?: 'GET' | 'POST' | 'DELETE';
   body?: BodyInit;
   contentType?: string;
   signal?: AbortSignal;

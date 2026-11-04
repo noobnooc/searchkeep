@@ -122,6 +122,10 @@ export interface CloudflareAnalyticsClient {
   webVitals(accountId: string, siteTag: string, date: IsoDate): Promise<CloudflareVitalsRow[]>;
   /** Verifies the API token; returns its status. */
   verifyToken(): Promise<{ active: boolean; message?: string }>;
+  /** Zones in the account (needs Zone: Read). Used to suggest settings in the dashboard. */
+  listZones?(accountId: string): Promise<Array<{ id: string; name: string }>>;
+  /** Web Analytics sites in the account (needs Account Settings: Read). */
+  listWebAnalyticsSites?(accountId: string): Promise<Array<{ siteTag: string; host: string | null }>>;
 }
 
 export interface SourceClients {

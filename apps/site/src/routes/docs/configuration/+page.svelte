@@ -78,9 +78,16 @@ npx wrangler secret delete ENABLE_WRITES --name searchkeep`;
   </table>
 </div>
 
-<h2 id="sites">SITES</h2>
+<h2 id="sites">Sites</h2>
 <p>
-  <code>SITES</code> is a JSON array with one object per site. It maps the site to its identifier in each data source.
+  The simplest way to add sites is the dashboard: <strong>Settings → Sites → Add site</strong>. It validates every
+  field and auto-fills the identifiers it can find with your credentials (to pick Cloudflare zones and Web Analytics
+  sites from a list, give the API token the optional <strong>Zone: Read</strong> and <strong>Account Settings:
+  Read</strong> permissions). The <code>SITES</code> secret below is the alternative for scripted setups; when both
+  define a site with the same <code>id</code>, the secret wins.
+</p>
+<p>
+  <code>SITES</code> is an optional JSON array with one object per site. It maps the site to its identifier in each data source.
   Only <code>domain</code> is required; every source-specific field is optional, and a source is simply skipped for a
   site that does not set it.
 </p>

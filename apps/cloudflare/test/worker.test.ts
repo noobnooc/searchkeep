@@ -159,3 +159,49 @@ describe('cron', () => {
     expect(await new D1Store(env.DB).getMeta(READY_FLAG_KEY)).toBeNull();
   });
 });
+
+describe('sites managed in the dashboard', () => {
+  it('creates, lists, uses and deletes a site; secret sites are read-only', async () => {
+    const env = await makeEnv();
+    const headers = { 'cf-access-jwt-assertion': await jwt(), 'content-type': 'application/json' };
+    const post = (body: unknown) => call(env, '/api/site-configs', { method: 'POST', headers, body: JSON.stringify(body) });
+
+    const bad = await post({ domain: 'not a domain' });
+    expect(bad.status).toBe(400);
+
+    const created = await post({ mode: 'create', domain: 'https://Blog.Acme.com/', bingSiteUrl: 'blog.acme.com' });
+    expect(created.status).toBe(200);
+    expect(await created.json()).toMatchObject({
+      site: { id: 'blog-acme-com', domain: 'blog.acme.com', bingSiteUrl: 'https://blog.acme.com/', origin: 'dashboard' },
+      created: true,
+    });
+
+    const dup = await post({ mode: 'create', domain: 'blog.acme.com' });
+    expect(dup.status).toBe(400);
+    const updated = await post({ id: 'blog-acme-com', domain: 'blog.acme.com', brandRegex: 'acme' });
+    expect(await updated.json()).toMatchObject({ created: false, site: { brandRegex: 'acme' } });
+
+    const list = (await (await call(env, '/api/site-configs', { headers })).json()) as { sites: Array<{ id: string; origin: string }> };
+    expect(list.sites.map((s) => [s.id, s.origin])).toEqual([
+      ['acme', 'secret'],
+      ['blog-acme-com', 'dashboard'],
+    ]);
+    // The new site is usable everywhere (API, MCP, cron) right away.
+    const sites = (await (await call(env, '/api/sites', { headers })).json()) as { sites: Array<{ id: string }> };
+    expect(sites.sites.map((s) => s.id)).toContain('blog-acme-com');
+
+    const editSecret = await post({ id: 'acme', domain: 'acme.com', brandRegex: 'x' });
+    expect(editSecret.status).toBe(403);
+    expect((await call(env, '/api/site-configs/acme', { method: 'DELETE', headers })).status).toBe(403);
+    const del = await call(env, '/api/site-configs/blog-acme-com', { method: 'DELETE', headers });
+    expect(await del.json()).toMatchObject({ deleted: 'blog-acme-com' });
+    expect((await call(env, '/api/site-configs/blog-acme-com', { method: 'DELETE', headers })).status).toBe(404);
+  });
+
+  it('stays locked without an API token, even when no sites are configured', async () => {
+    const env = await makeEnv({ SITES: undefined, CLOUDFLARE_API_TOKEN: undefined });
+    const headers = { 'cf-access-jwt-assertion': await jwt(), 'content-type': 'application/json' };
+    // Without a Cloudflare API token the Access check cannot run, so the API stays locked.
+    expect((await call(env, '/api/site-configs', { headers })).status).toBe(403);
+  });
+});

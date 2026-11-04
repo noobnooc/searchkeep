@@ -30,7 +30,7 @@ Time needed: about 30–45 minutes the first time.
 | 8   | [Enable Managed OAuth](#8-enable-managed-oauth)                                         | Agent or human                                            |
 | 9   | [Store the Access team domain and AUD](#9-store-the-access-team-domain-and-aud)         | Agent or human                                            |
 | 10  | [Cloudflare account ID and API token](#10-cloudflare-account-id-and-api-token)          | Human (token), agent (secrets)                            |
-| 11  | [Describe your sites (`SITES`)](#11-describe-your-sites-sites)                          | Agent or human                                            |
+| 11  | [Add your sites](#11-add-your-sites)                                                    | Human (dashboard) or agent (`SITES`)                      |
 | 12  | [Google Search Console service account](#12-google-search-console-service-account)      | Human, or agent with gcloud; GSC user step is **Human**   |
 | 13  | [Bing Webmaster Tools API key](#13-bing-webmaster-tools-api-key)                        | **Human** (key), agent (secret)                           |
 | 14  | [Optional settings](#14-optional-settings)                                              | Agent or human                                            |
@@ -76,7 +76,7 @@ are never shown, which is expected.
 | `ACCESS_AUD`              | yes      | 9           | Application Audience (AUD) tag of the Access application                                                        |
 | `CLOUDFLARE_ACCOUNT_ID`   | yes      | 10          | Your Cloudflare account ID                                                                                      |
 | `CLOUDFLARE_API_TOKEN`    | yes      | 10          | Read-only API token (Account Analytics, Zone Analytics, Access: Apps and Policies); needed for the Access check |
-| `SITES`                   | yes      | 11          | JSON array describing your sites                                                                                |
+| `SITES`                   | no       | 11          | JSON array describing your sites; optional, sites can be added in the dashboard instead                         |
 | `GSC_CLIENT_EMAIL`        | for GSC  | 12          | `client_email` from the service account key JSON                                                                |
 | `GSC_PRIVATE_KEY`         | for GSC  | 12          | `private_key` from the service account key JSON (real line breaks or literal `\n`)                              |
 | `BING_API_KEY`            | for Bing | 13          | Bing Webmaster Tools API key (treat it as a password)                                                           |
@@ -495,9 +495,22 @@ curl -s https://api.cloudflare.com/client/v4/user/tokens/verify \
 
 and `wrangler secret list` shows both names.
 
-## 11. Describe your sites (`SITES`)
+## 11. Add your sites
 
-**Who:** Agent or human.
+**Who:** Human in the dashboard (recommended), or an agent through the `SITES` secret.
+
+There are two ways to tell Searchkeep which sites to analyse. You can use both: sites from the
+secret show up in the dashboard as read-only.
+
+**Option A, dashboard (easiest).** After step 15, open the dashboard → **Settings** → **Sites** →
+**Add site**. Enter the domain and press **Auto-fill**: Searchkeep looks the domain up in Search
+Console, Bing Webmaster Tools and Cloudflare with the credentials you configured and fills in what
+it finds. Every field also accepts a value you type yourself. Sites are stored in your D1 database;
+edit or remove them on the same page. To pick Cloudflare zones and Web Analytics sites from a list,
+give the API token two more read permissions (optional): **Zone: Read** and **Account Settings:
+Read**.
+
+**Option B, `SITES` secret (for agents and scripted setups).** Skip it if you use the dashboard.
 
 `SITES` is a JSON array with one object per site:
 
@@ -549,8 +562,9 @@ pnpm exec wrangler secret put SITES < ~/searchkeep-sites.json
 
 In the dashboard, paste the JSON as the value of secret `SITES`.
 
-**Verify:** the `jq -e` check prints `true`. After step 15, the `list_sites` tool lists every site,
-and `setup_status` reports no configuration errors for `SITES`.
+**Verify:** after step 15, **Settings** → **Sites** lists every site (option A or B), the
+`list_sites` tool returns them, and `setup_status` shows "At least one site is configured" as OK
+with no configuration errors.
 
 ## 12. Google Search Console service account
 

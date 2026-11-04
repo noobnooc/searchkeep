@@ -10,6 +10,7 @@ import {
   aiCrawlers,
   aiReferrals,
   comparePeriods,
+  discoverSources,
   findCannibalization,
   findContentDecay,
   findCtrAnomalies,
@@ -29,6 +30,8 @@ import {
   SearchkeepError,
   setupStatus,
   toIsoDate,
+  validateSite,
+  withStoredSites,
   evaluateReadiness,
   type AuthResult,
   type CrawlerQuery,
@@ -197,14 +200,21 @@ app.use('*', async (c, next) => {
   await next();
 });
 
+/** Migrates on first use, attaches the store and adds dashboard-managed sites to the config. */
+async function attachStore(c: C): Promise<void> {
+  await ensureMigrated(c.env.DB);
+  const store = new D1Store(c.env.DB);
+  c.set('store', store);
+  c.set('config', withStoredSites(c.get('config'), await store.listSiteConfigs()));
+}
+
 // MCP ------------------------------------------------------------------------
 
 app.all('/mcp', async (c) => {
   const origin = new URL(c.req.url).origin;
   const auth = c.get('auth');
   if (!auth.ok) return mcpLockedResponse(lockedMessage('no_access', origin));
-  await ensureMigrated(c.env.DB);
-  c.set('store', new D1Store(c.env.DB));
+  await attachStore(c);
   const report = await readiness(c);
   if (report.state !== 'ready') return mcpLockedResponse(lockedMessage(report.state, origin));
   return handleMcpRequest(c.req.raw, { ctx: opsContext(c), readiness: async () => report });
@@ -224,8 +234,7 @@ app.use('/api/*', async (c, next) => {
       },
       403,
     );
-  await ensureMigrated(c.env.DB);
-  c.set('store', new D1Store(c.env.DB));
+  await attachStore(c);
   await next();
 });
 
@@ -467,6 +476,47 @@ app.post(
     return { seeded: await seedDemo(ctx.store, site.id, site.domain) };
   }),
 );
+// Sites managed in the dashboard -------------------------------------------
+
+app.get(
+  '/api/site-configs',
+  handle(async (c) => ({ sites: c.get('config').sites.map((s) => ({ ...s, origin: s.origin ?? 'secret' })) })),
+);
+app.post(
+  '/api/site-configs',
+  handle(async (c) => {
+    const body = (await c.req.json().catch(() => null)) as (Record<string, unknown> & { mode?: string }) | null;
+    if (!body) throw new SearchkeepError('bad_request', 'Send the site as a JSON object.');
+    const res = validateSite(body);
+    if ('error' in res) throw new SearchkeepError('bad_request', res.error.replace(/^site\./, ''));
+    const existing = c.get('config').sites.find((s) => s.id === res.site.id);
+    if (existing?.origin === 'secret' || (existing && !existing.origin)) {
+      throw new SearchkeepError('forbidden', `Site "${res.site.id}" is defined in the SITES secret; change it there.`);
+    }
+    if (existing && body.mode === 'create') throw new SearchkeepError('bad_request', `A site with id "${res.site.id}" already exists.`);
+    const store = c.get('store');
+    await store.saveSiteConfig(res.site);
+    await store.syncSites([res.site]);
+    return { site: { ...res.site, origin: 'dashboard' }, created: !existing };
+  }),
+);
+app.delete(
+  '/api/site-configs/:id',
+  handle(async (c) => {
+    const id = c.req.param('id') ?? '';
+    const site = c.get('config').sites.find((s) => s.id === id);
+    if (!site) throw new SearchkeepError('not_found', `Unknown site "${id}".`);
+    if (site.origin !== 'dashboard')
+      throw new SearchkeepError('forbidden', `Site "${id}" is defined in the SITES secret; remove it there.`);
+    await c.get('store').deleteSiteConfig(id);
+    return { deleted: id, note: 'The site configuration was removed. Data already synced for it stays in the database.' };
+  }),
+);
+app.get(
+  '/api/discover',
+  handle((c) => discoverSources(opsContext(c))),
+);
+
 app.all('/api/*', (c) => c.json({ error: 'Not found', code: 'not_found' }, 404));
 
 // Dashboard ------------------------------------------------------------------
@@ -488,7 +538,7 @@ app.all('*', async (c) => {
 export async function scheduledSync(env: Env, now = new Date()): Promise<string> {
   await ensureMigrated(env.DB);
   const store = new D1Store(env.DB);
-  const config = loadConfig(env as unknown as Record<string, unknown>);
+  const config = withStoredSites(loadConfig(env as unknown as Record<string, unknown>), await store.listSiteConfigs());
   if (!(await store.getMeta(READY_FLAG_KEY))) {
     return 'not ready: the deployment has not reached the ready state yet (open the dashboard through Access once)';
   }
