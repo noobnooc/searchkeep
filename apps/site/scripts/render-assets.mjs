@@ -1,6 +1,7 @@
-// Renders static/og.png and the PNG icons from HTML/SVG with Playwright.
+// Renders static/og.png and the PNG icons from the brand geometry with Playwright.
 // Playwright is not a dependency of this package; run with a global install:
 //   pnpm --filter @searchkeep/site run render:assets
+// Brand source: docs/brand (geometry mirrored in src/lib/brand.ts).
 import { createRequire } from 'node:module';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -12,83 +13,85 @@ const { chromium } = require('playwright');
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const out = (f) => resolve(root, 'static', f);
 const font = (f) => pathToFileURL(resolve(root, 'node_modules/@fontsource-variable', f)).href;
-const markSvg = readFileSync(out('favicon.svg'), 'utf8');
+
+// Read the brand constants from src/lib/brand.ts without a TS toolchain.
+const brandTs = readFileSync(resolve(root, 'src/lib/brand.ts'), 'utf8');
+const constant = (name) => brandTs.match(new RegExp(`export const ${name} = '([^']+)'`))[1];
+const MARK = constant('MARK');
+const MARK_SMALL = constant('MARK_SMALL');
+const WORDMARK = constant('WORDMARK');
+const WORDMARK_VIEWBOX = constant('WORDMARK_VIEWBOX');
+const INK = '#04140c';
+const GRAD = (id) =>
+  `<linearGradient id="${id}" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#a3ffb9"/><stop offset=".55" stop-color="#31eb91"/><stop offset="1" stop-color="#00cb87"/></linearGradient>`;
+
+/** The tile: rounded (default) or full-bleed square; `inset` is the padding around the glyph. */
+const tile = ({ d = MARK, rounded = true, inset = 0.16 } = {}) => {
+  const t = 64 * inset;
+  const s = 1 - 2 * inset;
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="100%" height="100%"><defs>${GRAD('g')}</defs><rect width="64" height="64" ${rounded ? 'rx="16.6"' : ''} fill="url(#g)"/><path transform="translate(${t} ${t}) scale(${s})" fill="${INK}" d="${d}"/></svg>`;
+};
 
 const fonts = `
 @font-face { font-family: 'Inter'; font-weight: 100 900; src: url('${font('inter/files/inter-latin-opsz-normal.woff2')}') format('woff2'); }
-@font-face { font-family: 'Mono'; font-weight: 100 900; src: url('${font('jetbrains-mono/files/jetbrains-mono-latin-wght-normal.woff2')}') format('woff2'); }
+@font-face { font-family: 'Funnel'; font-weight: 300 800; src: url('${font('funnel-display/files/funnel-display-latin-wght-normal.woff2')}') format('woff2'); }
 `;
 
 const og = `<!doctype html><html><head><style>
 ${fonts}
 * { margin: 0; box-sizing: border-box; }
 html, body { width: 1200px; height: 630px; }
-body {
-  font-family: 'Inter', sans-serif; color: #f3f4f5; background: #08090a; overflow: hidden; position: relative;
-  -webkit-font-smoothing: antialiased; font-optical-sizing: auto; font-feature-settings: 'cv11', 'ss01', 'ss03';
-}
+body { font-family: 'Inter', sans-serif; color: #f3f4f5; background: #08090a; overflow: hidden; position: relative; -webkit-font-smoothing: antialiased; }
 .bg { position: absolute; inset: 0;
   background:
-    radial-gradient(40% 55% at 78% 40%, oklch(0.8 0.18 160 / 0.22), transparent 70%),
-    radial-gradient(35% 45% at 100% 0%, oklch(0.6 0.13 250 / 0.22), transparent 70%),
-    linear-gradient(rgb(255 255 255 / 0.05) 1px, transparent 1px) 0 0 / 48px 48px,
-    linear-gradient(90deg, rgb(255 255 255 / 0.05) 1px, transparent 1px) 0 0 / 48px 48px;
-  -webkit-mask-image: radial-gradient(90% 90% at 70% 40%, #000 30%, transparent 85%);
+    radial-gradient(38% 60% at 80% 52%, rgb(49 235 145 / 0.22), transparent 70%),
+    radial-gradient(30% 40% at 100% 0%, rgb(90 120 255 / 0.14), transparent 70%),
+    linear-gradient(rgb(255 255 255 / 0.045) 1px, transparent 1px) 0 0 / 40px 40px,
+    linear-gradient(90deg, rgb(255 255 255 / 0.045) 1px, transparent 1px) 0 0 / 40px 40px;
+  -webkit-mask-image: radial-gradient(85% 95% at 72% 50%, #000 25%, transparent 80%);
 }
-.wrap { position: absolute; inset: 0; padding: 72px 80px; display: flex; flex-direction: column; }
-.brand { display: flex; align-items: center; gap: 16px; font-size: 30px; font-weight: 620; letter-spacing: -0.03em; }
-.brand svg { width: 48px; height: 48px; border-radius: 12px; box-shadow: 0 8px 32px -6px oklch(0.8 0.18 160 / 0.5); }
-h1 { margin-top: 96px; font-size: 74px; line-height: 0.98; letter-spacing: -0.05em; font-weight: 650; }
-h1 span { background: linear-gradient(180deg, #f3f4f5 20%, #8d929b); -webkit-background-clip: text; color: transparent; }
-p { margin-top: 26px; font-size: 27px; line-height: 1.35; color: #b3b7be; letter-spacing: -0.015em; max-width: 560px; }
+.wrap { position: absolute; inset: 0; padding: 68px 76px; display: flex; flex-direction: column; }
+.brand { display: flex; align-items: center; gap: 18px; }
+.brand .tile { width: 52px; height: 52px; border-radius: 14px; box-shadow: 0 10px 30px -8px rgb(49 235 145 / 0.55), 0 0 0 1px rgb(255 255 255 / .1); overflow: hidden; }
+.brand .word { height: 40px; }
+h1 { margin-top: 92px; font-family: 'Funnel', sans-serif; font-size: 86px; line-height: 0.98; letter-spacing: -0.045em; font-weight: 640; }
+h1 span { background: linear-gradient(180deg, #f3f4f5 10%, #9aa0a8); -webkit-background-clip: text; color: transparent; }
+p { margin-top: 26px; font-size: 27px; line-height: 1.38; color: #b3b7be; letter-spacing: -0.012em; max-width: 590px; }
 .foot { margin-top: auto; display: flex; gap: 14px; font-size: 20px; color: #8b9099; align-items: center; }
 .foot b { color: #f3f4f5; font-weight: 600; }
-.dot { width: 5px; height: 5px; border-radius: 50%; background: #646973; }
-.card { position: absolute; right: 64px; top: 168px; width: 372px; padding: 26px 28px; border-radius: 22px;
-  background: linear-gradient(180deg, rgb(255 255 255 / 0.05), rgb(255 255 255 / 0.015)), #0d0e10;
-  border: 1px solid rgb(255 255 255 / 0.11);
-  box-shadow: 0 1px 0 rgb(255 255 255 / 0.06) inset, 0 40px 80px -30px #000; }
-.ct { display: flex; justify-content: space-between; font-size: 17px; font-weight: 600; color: #f3f4f5; }
-.ct span { color: #646973; font-weight: 500; }
-.row { margin-top: 24px; }
-.rh { display: flex; justify-content: space-between; font-size: 18px; color: #b3b7be; }
-.rh b { color: #f3f4f5; font-variant-numeric: tabular-nums; }
-.tr { margin-top: 10px; height: 14px; border-radius: 7px; background: #17181b; overflow: hidden; }
-.fill { height: 100%; border-radius: 7px; }
-.f0 { width: 100%; background: color-mix(in oklch, oklch(0.86 0.17 160) 45%, #1e1f23); }
-.f1 { width: 23%; background: color-mix(in oklch, oklch(0.86 0.17 160) 72%, #1e1f23); }
-.f2 { width: 9.2%; background: oklch(0.86 0.17 160); box-shadow: 0 0 18px oklch(0.8 0.18 160 / 0.6); }
-.src { margin-top: 6px; font-size: 13px; color: #646973; font-family: 'Mono', monospace; }
+.dot { width: 5px; height: 5px; border-radius: 50%; background: #4f545c; }
+.keep { position: absolute; right: 78px; top: 118px; width: 360px; height: 360px; }
+.keep svg { width: 100%; height: 100%; overflow: visible; filter: drop-shadow(0 0 40px rgb(49 235 145 / 0.45)) drop-shadow(0 30px 60px rgb(0 0 0 / 0.6)); }
+.ground { position: absolute; right: 30px; top: 428px; width: 456px; height: 1px; background: linear-gradient(90deg, transparent, rgb(105 248 165 / 0.55), transparent); }
+.floor { position: absolute; right: 88px; top: 410px; width: 340px; height: 60px; border-radius: 50%; background: radial-gradient(closest-side, rgb(49 235 145 / 0.28), transparent); filter: blur(6px); }
 </style></head><body>
 <div class="bg"></div>
+<div class="keep"><svg viewBox="0 0 64 64"><defs>${GRAD('k')}</defs><path fill="url(#k)" d="${MARK}"/></svg></div>
+<div class="floor"></div>
+<div class="ground"></div>
 <div class="wrap">
-  <div class="brand">${markSvg}<span>Searchkeep</span></div>
+  <div class="brand"><div class="tile">${tile()}</div><svg class="word" viewBox="${WORDMARK_VIEWBOX}"><path fill="#f3f4f5" d="${WORDMARK}"/></svg></div>
   <h1>Your search data,<br/><span>kept.</span></h1>
   <p>SEO &amp; GEO analytics that lives in your own Cloudflare account.</p>
   <div class="foot"><b>searchkeep.dev</b><i class="dot"></i>Open source · MIT<i class="dot"></i>MCP + dashboard</div>
 </div>
-<div class="card">
-  <div class="ct">GEO funnel <span>pages · 28 days</span></div>
-  <div class="row"><div class="rh">Crawled by AI <b>412</b></div><div class="tr"><div class="fill f0"></div></div><div class="src">cloudflare ai crawl control</div></div>
-  <div class="row"><div class="rh">Cited in answers <b>96</b></div><div class="tr"><div class="fill f1"></div></div><div class="src">bing ai performance</div></div>
-  <div class="row"><div class="rh">Clicked from AI <b>38</b></div><div class="tr"><div class="fill f2"></div></div><div class="src">web analytics referrers</div></div>
-</div>
 </body></html>`;
 
-const icon = (size, padded) => `<!doctype html><html><head><style>
-* { margin: 0; } html, body { width: ${size}px; height: ${size}px; background: ${padded ? '#08090a' : 'transparent'}; }
-body { display: grid; place-items: center; }
-svg { width: ${padded ? Math.round(size * 0.72) : size}px; height: ${padded ? Math.round(size * 0.72) : size}px; }
-</style></head><body>${markSvg}</body></html>`;
+const icon = (size, opts) => `<!doctype html><html><head><style>
+* { margin: 0; } html, body { width: ${size}px; height: ${size}px; background: transparent; overflow: hidden; }
+</style></head><body>${tile(opts)}</body></html>`;
 
 const browser = await chromium.launch();
 try {
   const shots = [
     { file: 'og.png', html: og, w: 1200, h: 630 },
-    { file: 'favicon-32.png', html: icon(32, false), w: 32, h: 32, transparent: true },
-    { file: 'icon-192.png', html: icon(192, false), w: 192, h: 192, transparent: true },
-    { file: 'icon-512.png', html: icon(512, false), w: 512, h: 512, transparent: true },
-    { file: 'apple-touch-icon.png', html: icon(180, true), w: 180, h: 180 },
+    { file: 'favicon-32.png', html: icon(32, { d: MARK_SMALL }), w: 32, h: 32, transparent: true },
+    { file: 'icon-192.png', html: icon(192, {}), w: 192, h: 192, transparent: true },
+    { file: 'icon-512.png', html: icon(512, {}), w: 512, h: 512, transparent: true },
+    // iOS rounds the corners itself: full-bleed square.
+    { file: 'apple-touch-icon.png', html: icon(180, { rounded: false, inset: 0.18 }), w: 180, h: 180 },
+    // Android adaptive icons crop to a circle: keep the glyph inside the 80% safe zone.
+    { file: 'icon-maskable-512.png', html: icon(512, { rounded: false, inset: 0.24 }), w: 512, h: 512 },
   ];
   for (const s of shots) {
     const page = await browser.newPage({ viewport: { width: s.w, height: s.h }, deviceScaleFactor: 1 });

@@ -34,6 +34,10 @@ Because users sync `main` at any time, the `Unreleased` section is always accura
 
 ### Changed
 
+- New brand: "the keep" mark (a tower whose battlements rise like a bar chart), a lowercase
+  `searchkeep` wordmark in Funnel Display, Funnel Display for website headings, new favicons, app
+  icons (including a maskable icon) and Open Graph image. Brand files and usage notes are in
+  `docs/brand/`. The dashboard still loads no web fonts: the wordmark is drawn as outlines.
 - The `SITES` secret is now optional. Sites defined there keep working and appear read-only in the
   dashboard; when both define the same `id`, the secret wins. Site definitions are validated more
   strictly: a site with an invalid `brandRegex` (or other invalid field) is now skipped and reported

@@ -1,4 +1,9 @@
-# Searchkeep
+<h1>
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/brand/logo-on-dark.svg" />
+    <img alt="Searchkeep" src="docs/brand/logo-on-light.svg" height="48" />
+  </picture>
+</h1>
 
 **Your search data, kept.** SEO and GEO analytics that runs in your own Cloudflare account.
 
