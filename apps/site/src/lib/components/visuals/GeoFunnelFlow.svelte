@@ -108,8 +108,7 @@
     {#each steps as s, i (s.step)}
       <li style:--n={s.value}>
         <div class="head">
-          <span class="tile t{i}"><Icon name={s.icon} size={17} /></span>
-          <span class="n">0{i + 1}</span>
+          <span class="ico t{i}"><Icon name={s.icon} size={18} /></span>
           <h3>{s.step}</h3>
         </div>
         <div class="val">
@@ -197,25 +196,14 @@
   .head {
     display: flex;
     align-items: center;
-    gap: 10px;
+    gap: 8px;
   }
-  .tile {
-    display: grid;
-    place-items: center;
-    width: 32px;
-    height: 32px;
-    border-radius: 9px;
-    border: 1px solid var(--line-2);
-    background: var(--surface);
-    color: var(--text-2);
+  .ico {
+    display: inline-flex;
+    color: var(--text-3);
   }
-  .tile.t2 {
+  .ico.t2 {
     color: var(--accent-text);
-  }
-  .n {
-    font-family: var(--font-mono);
-    font-size: var(--fs-xs);
-    color: var(--text-4);
   }
   .head h3 {
     font-size: 1.25rem;
@@ -434,15 +422,10 @@
       padding-left: 10px;
     }
     .head {
-      flex-wrap: wrap;
       gap: 6px;
-    }
-    .n {
-      display: none;
     }
     .head h3 {
       font-size: 1rem;
-      width: 100%;
     }
     .conv {
       display: none;
