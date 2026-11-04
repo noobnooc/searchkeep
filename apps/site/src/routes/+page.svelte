@@ -7,9 +7,9 @@
   import ArchitectureDiagram from '#lib/components/visuals/ArchitectureDiagram.svelte';
   import AgentTranscript from '#lib/components/visuals/AgentTranscript.svelte';
   import HorizonLine from '#lib/components/visuals/HorizonLine.svelte';
-  import CodeBlock from '#lib/components/CodeBlock.svelte';
+  import AgentPrompt from '#lib/components/AgentPrompt.svelte';
   import { SITE, GITHUB } from '#lib/site.ts';
-  import { TOOLS, PRINCIPLES, FAQS, READINESS, AGENT_PROMPT, AGENT_PREREQS } from '#lib/content.ts';
+  import { TOOLS, PRINCIPLES, FAQS, READINESS } from '#lib/content.ts';
   import { organization, website, softwareApplication, faqPage } from '#lib/schema.ts';
 
   const funnel = [
@@ -326,38 +326,13 @@
         <span class="eyebrow">Deploy with an agent</span>
         <h2 id="agent-title">Hand the runbook to your agent.</h2>
         <p class="lead">An idempotent deploy guide an agent with GitHub and Cloudflare MCP can follow, stopping when you must click.</p>
-        <ul class="human-steps">
-          <li><span class="hs">You, once</span> Authorize the Cloudflare GitHub App</li>
-          <li><span class="hs">You, once</span> Create your Zero Trust organization</li>
-          <li><span class="hs">You, once</span> Create the read-only Cloudflare API token</li>
-          <li><span class="hs">You, once</span> Add the service account in Search Console</li>
-          <li><span class="hs">You, once</span> Generate the Bing API key</li>
-          <li><span class="hs">You</span> Sign in through Access</li>
-        </ul>
         <div class="cta-row left">
           <a class="btn btn-secondary" href="/docs/deploy#with-an-agent">Read the runbook <Icon name="arrow" /></a>
         </div>
       </div>
       <AgentTranscript />
     </div>
-
-    <div class="agent-start" id="agent-prompt">
-      <div class="prereqs">
-        <h3 class="prereqs-title">Before you paste: your agent needs</h3>
-        <ul>
-          {#each AGENT_PREREQS as p (p.title)}
-            <li class="prereq card">
-              <span class="prereq-icon"><Icon name={p.icon} size={18} /></span>
-              <div>
-                <h4>{p.title} <span class="req">Required</span></h4>
-                <p>{p.text}</p>
-              </div>
-            </li>
-          {/each}
-        </ul>
-      </div>
-      <CodeBlock code={AGENT_PROMPT} lang="text" title="Copy into Claude Code, Cursor or Codex" wrap />
-    </div>
+    <div class="agent-panel" id="agent-prompt"><AgentPrompt /></div>
   </div>
 </section>
 
@@ -1048,92 +1023,10 @@
   .agent-grid .section-head {
     margin-bottom: 0;
   }
-  .human-steps {
-    list-style: none;
-    padding: 0;
-    margin-top: 24px;
-    display: grid;
-    gap: 10px;
-    font-size: 0.9375rem;
-    color: var(--text-2);
-  }
-  .human-steps li {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-  }
-  .hs {
-    flex: none;
-    font-size: 11px;
-    font-weight: 600;
-    padding: 2px 8px;
-    border-radius: 6px;
-    color: var(--warn);
-    background: var(--warn-soft);
+  .agent-panel {
+    margin-top: clamp(2rem, 1.5rem + 2vw, 3rem);
   }
 
-  .agent-start {
-    margin-top: clamp(2.5rem, 2rem + 2vw, 3.5rem);
-    display: grid;
-    grid-template-columns: minmax(0, 0.95fr) minmax(0, 1.2fr);
-    gap: 48px;
-    align-items: start;
-  }
-  .prereqs-title {
-    font-family: var(--font-mono);
-    font-size: 0.75rem;
-    font-weight: 500;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-    color: var(--text-3);
-  }
-  .prereqs ul {
-    list-style: none;
-    padding: 0;
-    margin-top: 14px;
-    display: grid;
-    gap: 12px;
-  }
-  .prereq {
-    display: flex;
-    gap: 14px;
-    padding: 18px 20px;
-  }
-  .prereq-icon {
-    flex: none;
-    display: grid;
-    place-items: center;
-    width: 36px;
-    height: 36px;
-    border-radius: 10px;
-    border: 1px solid var(--line-2);
-    background: var(--surface-2);
-    color: var(--text);
-  }
-  .prereq h4 {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    font-size: 1rem;
-    letter-spacing: -0.01em;
-  }
-  .req {
-    font-family: var(--font-mono);
-    font-size: 10.5px;
-    font-weight: 500;
-    letter-spacing: 0.06em;
-    text-transform: uppercase;
-    padding: 2px 7px;
-    border-radius: 6px;
-    color: var(--warn);
-    background: var(--warn-soft);
-  }
-  .prereq p {
-    margin-top: 4px;
-    font-size: 0.875rem;
-    color: var(--text-3);
-    line-height: 1.5;
-  }
 
   /* ---------- Compare ---------- */
   .compare table {
@@ -1283,7 +1176,6 @@
     .own-grid,
     .sec-grid,
     .agent-grid,
-    .agent-start,
     .faq-grid {
       grid-template-columns: minmax(0, 1fr);
     }

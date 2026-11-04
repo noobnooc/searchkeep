@@ -63,42 +63,16 @@ Not included, by design: backlink data, competitor data, rank tracking and SERP 
 
 ## Install with an AI agent
 
-The fastest way to deploy: copy this prompt into Claude Code, Cursor, Codex or any agent that can
-use MCP or a terminal. The agent follows [docs/deploy.md](docs/deploy.md), checks every step, and
-stops whenever a step needs you.
-
-**Prerequisites: your agent must have access to both**
-
-- **GitHub**: the GitHub MCP server or the `gh` CLI, signed in as you, so it can fork the
-  repository.
-- **Cloudflare**: the Cloudflare MCP server signed in as you, or a short-lived API token that can
-  edit Workers Scripts, Workers Builds and Access apps and read your zones.
-
-You also need a Cloudflare account with your domain active, a GitHub account, and Owner access to
-your Search Console properties ([step 0](docs/deploy.md#0-choose-names-and-gather-prerequisites)).
+Paste this into Claude Code, Cursor, Codex or any agent that can use MCP or a terminal:
 
 ```text
-Deploy Searchkeep (https://github.com/noobnooc/searchkeep) into my Cloudflare
-account.
-
-Follow docs/deploy.md in that repository step by step, and run each step's
-"Verify" check before moving on.
-
-- My GitHub username: <github-username>
-- Hostname for Searchkeep: <searchkeep.example.com>
-- The only email allowed through Cloudflare Access: <you@example.com>
-
-Use your GitHub access to fork the repository and your Cloudflare access for
-Workers Builds, the custom domain and the Access application. Stop and tell me
-exactly what to do at every step marked [Human]. Never ask me to paste API keys
-or private keys into this chat: set secrets with wrangler secret put or the
-Cloudflare API. Finish by showing me the result of the setup checks.
+Deploy Searchkeep to my Cloudflare account by following this runbook:
+https://raw.githubusercontent.com/noobnooc/searchkeep/main/docs/deploy.md
 ```
 
-Replace the three values in angle brackets. The steps only you can do: authorizing the Cloudflare
-GitHub App, creating the Zero Trust organization, creating the read-only Cloudflare API token,
-adding the Search Console service account, generating the Bing API key, and signing in through
-Access.
+**Required:** the agent needs GitHub access and Cloudflare access (an MCP server or CLI for each,
+signed in as you; see [step 0](docs/deploy.md#0-choose-names-and-gather-prerequisites)). It asks
+you for your domain and email, and stops at the few steps only you can do.
 
 ## Quick start
 
