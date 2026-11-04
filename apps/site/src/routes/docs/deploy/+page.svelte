@@ -1,7 +1,8 @@
 <script lang="ts">
   import Callout from '#lib/components/Callout.svelte';
   import CodeBlock from '#lib/components/CodeBlock.svelte';
-  import { AGENT_PREREQS, AGENT_PROMPT, READ_ONLY_TOOLS, SITES_EXAMPLE } from '#lib/content.ts';
+  import AgentPrompt from '#lib/components/AgentPrompt.svelte';
+  import { READ_ONLY_TOOLS, SITES_EXAMPLE } from '#lib/content.ts';
   import { GITHUB } from '#lib/site.ts';
 
   const forkCheck = `gh repo fork noobnooc/searchkeep --clone=false
@@ -65,8 +66,7 @@ cloudflared access curl https://searchkeep.example.com/api/sync -X POST`;
 <h2 id="overview">Overview</h2>
 <Callout kind="agent" title="Using an AI agent?">
   <p>
-    Copy the prompt in <a href="#with-an-agent">Deploy with an agent</a>. Your agent needs access to GitHub and to
-    Cloudflare.
+    Copy the two-line prompt in <a href="#with-an-agent">Deploy with an agent</a>.
   </p>
 </Callout>
 <p>
@@ -399,18 +399,11 @@ cloudflared access curl https://searchkeep.example.com/api/sync -X POST`;
   <a href={GITHUB.deployRunbook}>docs/deploy.md</a> is written for agents: every step is idempotent and has a check,
   and the steps only a person can do are marked so the agent stops and asks.
 </p>
-<p><strong>Before you paste, your agent needs:</strong></p>
-<ul>
-  {#each AGENT_PREREQS as p (p.title)}
-    <li><strong>{p.title}</strong> (required). {p.text}</li>
-  {/each}
-  <li>
-    And you need the accounts from <a href="#before-you-start">Before you start</a>: Cloudflare with your domain
-    active, GitHub, and Owner access to your Search Console properties.
-  </li>
-</ul>
-<p>Then copy this prompt into Claude Code, Cursor, Codex or any agent that can use MCP or a terminal:</p>
-<CodeBlock lang="text" title="Prompt" code={AGENT_PROMPT} wrap />
+<AgentPrompt />
+<p>
+  The agent needs GitHub and Cloudflare access: an MCP server or CLI for each, signed in as you (details in
+  <a href="#before-you-start">Before you start</a>).
+</p>
 <p>The steps that need you:</p>
 <ol>
   <li>authorizing the Cloudflare GitHub App for the fork;</li>

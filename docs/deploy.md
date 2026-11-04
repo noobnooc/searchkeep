@@ -13,10 +13,20 @@ can execute it directly and a non-technical person can follow it by hand.
 - Values in angle brackets are yours to substitute, for example `<your-domain>`.
 - Never paste secrets into issues, pull requests, chat logs or commits. Your fork is public.
 
-Want an AI agent to do it? Copy the prompt in the README,
-[Install with an AI agent](../README.md#install-with-an-ai-agent). The agent needs access to GitHub
-(the GitHub MCP server or `gh`) and to Cloudflare (the Cloudflare MCP server or a deploy token, see
-[step 0](#0-choose-names-and-gather-prerequisites)).
+**For AI agents.** A person asked you to deploy Searchkeep with this runbook (the prompt in the
+README's [Install with an AI agent](../README.md#install-with-an-ai-agent) points here). Then:
+
+1. Check that you have **GitHub access** (the GitHub MCP server or `gh`, signed in as the person)
+   and **Cloudflare access** (the Cloudflare MCP server signed in as them, or a short-lived deploy
+   token, see [step 0](#0-choose-names-and-gather-prerequisites)). If either is missing, say so and
+   stop.
+2. Ask for the names in step 0 first: their GitHub username, the hostname for Searchkeep and the
+   one email address Cloudflare Access should let in.
+3. Go step by step, and run each **Verify** before moving on.
+4. At every **[Human]** step, stop, tell the person exactly what to do, and wait for them.
+5. Never ask for API keys or private keys in the chat: set secrets with `wrangler secret put` or the
+   Cloudflare API.
+6. Finish with [step 16](#16-verify-readiness) and show the person the result.
 
 Time needed: about 30–45 minutes the first time.
 
