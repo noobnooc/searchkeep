@@ -1,4 +1,15 @@
-import { FAQS, PRINCIPLES, READ_ONLY_TOOLS, READINESS, SECRETS, SITE_FIELDS, SITES_EXAMPLE, TOOLS } from './content';
+import {
+  AGENT_PREREQS,
+  AGENT_PROMPT,
+  FAQS,
+  PRINCIPLES,
+  READ_ONLY_TOOLS,
+  READINESS,
+  SECRETS,
+  SITE_FIELDS,
+  SITES_EXAMPLE,
+  TOOLS,
+} from './content';
 import { DOCS } from './docs';
 import { GITHUB, SITE, absolute } from './site';
 
@@ -78,6 +89,12 @@ ${principles}
 
 ## Deploy
 
+Deploying with an AI agent requires ${AGENT_PREREQS.map((p) => `${p.title} (${p.text.charAt(0).toLowerCase()}${p.text.slice(1).replace(/\.$/, '')})`).join(' and ')}. The prompt a person pastes into their agent:
+
+\`\`\`text
+${AGENT_PROMPT}
+\`\`\`
+
 Deployment is fork + Cloudflare Workers Builds (no Deploy button). The agent-executable runbook with every click path, API call and verification is ${GITHUB.deployRunbook}. Steps:
 
 1. Fork ${GITHUB.repo} (an agent can use the GitHub MCP server). Verify: \`gh repo view <you>/searchkeep --json parent --jq .parent.nameWithOwner\` prints \`noobnooc/searchkeep\`.
@@ -86,7 +103,7 @@ Deployment is fork + Cloudflare Workers Builds (no Deploy button). The agent-exe
 4. The first build auto-provisions the D1 database \`searchkeep\` (binding \`DB\`; no database_id in the repo).
 5. Add a custom domain (e.g. \`searchkeep.example.com\`) and make sure the workers.dev route and Preview URLs are off (\`wrangler.jsonc\` sets \`workers_dev: false\` and \`preview_urls: false\` and declares no routes). Verify: \`GET /healthz\` returns \`{"ok":true}\`; without Access, \`/\` shows the public "Searchkeep is locked" setup page, \`/api/*\` returns 403 \`{"code":"locked","state":"no_access",...}\` and \`/mcp\` returns a JSON-RPC error (code -32001) explaining the lock.
 6. Cloudflare Zero Trust: create the Zero Trust organization (human, first time only); create a self-hosted Access application for the whole custom domain with one Allow policy that includes only specific emails; enable Managed OAuth (dynamic client registration, allow localhost and loopback clients); save the team domain (hostname only) and the application's AUD tag as the secrets \`ACCESS_TEAM_DOMAIN\` and \`ACCESS_AUD\`. Verify: \`/healthz\` now answers 302 or 401 (never 200), and \`/mcp\` answers 401 with a \`www-authenticate\` header.
-7. Credentials: create a read-only Cloudflare API token (human recommended) and set \`CLOUDFLARE_ACCOUNT_ID\` and \`CLOUDFLARE_API_TOKEN\` (required: Searchkeep uses the token to check the Access setup); set \`SITES\`; create a GSC service account (human in Google Cloud, or an agent with gcloud) and add its email as a Restricted user in each Search Console property (always human); generate a Bing Webmaster Tools API key (human). Store everything with \`npx wrangler secret put NAME --name searchkeep\`.
+7. Credentials: create a read-only Cloudflare API token (human recommended) and set \`CLOUDFLARE_ACCOUNT_ID\` and \`CLOUDFLARE_API_TOKEN\` (required: Searchkeep uses the token to check the Access setup); add sites in the dashboard (or set the optional \`SITES\` secret); create a GSC service account (human in Google Cloud, or an agent with gcloud) and add its email as a Restricted user in each Search Console property (always human); generate a Bing Webmaster Tools API key (human). Store everything with \`npx wrangler secret put NAME --name searchkeep\`.
 8. Verify: connect an MCP client (it lists ${READ_ONLY_TOOLS.length} tools, ${TOOLS.length} with \`ENABLE_WRITES=true\`) and call \`setup_status\`, or open the dashboard; it must report \`ready\`. The first authenticated request that sees \`ready\` records a ready flag in D1; from then on the cron (every 15 minutes) syncs, re-checking Access on each pass. Start the first sync right away with "Sync now" in the dashboard's Settings or \`POST /api/sync\`. Daily increments come first; the 16-month GSC backfill then takes days to weeks on the free D1 write quota.
 
 Example commands:

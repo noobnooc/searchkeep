@@ -7,7 +7,8 @@
     lang = 'text',
     title,
     copy = true,
-  }: { code: string; lang?: Lang; title?: string; copy?: boolean } = $props();
+    wrap = false,
+  }: { code: string; lang?: Lang; title?: string; copy?: boolean; wrap?: boolean } = $props();
 
   const html = $derived(highlight(code.replace(/^\n+|\s+$/g, ''), lang));
   const label = $derived(
@@ -15,7 +16,7 @@
   );
 </script>
 
-<div class="code" data-code>
+<div class="code" class:wrap data-code>
   {#if label || copy}
     <div class="bar">
       <span class="title">{label}</span>
@@ -66,6 +67,11 @@
     line-height: 1.7;
     color: var(--text-2);
     tab-size: 2;
+  }
+  /* Prose-like blocks (prompts) wrap instead of scrolling sideways. */
+  .wrap pre {
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
   }
   pre:focus-visible {
     outline-offset: -2px;

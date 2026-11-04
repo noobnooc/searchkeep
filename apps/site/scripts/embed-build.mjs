@@ -7,6 +7,7 @@ import { readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { extname, join, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { OG_PAGES, ogFile } from '../src/lib/og.ts';
+import { AGENT_PROMPT } from '../src/lib/content.ts';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 const build = join(root, 'build');
@@ -38,6 +39,12 @@ function walk(dir) {
 const missingOg = OG_PAGES.map((p) => ogFile(p.path)).filter((f) => !statSync(join(build, 'og', f), { throwIfNoEntry: false }));
 if (missingOg.length) {
   throw new Error(`Missing OG images: ${missingOg.join(', ')}. Run: pnpm --filter @searchkeep/site run render:assets`);
+}
+
+// The README shows the same agent prompt as the website (wrapped differently); keep the words identical.
+const squash = (t) => t.replace(/\s+/g, ' ').trim();
+if (!squash(readFileSync(join(root, '../../README.md'), 'utf8')).includes(squash(AGENT_PROMPT))) {
+  throw new Error('README.md must contain AGENT_PROMPT from src/lib/content.ts (section "Install with an AI agent"), up to whitespace.');
 }
 
 const files = {};
