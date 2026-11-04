@@ -27,7 +27,7 @@ Option 3. There is no Deploy button.
 
 - Workers Builds settings: root directory `apps/cloudflare`, build command `pnpm run build`, deploy
   command `pnpm run deploy` (tries to apply D1 migrations remotely, runs `wrangler deploy`, retries
-  the migrations, and never fails because of them), watch paths `apps/cloudflare/**`, `packages/**`
+  the migrations, and never fails because of them), watch paths `apps/cloudflare/*`, `packages/*`
   and `pnpm-lock.yaml`.
 - `wrangler.jsonc` declares bindings by name only (D1 binding `DB`, `database_name: "searchkeep"`,
   no `database_id`); wrangler provisions the database on first deploy and the ID is stored only in

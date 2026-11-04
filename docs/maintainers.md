@@ -164,8 +164,8 @@ people who want to pin a release.
 ## 7. The website (searchkeep.dev)
 
 The website in `apps/site` is deployed by the project, never by users: their Workers Builds watch
-paths (`apps/cloudflare/**`, `packages/**`, `pnpm-lock.yaml`) leave it out, and the workflow below
-is skipped in forks.
+paths (`apps/cloudflare/*`, `packages/*`, `pnpm-lock.yaml`) leave it out, and its Workers Builds
+connection exists only in the project's Cloudflare account.
 
 **How it is hosted.** The site is a small Worker, `searchkeep-site`
 ([`apps/site/wrangler.jsonc`](../apps/site/wrangler.jsonc)), that serves the prerendered SvelteKit
@@ -176,23 +176,15 @@ redirects `www.searchkeep.dev` and other subdomains to it, and serves canonical 
 or trailing slashes. Both hostnames are custom domains declared in `wrangler.jsonc`; `workers.dev`
 and preview URLs are off.
 
-**Automatic deploys.** [`.github/workflows/deploy-site.yml`](../.github/workflows/deploy-site.yml)
-builds and deploys the site on every push to `main` that changes `apps/site/**`, `pnpm-lock.yaml` or
-the workflow itself. It can also be started by hand: **Actions** → **Deploy website** → **Run
-workflow**. It needs two repository secrets (**Settings** → **Secrets and variables** →
-**Actions**):
+**Automatic deploys (Workers Builds).** The `searchkeep-site` Worker is connected to this
+repository with Workers Builds: root directory `apps/site`, build command `pnpm run build`, deploy
+command `npx wrangler deploy`, branch `main`, watch paths `apps/site/*` and `pnpm-lock.yaml`. Every
+push to `main` that touches those paths rebuilds and redeploys searchkeep.dev; the build status shows
+up as a check on the commit. No repository secrets are involved. To see or change it: Cloudflare
+dashboard → **Workers & Pages** → `searchkeep-site` → **Settings** → **Builds**. To redeploy by
+hand: the same page → **Deployments** → **Retry build** (or start a build for `main`).
 
-| Secret                  | Value                                                                                                                                |
-| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
-| `CLOUDFLARE_API_TOKEN`  | API token with **Workers Scripts: Edit** on the account, and **Workers Routes: Edit** and **DNS: Edit** on the `searchkeep.dev` zone |
-| `CLOUDFLARE_ACCOUNT_ID` | The account that owns the `searchkeep.dev` zone                                                                                      |
-
-Until the token is set, the job logs "CLOUDFLARE_API_TOKEN is not set; skipping the website deploy."
-and succeeds without deploying. In the meantime a daily Claude Code scheduled task on the
-maintainer's account ("searchkeep.dev auto-deploy (daily)") redeploys the site from `main` whenever
-`apps/site` changed; disable it once the secrets are set.
-
-**Manual deploy** (maintainers only, with the same token and account ID exported in the shell):
+**Manual deploy** (maintainers only, from a machine with Cloudflare credentials for the account):
 
 ```sh
 pnpm --filter @searchkeep/site run build
@@ -205,6 +197,6 @@ readiness states) live in `apps/site/src/lib/content.ts` and feed the docs pages
 `packages/core/src/config.ts` or `apps/cloudflare`, and keep `/docs/deploy` in line with
 [docs/deploy.md](deploy.md).
 
-**Verify:** the latest **Deploy website** run succeeded; `curl -sI https://searchkeep.dev/` returns
+**Verify:** the latest `searchkeep-site` build in Workers Builds succeeded; `curl -sI https://searchkeep.dev/` returns
 `200`; `curl -sI https://www.searchkeep.dev/` returns `301` with `location: https://searchkeep.dev/`;
 and `https://searchkeep.dev/llms.txt` shows the current version.

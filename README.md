@@ -60,8 +60,8 @@ Not included, by design: backlink data, competitor data, rank tracking and SERP 
 
 1. Fork this repository.
 2. Connect the fork to Cloudflare Workers Builds (root directory `apps/cloudflare`, build command
-   `pnpm run build`, deploy command `pnpm run deploy`, watch paths `apps/cloudflare/**`,
-   `packages/**` and `pnpm-lock.yaml`).
+   `pnpm run build`, deploy command `pnpm run deploy`, watch paths `apps/cloudflare/*`,
+   `packages/*` and `pnpm-lock.yaml`).
 3. Add a custom domain and protect it with a Cloudflare Access application with Managed OAuth.
 4. Add your credentials as Worker Secrets.
 5. Check readiness on the dashboard's status page, then with the `setup_status` MCP tool. Once it
@@ -76,11 +76,12 @@ There is no "Deploy to Cloudflare" button on purpose; see
 
 **How this deploy path is verified.** The `workers-builds` CI job replays the exact Workers Builds
 commands on every change: a fresh `pnpm install --frozen-lockfile` from `apps/cloudflare`, the build
-command, and a `wrangler deploy --dry-run`. Before the first release the deploy command was also run
-against a real Cloudflare account: Wrangler created the D1 database from the name-only binding, the
-deploy script tolerated the first (pre-database) migration attempt and applied the migration on its
-retry, and the deployed Worker served the public setup page, returned `403 locked` on `/api` and a
-JSON-RPC lock error on `/mcp`, and rejected forged Access JWTs.
+command, and a `wrangler deploy --dry-run`. Before the first release the whole path also ran for real
+in Workers Builds, with exactly the settings above: the build installed the workspace, built the
+dashboard into the assets, the deploy command tolerated the first (pre-database) migration attempt,
+Wrangler created the D1 database from the name-only binding and uploaded the Worker with its assets,
+and the retry applied the migration. A deployed Worker served the public setup page, returned
+`403 locked` on `/api` and a JSON-RPC lock error on `/mcp`, and rejected forged Access JWTs.
 
 ## Architecture
 

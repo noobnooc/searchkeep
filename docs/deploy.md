@@ -191,7 +191,7 @@ repository connection and the build trigger in one go.
    never in Git). The remote migration step is normally skipped on Workers Builds; see **About
    migrations** below.
 5. Open the Worker → **Settings** → **Build**:
-   - **Build watch paths** → **Include paths:** `apps/cloudflare/**`, `packages/**` and
+   - **Build watch paths** → **Include paths:** `apps/cloudflare/*`, `packages/*` and
      `pnpm-lock.yaml`
    - **Branch control:** production branch `main`; turn **off** builds for non-production branches.
 
@@ -211,7 +211,7 @@ curl -s "https://api.cloudflare.com/client/v4/accounts/<account-id>/builds/worke
 # Fix a trigger in place
 curl -s -X PATCH "https://api.cloudflare.com/client/v4/accounts/<account-id>/builds/triggers/<trigger-uuid>" \
   -H "Authorization: Bearer $CF_DEPLOY_TOKEN" -H "Content-Type: application/json" \
-  --data '{"root_directory":"apps/cloudflare","build_command":"pnpm run build","deploy_command":"pnpm run deploy","branch_includes":["main"],"path_includes":["apps/cloudflare/**","packages/**","pnpm-lock.yaml"]}'
+  --data '{"root_directory":"apps/cloudflare","build_command":"pnpm run build","deploy_command":"pnpm run deploy","branch_includes":["main"],"path_includes":["apps/cloudflare/*","packages/*","pnpm-lock.yaml"]}'
 ```
 
 Creating everything by API uses `PUT .../builds/repos/connections`, `POST .../builds/tokens` and
@@ -810,7 +810,7 @@ and the reason.
   applies pending migrations on its first request (see step 3). If the deploy itself failed, open an
   issue with the build log, with any secrets removed.
 - **A sync of your fork did not trigger a build:** the change did not touch the watch paths
-  (`apps/cloudflare/**`, `packages/**`, `pnpm-lock.yaml`), so there was nothing to deploy. Check the
+  (`apps/cloudflare/*`, `packages/*`, `pnpm-lock.yaml`), so there was nothing to deploy. Check the
   include paths if a code change did not build.
 
 ### Custom domain cannot be added

@@ -21,7 +21,7 @@ gh repo sync <you>/searchkeep --source noobnooc/searchkeep --branch main`;
 <ol>
   <li>
     Workers Builds sees the new commit on <code>main</code> and starts a build if it touches the watch paths
-    (<code>apps/cloudflare/**</code>, <code>packages/**</code> or <code>pnpm-lock.yaml</code>). Changes that only touch
+    (<code>apps/cloudflare/*</code>, <code>packages/*</code> or <code>pnpm-lock.yaml</code>). Changes that only touch
     the docs or the website do not rebuild your Worker.
   </li>
   <li>The build compiles the Worker and the dashboard.</li>
