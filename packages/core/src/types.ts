@@ -187,6 +187,8 @@ export interface UrlInspectionInput {
 export interface IndexStatusRow extends Omit<UrlInspectionInput, 'inspectedAt'> {
   inspectedAt: string | null;
   firstSeen: IsoDate;
+  /** Last day a sitemap listed the URL (refreshed about weekly). */
+  lastSeen: IsoDate;
   previousCoverageState: string | null;
   changedAt: string | null;
 }

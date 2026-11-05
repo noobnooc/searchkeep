@@ -498,9 +498,9 @@ export function storeContract(name: string, makeStore: () => Promise<Store>): vo
 
     it('tracks index coverage: sitemap URLs, inspections and changes', async () => {
       const u = (path: string) => `https://acme.com${path}`;
-      expect(await store.updateIndexUrls('acme', [u('/'), u('/a'), u('/b'), u('/c')], [], '2026-10-01')).toBe(4);
-      expect(await store.updateIndexUrls('acme', [u('/a')], [], '2026-10-02')).toBe(0);
-      expect((await store.listIndexUrls('acme')).sort()).toEqual([u('/'), u('/a'), u('/b'), u('/c')]);
+      expect(await store.addIndexUrls('acme', [u('/'), u('/a'), u('/b'), u('/c'), u('/a')], '2026-10-01', 10)).toBe(4);
+      // Listed again within a week: nothing to write.
+      expect(await store.addIndexUrls('acme', [u('/a')], '2026-10-02', 10)).toBe(0);
       const inspection = (url: string, at: string, over: Partial<UrlInspectionInput> = {}): UrlInspectionInput => ({
         url,
         inspectedAt: at,
@@ -575,9 +575,28 @@ export function storeContract(name: string, makeStore: () => Promise<Store>): vo
       const rich = await store.indexCoverage({ siteId: 'acme', richResultIssues: true, changedSince: day8, limit: 10 });
       expect(rich.urls.map((r) => r.url)).toEqual([u('/')]);
 
-      // URLs that left the sitemaps are dropped.
-      expect(await store.updateIndexUrls('acme', [], [u('/c')], '2026-10-09')).toBe(1);
-      expect((await store.indexCoverage({ siteId: 'acme', changedSince: day8, limit: 10 })).totals.urls).toBe(3);
+      // A week later the sitemaps list all but /c: the others are seen again, /c is dropped after the grace period.
+      expect(await store.addIndexUrls('acme', [u('/'), u('/a'), u('/b')], '2026-10-08', 10)).toBe(3);
+      expect(await store.pruneIndexUrls('acme', '2026-10-01')).toBe(0);
+      expect(await store.pruneIndexUrls('acme', '2026-10-02')).toBe(1);
+      const left = await store.indexCoverage({ siteId: 'acme', changedSince: day8, limit: 10 });
+      expect(left.urls.map((r) => [r.url, r.firstSeen, r.lastSeen]).sort()).toEqual([
+        [u('/'), '2026-10-01', '2026-10-08'],
+        [u('/a'), '2026-10-01', '2026-10-08'],
+        [u('/b'), '2026-10-01', '2026-10-08'],
+      ]);
+    });
+
+    it('never tracks more index coverage URLs than the cap', async () => {
+      const urls = Array.from({ length: 8 }, (_, i) => `https://acme.com/p${i}`);
+      expect(await store.addIndexUrls('acme', urls.slice(0, 5), '2026-10-01', 4)).toBe(4);
+      // New URLs wait until old ones are dropped; known ones are still seen.
+      expect(await store.addIndexUrls('acme', urls.slice(3), '2026-10-09', 4)).toBe(1);
+      expect((await store.indexCoverage({ siteId: 'acme', changedSince: '2026-10-01', limit: 10 })).totals.urls).toBe(4);
+      expect(await store.pruneIndexUrls('acme', '2026-10-02')).toBe(3);
+      expect(await store.addIndexUrls('acme', urls.slice(3), '2026-10-10', 4)).toBe(3);
+      const cov = await store.indexCoverage({ siteId: 'acme', changedSince: '2026-10-01', limit: 10 });
+      expect(cov.urls.map((r) => r.url).sort()).toEqual(urls.slice(3, 7));
     });
 
     it('replaces crawl issue and sitemap snapshots', async () => {
@@ -1379,6 +1398,37 @@ export function storeContract(name: string, makeStore: () => Promise<Store>): vo
         expect(cursors['gsc:segments:backfill:beta']).toBeUndefined();
         // A second run the same day has nothing due.
         expect((await sync(store, { config: cfg, clients: c, trigger: 'cron', now: NOW })).status).toBe('skipped');
+      });
+
+      it('recovers the days another dataset missed while web search kept syncing', async () => {
+        const cfg = config({ SYNC_MAX_CALLS_PER_RUN: '900', GSC_BACKFILL_MONTHS: '0', GSC_SEARCH_TYPES: 'image' }, [
+          { id: 'acme', domain: 'acme.com', gscProperty: 'sc-domain:acme.com' },
+        ]);
+        const c = clients();
+        let imageDown = false;
+        const searchAnalytics = c.gsc!.searchAnalytics.bind(c.gsc);
+        c.gsc!.searchAnalytics = async (req) => {
+          if (req.type === 'image' && imageDown) throw new SourceError('gsc', 500, 'HTTP 500: backend error');
+          return searchAnalytics(req);
+        };
+        const at = (d: string) => new Date(`${d}T04:00:00Z`);
+        await sync(store, { config: cfg, clients: c, trigger: 'manual', now: at('2026-10-20') });
+        // Image search fails for six days; web search keeps its latest days.
+        imageDown = true;
+        for (const d of daysOf('2026-10-21', '2026-10-26')) await sync(store, { config: cfg, clients: c, trigger: 'manual', now: at(d) });
+        expect(await store.latestDate('acme', 'gsc')).toBe('2026-10-25');
+        imageDown = false;
+        await sync(store, { config: cfg, clients: c, trigger: 'manual', now: at('2026-10-27') });
+        const image = await store.queryPerformance({
+          siteId: 'acme',
+          source: 'gsc',
+          searchType: 'image',
+          range: { start: '2026-10-01', end: '2026-10-31' },
+          dimensions: ['date'],
+          orderBy: 'date',
+          order: 'asc',
+        });
+        expect(image.map((r) => r.date)).toEqual(daysOf('2026-10-16', '2026-10-26'));
       });
 
       describe('index coverage', () => {

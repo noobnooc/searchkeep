@@ -806,6 +806,8 @@ How the sync works:
   Console knows are read from your site (at most 25 sitemap files and 5,000 URLs per site; URLs
   outside the property are skipped), then up to `GSC_INSPECTIONS_PER_DAY` URLs are inspected, the
   ones never inspected first and then those inspected longest ago (each again after about 7 days).
+  Reading the sitemaps may take several passes; it continues where it stopped. URLs that no sitemap
+  lists for over a week are dropped, unless a sitemap could not be read that day.
   This work never makes a pass `partial`, and reaching the URL Inspection quota stops it for the
   day without pausing the rest of Search Console. A small site's full history takes a few dozen
   requests; on the free D1 write quota, sites with a lot of data take days.

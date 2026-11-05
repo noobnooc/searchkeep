@@ -328,6 +328,7 @@ export interface SitemapsResponse {
 export interface IndexStatusRow {
   url: string;
   firstSeen?: string;
+  lastSeen?: string;
   inspectedAt?: string;
   verdict?: string;
   coverageState?: string;

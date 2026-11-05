@@ -603,6 +603,12 @@ async function planUnits(ctx: SyncContext, today: IsoDate, nowMs: number, budget
           const progress = parseJson<GscDailyProgress>(get(opts.keys.daily));
           let pending: IsoDate[];
           let ready: boolean;
+          let through = progress?.through;
+          const save = () =>
+            store.setMeta(
+              opts.keys.daily,
+              JSON.stringify({ day: today, pending, ready, ...(through ? { through } : {}) } satisfies GscDailyProgress),
+            );
           if (progress && progress.day === today) {
             pending = progress.pending;
             ready = progress.ready ?? pending.length === 0;
@@ -610,13 +616,18 @@ async function planUnits(ctx: SyncContext, today: IsoDate, nowMs: number, budget
             const latest = await (latestWeb ??= store.latestDate(site.id, 'gsc'));
             let start = addDays(today, -GSC_REPULL_DAYS);
             if (latest && addDays(latest, -3) < start) start = addDays(latest, -3);
+            // This dataset's own gaps too: days still outstanding from an earlier day, and the days since
+            // its last complete increment (it may have failed, or been off, while web search synced).
+            const outstanding = progress?.pending.at(-1);
+            if (outstanding && outstanding < start) start = outstanding;
+            if (through && addDays(through, 1) < start) start = addDays(through, 1);
             const floor = addDays(today, -GSC_MAX_GAP_DAYS);
             if (start < floor) start = floor;
             pending = [];
             for (let d = yesterday; d >= start; d = addDays(d, -1)) pending.push(d);
             // A site that synced on an earlier day had its first increment then (older records carry no flag).
             ready = progress ? (progress.ready ?? true) : false;
-            await store.setMeta(opts.keys.daily, JSON.stringify({ day: today, pending, ready } satisfies GscDailyProgress));
+            await save();
             // The backfill cursor starts where the first increment begins.
             if (!get(opts.keys.backfill)) {
               await store.setMeta(opts.keys.backfill, start);
@@ -629,8 +640,11 @@ async function planUnits(ctx: SyncContext, today: IsoDate, nowMs: number, budget
             const range = { start: group[group.length - 1]!, end: group[0]! };
             const done = async () => {
               pending = pending.filter((d) => !group.includes(d));
-              if (pending.length === 0) ready = true;
-              await store.setMeta(opts.keys.daily, JSON.stringify({ day: today, pending, ready } satisfies GscDailyProgress));
+              if (pending.length === 0) {
+                ready = true;
+                through = yesterday;
+              }
+              await save();
             };
             opts.tier.push(rangeUnit(opts.task, range, false, done));
           }
@@ -1164,6 +1178,21 @@ const SEGMENT_ROWS_PER_DAY = 1_000;
 /** Sitemap files read per site and day, and URLs tracked per site. */
 const MAX_SITEMAP_FILES = 25;
 export const MAX_INDEX_URLS = 5_000;
+/** A tracked URL no sitemap listed for longer than this is dropped (`last_seen` is refreshed weekly). */
+const INDEX_URL_GRACE_DAYS = 7;
+
+/** Today's walk through a site's sitemaps; it may take several runs. */
+interface SitemapWalk {
+  day: IsoDate;
+  /** Sitemap files still to read, in order. */
+  queue: string[];
+  seen: string[];
+  files: number;
+  urls: number;
+  /** A file could not be read: no URL is dropped after this walk. */
+  failed: boolean;
+  done: boolean;
+}
 /** URL inspections per unit; several units per site and run go round-robin over the sites. */
 const INSPECTIONS_PER_UNIT = 10;
 const UNITS_PER_SITE_AND_RUN = 4;
@@ -1258,7 +1287,9 @@ function indexCoverageUnits(o: {
   const { site, gsc, property, reader, store, budget, today, nowMs, config, get } = o;
   const units: Unit[] = [];
   const urlsKey = syncKeys.gscIndexUrls(site.id);
-  if (get(urlsKey) !== today) {
+  const stored = parseJson<SitemapWalk>(get(urlsKey));
+  const walk = stored?.day === today ? stored : null;
+  if (!walk?.done) {
     units.push({
       task: 'gsc.index_urls',
       siteId: site.id,
@@ -1266,50 +1297,73 @@ function indexCoverageUnits(o: {
       backfill: false,
       idle: true,
       calls: 1,
-      key: `gsc.index_urls:${site.id}:${today}`,
+      // Progress is part of the key: a walk that moves on is not "interrupted" again.
+      key: `gsc.index_urls:${site.id}:${today}:${walk?.files ?? 0}`,
       run: async () => {
-        const queue = (await store.listSitemaps(site.id, 'gsc')).map((m) => m.path).filter((u) => onSiteDomain(u, site.domain));
-        const seen = new Set<string>();
-        const urls = new Set<string>();
-        // Complete only when every sitemap was read in full: only then are URLs that left the sitemaps dropped.
-        let complete = queue.length > 0;
-        let files = 0;
-        while (queue.length > 0) {
-          const next = queue.shift()!;
-          if (seen.has(next)) continue;
-          seen.add(next);
-          if (files >= MAX_SITEMAP_FILES || urls.size >= MAX_INDEX_URLS) {
-            complete = false;
+        let w = walk;
+        if (!w) {
+          const maps = (await store.listSitemaps(site.id, 'gsc')).map((m) => m.path).filter((u) => onSiteDomain(u, site.domain));
+          // Without a sitemap nothing is dropped: an empty list is no proof that the URLs are gone.
+          w = { day: today, queue: maps, seen: [], files: 0, urls: 0, failed: maps.length === 0, done: false };
+        }
+        const seen = new Set(w.seen);
+        const found: string[] = [];
+        let read = 0;
+        while (w.queue.length > 0) {
+          // At the caps the walk ends: the first sitemap files and URLs, in order, are the ones tracked.
+          if (w.files >= MAX_SITEMAP_FILES || w.urls >= MAX_INDEX_URLS) {
+            w.queue = [];
             break;
           }
-          if (files > 0) budget.spend('gsc');
-          files++;
+          const next = w.queue[0]!;
+          if (seen.has(next)) {
+            w.queue.shift();
+            continue;
+          }
+          // The reserved call reads the first file of this run; the next files take the calls left over,
+          // and the walk continues on the next run where it stopped.
+          if (read > 0) {
+            if (budget.left() < 1 || budget.expired()) break;
+            budget.spend('gsc');
+          }
+          w.queue.shift();
+          seen.add(next);
+          w.files++;
+          read++;
           let contents;
           try {
             contents = await reader.read(next);
           } catch {
-            // One unreadable sitemap must not stop the others; its URLs are kept as they are.
-            complete = false;
+            // One unreadable sitemap must not stop the others; nothing is dropped after this walk.
+            w.failed = true;
             continue;
           }
-          if (contents.truncated) complete = false;
           for (const u of contents.urls) {
-            if (urls.size >= MAX_INDEX_URLS) {
-              complete = false;
-              break;
-            }
-            if (inPropertyScope(u, property)) urls.add(u);
+            if (w.urls >= MAX_INDEX_URLS) break;
+            if (!inPropertyScope(u, property)) continue;
+            found.push(u);
+            w.urls++;
           }
-          for (const m of contents.sitemaps) if (onSiteDomain(m, site.domain) && !seen.has(m)) queue.push(m);
+          for (const m of contents.sitemaps) {
+            if (onSiteDomain(m, site.domain) && !seen.has(m) && !w.queue.includes(m)) w.queue.push(m);
+          }
+          w.queue = w.queue.slice(0, Math.max(0, MAX_SITEMAP_FILES - w.files));
         }
-        const known = new Set(await store.listIndexUrls(site.id));
-        const add = [...urls].filter((u) => !known.has(u));
-        const remove = complete ? [...known].filter((u) => !urls.has(u)) : [];
-        const n = await store.updateIndexUrls(site.id, add, remove, today);
-        await store.setMeta(urlsKey, today);
+        let n = found.length ? await store.addIndexUrls(site.id, found, today, MAX_INDEX_URLS) : 0;
+        w.seen = [...seen];
+        if (w.queue.length === 0) {
+          w.done = true;
+          // A walk that read every sitemap it reached drops the URLs no sitemap listed for over a week.
+          if (!w.failed) n += await store.pruneIndexUrls(site.id, addDays(today, -INDEX_URL_GRACE_DAYS));
+        }
+        await store.setMeta(urlsKey, JSON.stringify(w));
         return n;
       },
-      skip: () => store.setMeta(urlsKey, today),
+      skip: () =>
+        store.setMeta(
+          urlsKey,
+          JSON.stringify({ day: today, queue: [], seen: [], files: 0, urls: 0, failed: true, done: true } satisfies SitemapWalk),
+        ),
     });
   }
 

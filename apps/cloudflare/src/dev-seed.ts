@@ -204,7 +204,7 @@ export async function seedDemo(store: Store, siteId: string, domain: string, tod
   ]);
   // Index coverage: the sitemap's URLs, most inspected.
   const urls = PAGES.map((p) => `https://${domain}${p}`);
-  n += await store.updateIndexUrls(siteId, urls, [], addDays(today, -10));
+  n += await store.addIndexUrls(siteId, urls, addDays(today, -1), 5_000);
   const states: Array<[string, string]> = [
     ['PASS', 'Submitted and indexed'],
     ['PASS', 'Submitted and indexed'],

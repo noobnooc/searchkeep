@@ -27,7 +27,8 @@ Because users sync `main` at any time, the `Unreleased` section is always accura
 ### Added
 
 - Index coverage, kept (#24). Once a day the sync reads the URLs of the sitemaps Search Console
-  knows (up to 5,000 per site, only URLs inside the property) and inspects them with the URL
+  knows (up to 5,000 per site, only URLs inside the property; URLs no sitemap lists for a week are
+  dropped; large sitemap indexes are read over several passes) and inspects them with the URL
   Inspection API in batches, never-inspected URLs first and each again after about a week, up to
   `GSC_INSPECTIONS_PER_DAY` per site and day (default `200`; Google allows 2,000 per property and
   day, shared with `inspect_url`). It uses only the calls a pass has left over, never makes a pass

@@ -82,6 +82,8 @@ export interface GscDailyProgress {
   pending: IsoDate[];
   /** The site's first increment has completed (missing in records from older versions). */
   ready?: boolean;
+  /** Newest day of the last increment that completed: the next day's increment starts after it at the latest. */
+  through?: IsoDate;
 }
 
 export interface LastRunMeta {

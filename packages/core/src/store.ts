@@ -81,10 +81,14 @@ export interface Store {
   replaceSitemaps(siteId: string, source: SearchSource, rows: SitemapRecord[]): Promise<number>;
 
   // ---- index coverage -----------------------------------------------------
-  /** URLs tracked for a site's index coverage (from its sitemaps). */
-  listIndexUrls(siteId: string): Promise<string[]>;
-  /** Starts tracking `add` (seen first on `day`) and stops tracking `remove`; returns rows changed. */
-  updateIndexUrls(siteId: string, add: string[], remove: string[], day: IsoDate): Promise<number>;
+  /**
+   * Records `urls` as listed in a sitemap on `day`: tracked URLs whose last sighting is a week old or
+   * more get `day` (so a URL costs about one write a week), new URLs are tracked while the site has
+   * fewer than `maxUrls`. Returns rows changed.
+   */
+  addIndexUrls(siteId: string, urls: string[], day: IsoDate, maxUrls: number): Promise<number>;
+  /** Stops tracking URLs last seen in a sitemap before `seenBefore`; returns how many. */
+  pruneIndexUrls(siteId: string, seenBefore: IsoDate): Promise<number>;
   /** Tracked URLs due for inspection: never inspected first, then inspected before `inspectedBefore` (oldest first). */
   listUrlsToInspect(siteId: string, inspectedBefore: string, limit: number): Promise<string[]>;
   /** Stores inspection results of tracked URLs; a changed coverage state is remembered with its time. */

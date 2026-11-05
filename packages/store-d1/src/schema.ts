@@ -166,7 +166,7 @@ export const searchSegments = sqliteTable(
 /**
  * Index coverage snapshot: the latest URL Inspection result per URL listed in the
  * site's sitemaps. URLs are inspected in batches over days; `previous_coverage_state`
- * and `changed_at` keep the last change. `rich_results` is JSON:
+ * and `changed_at` keep the last change. URLs no sitemap listed for over a week are dropped. `rich_results` is JSON:
  * `[{"t": type, "i": [{"s": severity, "m": message}]}]`.
  */
 export const indexStatus = sqliteTable(
@@ -175,6 +175,8 @@ export const indexStatus = sqliteTable(
     siteId: text('site_id').notNull(),
     url: text('url').notNull(),
     firstSeen: text('first_seen').notNull(),
+    /** Last day a sitemap listed the URL; refreshed at most weekly, so a present URL is never more than 7 days old. */
+    lastSeen: text('last_seen').notNull(),
     inspectedAt: text('inspected_at'),
     verdict: text('verdict'),
     coverageState: text('coverage_state'),

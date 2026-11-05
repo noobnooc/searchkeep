@@ -2,6 +2,7 @@ CREATE TABLE `index_status` (
 	`site_id` text NOT NULL,
 	`url` text NOT NULL,
 	`first_seen` text NOT NULL,
+	`last_seen` text NOT NULL,
 	`inspected_at` text,
 	`verdict` text,
 	`coverage_state` text,

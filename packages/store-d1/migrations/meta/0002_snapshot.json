@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "b4e8e89f-4878-4a10-9032-f4572f5c5c1a",
+  "id": "624e66df-f0dd-4a2d-a04a-8a269ebb5d2f",
   "prevId": "be8c9514-573f-4f77-8860-727aa666c509",
   "tables": {
     "ai_citations": {
@@ -226,6 +226,13 @@
         },
         "first_seen": {
           "name": "first_seen",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "last_seen": {
+          "name": "last_seen",
           "type": "text",
           "primaryKey": false,
           "notNull": true,

@@ -580,25 +580,47 @@ export class D1Store implements Store {
 
   // --------------------------------------------------------- index coverage
 
-  async listIndexUrls(siteId: string): Promise<string[]> {
-    return (await this.all<{ url: string }>('SELECT url FROM index_status WHERE site_id = ?1', siteId)).map((r) => r.url);
-  }
-
-  async updateIndexUrls(siteId: string, add: string[], remove: string[], day: IsoDate): Promise<number> {
-    return this.batch([
-      ...chunks([...new Set(add)]).map((group) =>
+  async addIndexUrls(siteId: string, urls: string[], day: IsoDate, maxUrls: number): Promise<number> {
+    const unique = [...new Set(urls)];
+    if (unique.length === 0) return 0;
+    // A URL listed again is touched at most once a week: `last_seen` only has to stay within 7 days.
+    const weekAgo = new Date(Date.parse(`${day}T00:00:00Z`) - 6 * 86_400_000).toISOString().slice(0, 10);
+    let changes = await this.batch(
+      chunks(unique).map((group) =>
         this.db
           .prepare(
-            'INSERT INTO index_status (site_id, url, first_seen) SELECT ?1, value, ?2 FROM json_each(?3) WHERE true ON CONFLICT (site_id, url) DO NOTHING',
+            'UPDATE index_status SET last_seen = ?2 WHERE site_id = ?1 AND url IN (SELECT value FROM json_each(?4)) AND last_seen < ?3',
+          )
+          .bind(siteId, day, weekAgo, JSON.stringify(group)),
+      ),
+    );
+    const existing = new Set<string>();
+    for (const group of chunks(unique)) {
+      const rows = await this.all<{ url: string }>(
+        'SELECT url FROM index_status WHERE site_id = ?1 AND url IN (SELECT value FROM json_each(?2))',
+        siteId,
+        JSON.stringify(group),
+      );
+      for (const r of rows) existing.add(r.url);
+    }
+    const tracked = (await this.first<{ n: number }>('SELECT COUNT(*) AS n FROM index_status WHERE site_id = ?1', siteId))?.n ?? 0;
+    const room = Math.max(0, Math.floor(maxUrls) - Number(tracked));
+    const fresh = unique.filter((u) => !existing.has(u)).slice(0, room);
+    changes += await this.batch(
+      chunks(fresh).map((group) =>
+        this.db
+          .prepare(
+            'INSERT INTO index_status (site_id, url, first_seen, last_seen) SELECT ?1, value, ?2, ?2 FROM json_each(?3) WHERE true ON CONFLICT (site_id, url) DO NOTHING',
           )
           .bind(siteId, day, JSON.stringify(group)),
       ),
-      ...chunks([...new Set(remove)]).map((group) =>
-        this.db
-          .prepare('DELETE FROM index_status WHERE site_id = ?1 AND url IN (SELECT value FROM json_each(?2))')
-          .bind(siteId, JSON.stringify(group)),
-      ),
-    ]);
+    );
+    return changes;
+  }
+
+  async pruneIndexUrls(siteId: string, seenBefore: IsoDate): Promise<number> {
+    const res = await this.db.prepare('DELETE FROM index_status WHERE site_id = ?1 AND last_seen < ?2').bind(siteId, seenBefore).run();
+    return res.meta?.changes ?? 0;
   }
 
   async listUrlsToInspect(siteId: string, inspectedBefore: string, limit: number): Promise<string[]> {
@@ -744,6 +766,7 @@ export class D1Store implements Store {
       urls: rows<Record<string, unknown>>(urls).map((r): IndexStatusRow => ({
         url: String(r.url),
         firstSeen: String(r.first_seen),
+        lastSeen: String(r.last_seen),
         inspectedAt: str(r.inspected_at),
         verdict: str(r.verdict),
         coverageState: str(r.coverage_state),

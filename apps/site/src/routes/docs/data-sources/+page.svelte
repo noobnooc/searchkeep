@@ -148,7 +148,7 @@ cloudflared access curl "https://searchkeep.example.com/api/import/ai-citations?
   <li>
     <strong>Index coverage</strong>: the URLs in your sitemaps (up to 5,000 per site), inspected in daily batches with
     the URL Inspection API: verdict, coverage state, Google’s and your canonical, last crawl and rich result issues, and
-    the last change of each URL’s state (<code>index_coverage</code>).
+    the last change of each URL’s state (<code>index_coverage</code>). URLs no sitemap lists for a week are dropped.
   </li>
   <li>URL Inspection, live, through <code>inspect_url</code>.</li>
 </ul>
