@@ -60,6 +60,28 @@ export function crawlIssueNames(flags: unknown): string[] {
   return names.length ? names : [`Flags${n}`];
 }
 
+/**
+ * Bing `ApiErrorCode` values that mean "slow down". Bing answers them with HTTP
+ * 400, not 429, so they are recognized from the body.
+ */
+const THROTTLE_CODES: Record<number, string> = { 4: 'ThrottleUser', 5: 'ThrottleHost' };
+
+/** The throttling reason in a Bing error body, or null when it is another error. */
+export function bingThrottle(body: string): string | null {
+  try {
+    const j = JSON.parse(body) as { Message?: unknown; ErrorCode?: unknown };
+    const name = THROTTLE_CODES[Number(j.ErrorCode)];
+    if (name) return name;
+    if (typeof j.Message === 'string') {
+      const m = /throttle(user|host)?/i.exec(j.Message);
+      if (m) return m[1] ? `Throttle${m[1][0]!.toUpperCase()}${m[1].slice(1).toLowerCase()}` : 'throttled';
+    }
+  } catch {
+    // not JSON
+  }
+  return null;
+}
+
 function num(v: unknown): number {
   const n = Number(v);
   return Number.isFinite(n) ? n : 0;
@@ -75,15 +97,22 @@ export function createBingClient(opts: BingClientOptions): BingClient {
 
   async function call<T>(method: string, params: Record<string, string> = {}): Promise<T[]> {
     const qs = new URLSearchParams({ ...params, apikey: opts.apiKey });
-    const res = await requestJson<{ d?: T[] | T }>('bing', `${API}/${method}?${qs.toString()}`, { fetch: f }, (status, body) => {
-      try {
-        const j = JSON.parse(body) as { Message?: string; ErrorCode?: number };
-        if (j.Message) return `HTTP ${status}: ${j.Message}${j.ErrorCode !== undefined ? ` (code ${j.ErrorCode})` : ''}`;
-      } catch {
-        // ignore
-      }
-      return status === 401 || status === 403 ? `HTTP ${status}: check BING_API_KEY` : `HTTP ${status}`;
-    });
+    const res = await requestJson<{ d?: T[] | T }>(
+      'bing',
+      `${API}/${method}?${qs.toString()}`,
+      { fetch: f, rateLimited: (status, body) => status === 429 || bingThrottle(body) !== null },
+      (status, body) => {
+        const throttle = bingThrottle(body);
+        if (throttle) return `HTTP ${status}: rate limited by Bing (${throttle})`;
+        try {
+          const j = JSON.parse(body) as { Message?: string; ErrorCode?: number };
+          if (j.Message) return `HTTP ${status}: ${j.Message}${j.ErrorCode !== undefined ? ` (code ${j.ErrorCode})` : ''}`;
+        } catch {
+          // ignore
+        }
+        return status === 401 || status === 403 ? `HTTP ${status}: check BING_API_KEY` : `HTTP ${status}`;
+      },
+    );
     const d = res?.d;
     if (d === undefined || d === null) return [];
     return Array.isArray(d) ? d : [d];

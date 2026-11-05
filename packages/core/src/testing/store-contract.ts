@@ -9,7 +9,10 @@ import { addDays } from '../dates.js';
 import type { SourceClients } from '../sources.js';
 import type { Store } from '../store.js';
 import type { SearchFactInput } from '../types.js';
-import { runSync } from '../sync/run-sync.js';
+import { SourceError } from '../http.js';
+import { runSync, type SyncContext } from '../sync/run-sync.js';
+import { syncProgress } from '../sync/progress.js';
+import { syncKeys, type BackoffMap } from '../sync/state.js';
 import {
   comparePeriods,
   findCannibalization,
@@ -31,8 +34,20 @@ const SITE = {
   webAnalyticsSiteTag: 'tag1',
 };
 
-function config(extra: Record<string, string> = {}): SearchkeepConfig {
-  return loadConfig({ SITES: JSON.stringify([SITE]), BRAND_REGEX: 'acme', CLOUDFLARE_ACCOUNT_ID: 'acct', ...extra });
+const SITE_2 = {
+  id: 'beta',
+  domain: 'beta.dev',
+  gscProperty: 'sc-domain:beta.dev',
+  bingSiteUrl: 'https://beta.dev/',
+  cloudflareZoneId: 'zone2',
+  webAnalyticsSiteTag: 'tag2',
+};
+
+/** Without Cloudflare: for tests about the search sources (the Cloudflare lookback is many units). */
+const searchOnly = (site: typeof SITE) => ({ ...site, cloudflareZoneId: undefined, webAnalyticsSiteTag: undefined });
+
+function config(extra: Record<string, string> = {}, sites: object[] = [SITE]): SearchkeepConfig {
+  return loadConfig({ SITES: JSON.stringify(sites), BRAND_REGEX: 'acme', CLOUDFLARE_ACCOUNT_ID: 'acct', ...extra });
 }
 
 export function storeContract(name: string, makeStore: () => Promise<Store>): void {
@@ -50,6 +65,14 @@ export function storeContract(name: string, makeStore: () => Promise<Store>): vo
       expect(await store.getMeta('k')).toBe('v2');
       await store.deleteMeta('k');
       expect(await store.getMeta('k')).toBeNull();
+      await store.setMeta('cf:rum:acme', '2026-10-19');
+      await store.setMeta('cf:rum:from:acme', '2026-09-01');
+      await store.setMeta('cf;other', 'x');
+      await store.setMeta('CF:upper', 'x');
+      await store.setMeta('gsc:backfill:acme', '2026-01-01');
+      expect(await store.listMeta('cf:')).toEqual({ 'cf:rum:acme': '2026-10-19', 'cf:rum:from:acme': '2026-09-01' });
+      expect(await store.listMeta('cf:rum:from:')).toEqual({ 'cf:rum:from:acme': '2026-09-01' });
+      expect(await store.listMeta('nothing:')).toEqual({});
     });
 
     it('upserts facts idempotently and skips unchanged rows', async () => {
@@ -477,9 +500,12 @@ export function storeContract(name: string, makeStore: () => Promise<Store>): vo
         },
       });
 
+      // The mock clients need no pacing between calls.
+      const sync = (store: Store, opts: Omit<SyncContext, 'store'>) => runSync({ store, pacing: {}, ...opts });
+
       it('syncs every source, then backfills, within budgets', async () => {
         const cfg = config({ SYNC_MAX_CALLS_PER_RUN: '900', GSC_BACKFILL_MONTHS: '1' });
-        const run = await runSync({ store, config: cfg, clients: clients(), trigger: 'manual', now: NOW, timeBudgetMs: 60_000 });
+        const run = await sync(store, { config: cfg, clients: clients(), trigger: 'manual', now: NOW, timeBudgetMs: 60_000 });
         expect(run.status).toBe('ok');
         expect(run.rowsWritten).toBeGreaterThan(0);
         expect(await store.latestDate('acme', 'gsc')).toBe('2026-10-19');
@@ -500,21 +526,31 @@ export function storeContract(name: string, makeStore: () => Promise<Store>): vo
         const crawlers = await aiCrawlers({ store, config: cfg }, { start: '2026-10-01', end: '2026-10-19' });
         expect(crawlers.rows[0]).toMatchObject({ crawler: 'GPTBot' });
 
+        // Everything is in: the progress report says so.
+        const progress = await syncProgress({ store, config: cfg, clients: clients(), now: () => NOW });
+        expect(progress.phase).toBe('done');
+        expect(progress.summary).toEqual({ sites: 1, sitesWithRecentData: 1, historyPercent: 100, issues: 0 });
+        const byDataset = Object.fromEntries(progress.sites[0]!.datasets.map((d) => [d.dataset, d]));
+        expect(byDataset.gsc).toMatchObject({ state: 'done', from: '2026-09-20', target: '2026-09-20' });
+        expect(byDataset.bing).toMatchObject({ state: 'done', percent: 100 });
+        expect(byDataset.ai_crawlers).toMatchObject({ state: 'done', from: '2026-09-20', target: '2026-09-20' });
+        expect(byDataset.web_analytics).toMatchObject({ state: 'done', from: '2026-07-22', target: '2026-07-22' });
+
         // A second pass the same day has nothing due.
-        const again = await runSync({ store, config: cfg, clients: clients(), trigger: 'cron', now: NOW });
+        const again = await sync(store, { config: cfg, clients: clients(), trigger: 'cron', now: NOW });
         expect(again.status).toBe('skipped');
         expect(again.rowsWritten).toBe(0);
       });
 
       it('stops at the call budget and resumes later', async () => {
         const cfg = config({ SYNC_MAX_CALLS_PER_RUN: '25', GSC_BACKFILL_MONTHS: '0' });
-        const first = await runSync({ store, config: cfg, clients: clients(), trigger: 'cron', now: NOW });
+        const first = await sync(store, { config: cfg, clients: clients(), trigger: 'cron', now: NOW });
         expect(first.status).toBe('partial');
         for (let i = 0; i < 40; i++) {
-          const r = await runSync({ store, config: cfg, clients: clients(), trigger: 'cron', now: NOW });
+          const r = await sync(store, { config: cfg, clients: clients(), trigger: 'cron', now: NOW });
           if (r.status === 'skipped') break;
         }
-        const last = await runSync({ store, config: cfg, clients: clients(), trigger: 'cron', now: NOW });
+        const last = await sync(store, { config: cfg, clients: clients(), trigger: 'cron', now: NOW });
         expect(last.status).toBe('skipped');
         expect(await store.latestDate('acme', 'bing')).toBe('2026-10-18');
       });
@@ -524,8 +560,7 @@ export function storeContract(name: string, makeStore: () => Promise<Store>): vo
         c.bing!.getQueryStats = async () => {
           throw new Error('HTTP 401 apikey=SECRET123');
         };
-        const run = await runSync({
-          store,
+        const run = await sync(store, {
           config: config({ SYNC_MAX_CALLS_PER_RUN: '900', GSC_BACKFILL_MONTHS: '0' }),
           clients: c,
           trigger: 'manual',
@@ -536,6 +571,160 @@ export function storeContract(name: string, makeStore: () => Promise<Store>): vo
         expect(failed.status).toBe('error');
         expect(failed.message).not.toContain('SECRET123');
         expect(await store.latestDate('acme', 'gsc')).toBe('2026-10-19');
+      });
+
+      it('gives every site its latest days before any history', async () => {
+        const cfg = config({ SYNC_MAX_CALLS_PER_RUN: '30', GSC_BACKFILL_MONTHS: '2' }, [SITE, SITE_2]);
+        const first = await sync(store, { config: cfg, clients: clients(), trigger: 'cron', now: NOW });
+        expect(first.status).toBe('partial');
+        // Round-robin over sites: both have their four most recent GSC days after one run.
+        for (const id of ['acme', 'beta']) {
+          const cov = (await store.coverage(id)).find((c) => c.source === 'gsc')!;
+          expect(cov).toMatchObject({ firstDate: '2026-10-16', lastDate: '2026-10-19', days: 4 });
+        }
+        for (let i = 0; i < 6; i++) await sync(store, { config: cfg, clients: clients(), trigger: 'cron', now: NOW });
+        // History runs newest first across sites and sources, so both sites move back together.
+        const cursors = await store.listMeta('gsc:backfill:');
+        const [a, b] = [cursors['gsc:backfill:acme']!, cursors['gsc:backfill:beta']!];
+        expect(a < '2026-10-16').toBe(true);
+        expect(Math.abs(Date.parse(a) - Date.parse(b))).toBeLessThanOrEqual(86_400_000);
+        // Cloudflare looks back newest first too, and never past its window.
+        const cf = await store.listMeta('cf:');
+        expect(cf['cf:crawlers:acme']).toBe('2026-10-19');
+        expect(cf['cf:crawlers:from:acme']! < '2026-10-19').toBe(true);
+        expect(cf['cf:crawlers:from:acme']! >= '2026-09-20').toBe(true);
+      });
+
+      it('pauses a rate-limited source for every site and keeps the others going', async () => {
+        const c = clients();
+        let bingCalls = 0;
+        const throttled = async (): Promise<never> => {
+          bingCalls++;
+          throw new SourceError('bing', 400, 'HTTP 400: rate limited by Bing (ThrottleUser)', { rateLimited: true });
+        };
+        c.bing!.getRankAndTrafficStats = throttled;
+        c.bing!.getQueryStats = throttled;
+        c.bing!.getPageStats = throttled;
+        c.bing!.getCrawlIssues = throttled;
+        const cfg = config({ SYNC_MAX_CALLS_PER_RUN: '900', GSC_BACKFILL_MONTHS: '0' }, [searchOnly(SITE), searchOnly(SITE_2)]);
+        const run = await sync(store, { config: cfg, clients: c, trigger: 'cron', now: NOW });
+        expect(bingCalls).toBe(1);
+        expect(run.status).toBe('partial');
+        expect(run.details!.some((d) => d.status === 'error')).toBe(false);
+        expect(run.message).toMatch(/Bing is paused until 04:30 UTC/);
+        expect(await store.latestDate('acme', 'gsc')).toBe('2026-10-19');
+        expect(await store.latestDate('beta', 'gsc')).toBe('2026-10-19');
+        const backoff = JSON.parse((await store.getMeta(syncKeys.backoff))!) as BackoffMap;
+        expect(backoff['source:bing']).toMatchObject({ failures: 1, until: '2026-10-20T04:30:00.000Z' });
+
+        // Still paused: no Bing calls, also not for "Sync now".
+        const later = new Date('2026-10-20T04:15:00Z');
+        const again = await sync(store, { config: cfg, clients: c, trigger: 'manual', now: later });
+        expect(bingCalls).toBe(1);
+        expect(again.status).toBe('skipped');
+        expect(again.message).toMatch(/Bing is paused/);
+        const report = await syncProgress({ store, config: cfg, clients: c, now: () => later });
+        expect(report.paused).toEqual([expect.objectContaining({ source: 'bing', until: '2026-10-20T04:30:00.000Z' })]);
+        expect(report.sites[0]!.datasets.find((d) => d.dataset === 'bing')!.state).toBe('paused');
+
+        // Throttled again after the pause: twice as long.
+        await sync(store, { config: cfg, clients: c, trigger: 'cron', now: new Date('2026-10-20T04:45:00Z') });
+        expect(bingCalls).toBe(2);
+        const longer = JSON.parse((await store.getMeta(syncKeys.backoff))!) as BackoffMap;
+        expect(longer['source:bing']).toMatchObject({ failures: 2, until: '2026-10-20T05:45:00.000Z' });
+
+        // Recovered: Bing syncs again, at most 8 calls per run, and the pause is cleared.
+        const recovered = await sync(store, { config: cfg, clients: clients(), trigger: 'cron', now: new Date('2026-10-20T06:00:00Z') });
+        expect(recovered.details!.filter((d) => d.source === 'bing' && d.status === 'ok').length).toBe(8);
+        expect(await store.getMeta(syncKeys.backoff)).toBeNull();
+        expect(await store.latestDate('beta', 'bing')).toBe('2026-10-18');
+      });
+
+      it('retries a failing task later, or right away on Sync now', async () => {
+        const c = clients();
+        let sitemapCalls = 0;
+        c.gsc!.listSitemaps = async () => {
+          sitemapCalls++;
+          throw new SourceError('gsc', 403, 'HTTP 403: forbidden');
+        };
+        const cfg = config({ SYNC_MAX_CALLS_PER_RUN: '900', GSC_BACKFILL_MONTHS: '0' }, [searchOnly(SITE)]);
+        const first = await sync(store, { config: cfg, clients: c, trigger: 'cron', now: NOW });
+        expect(first.status).toBe('partial');
+        expect(sitemapCalls).toBe(1);
+        const at = new Date('2026-10-20T04:05:00Z');
+        const next = await sync(store, { config: cfg, clients: c, trigger: 'cron', now: at });
+        expect(sitemapCalls).toBe(1);
+        expect(next.message).toMatch(/1 failed task waits to be retried/);
+        const report = await syncProgress({ store, config: cfg, clients: c, now: () => at });
+        expect(report.summary.issues).toBe(1);
+        expect(report.sites[0]!.datasets.find((d) => d.dataset === 'gsc')).toMatchObject({
+          state: 'error',
+          message: 'gsc: HTTP 403: forbidden',
+        });
+        await sync(store, { config: cfg, clients: c, trigger: 'manual', now: new Date('2026-10-20T04:06:00Z') });
+        expect(sitemapCalls).toBe(2);
+        // The cron waits out the longer backoff after the second failure (20 minutes).
+        await sync(store, { config: cfg, clients: c, trigger: 'cron', now: new Date('2026-10-20T04:20:00Z') });
+        expect(sitemapCalls).toBe(2);
+        await sync(store, { config: cfg, clients: clients(), trigger: 'cron', now: new Date('2026-10-20T04:30:00Z') });
+        expect(await store.getMeta(syncKeys.backoff)).toBeNull();
+      });
+
+      it('reports sync progress from waiting to done', async () => {
+        const cfg = config({ SYNC_MAX_CALLS_PER_RUN: '25', GSC_BACKFILL_MONTHS: '1' }, [SITE, SITE_2]);
+        const at = () => NOW;
+        const before = await syncProgress({ store, config: cfg, clients: clients(), now: at });
+        expect(before.phase).toBe('waiting');
+        expect(before.summary).toEqual({ sites: 2, sitesWithRecentData: 0, historyPercent: 0, issues: 0 });
+        expect(before.sites[0]!.datasets.map((d) => [d.dataset, d.state])).toEqual([
+          ['gsc', 'waiting'],
+          ['bing', 'waiting'],
+          ['ai_crawlers', 'waiting'],
+          ['web_analytics', 'waiting'],
+        ]);
+
+        await sync(store, { config: cfg, clients: clients(), trigger: 'cron', now: NOW });
+        const during = await syncProgress({ store, config: cfg, clients: clients(), now: at });
+        expect(during.phase).toBe('recent');
+        expect(during.lastRun).toMatchObject({ status: 'partial' });
+
+        // A larger run brings in the rest of the latest days and starts on history.
+        const bigger = config({ SYNC_MAX_CALLS_PER_RUN: '60', GSC_BACKFILL_MONTHS: '1' }, [SITE, SITE_2]);
+        await sync(store, { config: bigger, clients: clients(), trigger: 'cron', now: NOW });
+        const history = await syncProgress({ store, config: cfg, clients: clients(), now: at });
+        expect(history.phase).toBe('history');
+        expect(history.summary.sitesWithRecentData).toBe(2);
+        expect(history.summary.historyPercent).toBeGreaterThan(0);
+        expect(history.summary.historyPercent).toBeLessThan(100);
+        expect(history.sites[0]!.datasets.find((d) => d.dataset === 'gsc')).toMatchObject({
+          state: 'syncing',
+          recent: true,
+          complete: false,
+          target: '2026-09-20',
+        });
+      });
+
+      it('keeps the forward-only Cloudflare cursors of older versions', async () => {
+        // Older versions synced Cloudflare forward from the start of its window and kept no lookback cursor.
+        await store.setMeta('cf:crawlers:acme', '2026-10-18');
+        await store.setMeta('cf:rum:acme', '2026-10-18');
+        const cfg = config({ SYNC_MAX_CALLS_PER_RUN: '900', GSC_BACKFILL_MONTHS: '0' });
+        const days: string[] = [];
+        const c = clients();
+        const crawl = c.cloudflare!.aiCrawlerRequests.bind(c.cloudflare);
+        c.cloudflare!.aiCrawlerRequests = async (zone, date, patterns) => {
+          days.push(date);
+          return crawl(zone, date, patterns);
+        };
+        const before = await syncProgress({ store, config: cfg, clients: c, now: () => NOW });
+        expect(before.sites[0]!.datasets.find((d) => d.dataset === 'ai_crawlers')).toMatchObject({
+          recent: true,
+          complete: true,
+          percent: 100,
+        });
+        await sync(store, { config: cfg, clients: c, trigger: 'cron', now: NOW });
+        expect(days).toEqual(['2026-10-19']);
+        expect(await store.getMeta('cf:crawlers:from:acme')).toBeNull();
       });
 
       it('reports setup status without secrets', async () => {
@@ -557,6 +746,8 @@ export function storeContract(name: string, makeStore: () => Promise<Store>): vo
         expect(text).not.toContain('cf-s3cr3t');
         expect(status.state).toBe('ready');
         expect(status.checks.find((c) => c.id === 'probe.gsc')!.status).toBe('ok');
+        expect(status.checks.find((c) => c.id === 'sync.progress')).toMatchObject({ status: 'ok' });
+        expect(status.syncProgress.phase).toBe('waiting');
         const sites = await listSites({ store, config: cfg, clients: clients() });
         expect(sites.sites[0]!.sources).toEqual({ gsc: true, bing: true, aiCrawlers: true, webAnalytics: true });
       });

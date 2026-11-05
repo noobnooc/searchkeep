@@ -6,8 +6,10 @@
   import Logo from './components/Logo.svelte';
   import Shell from './components/Shell.svelte';
   import { ApiError, apiUrl, onLocked, request } from './lib/api';
+  import { refreshAll } from './lib/resource.svelte';
   import { href, router } from './lib/router.svelte';
   import { ui } from './lib/state.svelte';
+  import { syncWatch } from './lib/sync.svelte';
   import type { SitesResponse, StatusResponse } from './lib/types';
   import AiCrawlers from './views/AiCrawlers.svelte';
   import AiReferrals from './views/AiReferrals.svelte';
@@ -39,6 +41,11 @@
       }
       await loadSites();
       phase = 'ready';
+      // When a sync writes new rows, refresh what is on screen so the views fill in without a reload.
+      syncWatch.start(() => {
+        refreshAll();
+        void loadSites().catch(() => {});
+      });
     } catch (err) {
       if (err instanceof ApiError && err.code === 'locked') return; // handled by onLocked
       bootError = err;

@@ -5,6 +5,8 @@
   import Icon, { type IconName } from './Icon.svelte';
   import Logo from './Logo.svelte';
   import SiteSwitcher from './SiteSwitcher.svelte';
+  import SyncBanner from './SyncBanner.svelte';
+  import SyncStatus from './SyncStatus.svelte';
 
   interface Props {
     children: Snippet;
@@ -102,6 +104,7 @@
 
 {#snippet foot()}
   <div class="foot">
+    <SyncStatus />
     <a class="nav-item" href={href('settings')} aria-current={router.view === 'settings' ? 'page' : undefined}>
       <Icon name="settings" size={16} />
       <span>Settings</span>
@@ -149,16 +152,7 @@
 
   <main class="main">
     <div class="content">
-      {#if noData && router.view !== 'settings' && router.view !== 'overview'}
-        <div class="nodata" role="status">
-          <Icon name="sync" size={16} />
-          <div>
-            <strong>No data synced for {ui.site?.domain} yet.</strong>
-            <span>Syncs every 15 minutes; the first passes backfill history.</span>
-          </div>
-          <a class="btn sm" href={href('settings', 'sync')}>Sync now <Icon name="arrowRight" size={13} /></a>
-        </div>
-      {/if}
+      {#if router.view !== 'settings'}<SyncBanner />{/if}
       {@render children()}
     </div>
   </main>
@@ -293,29 +287,6 @@
     max-width: 1320px;
     margin: 0 auto;
     padding: 28px 32px 64px;
-  }
-  .nodata {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    padding: 12px 14px;
-    margin-bottom: 20px;
-    border-radius: var(--radius);
-    border: 1px solid var(--border-2);
-    background: var(--surface-2);
-    color: var(--accent-text);
-    font-size: 13px;
-    flex-wrap: wrap;
-  }
-  .nodata div {
-    flex: 1 1 260px;
-    display: flex;
-    flex-direction: column;
-    color: var(--text-2);
-  }
-  .nodata strong {
-    color: var(--text);
-    font-weight: 600;
   }
 
   @media (max-width: 900px) {

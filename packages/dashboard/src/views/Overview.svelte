@@ -18,6 +18,7 @@
   import { resource } from '../lib/resource.svelte';
   import { href, type ViewId } from '../lib/router.svelte';
   import { ui } from '../lib/state.svelte';
+  import { syncWatch } from '../lib/sync.svelte';
   import type { GeoFunnelResponse, OverviewResponse, Source } from '../lib/types';
 
   const ov = resource<OverviewResponse>(() => (ui.siteId ? apiUrl('/api/overview', { site: ui.siteId, brand: ui.brand, ...ui.rangeParams() }) : null));
@@ -31,7 +32,11 @@
     (['gsc', 'bing'] as const).map((id) => {
       const s = d?.search.find((x) => x.source === id);
       const hasData = Boolean(s && (s.series.length > 0 || s.current.impressions > 0 || s.previous.impressions > 0));
-      const kpis = s ? searchKpis(s.current, s.previous) : [];
+      let kpis = s ? searchKpis(s.current, s.previous) : [];
+      // While history is still syncing, the previous period may be partly empty: no deltas until it is in.
+      const ds = syncWatch.site(ui.siteId)?.datasets.find((x) => x.dataset === id);
+      const prevSyncing = Boolean(d && ds && !ds.complete && (!ds.from || ds.from > d.previousRange.start));
+      if (prevSyncing) kpis = kpis.map((k) => ({ ...k, delta: null, sub: 'Previous period still syncing' }));
       // Bing reports no average position for site totals.
       if (s && s.current.position === null && s.previous.position === null && kpis[3]) kpis[3] = { ...kpis[3], sub: `Not reported by ${id === 'bing' ? 'Bing' : 'Google'}` };
       return { id, name: id === 'gsc' ? 'Google Search Console' : 'Bing Webmaster Tools', s, hasData, kpis };
@@ -79,8 +84,8 @@
   <ErrorBanner error={ov.error} retry={ov.reload} />
 {:else if everythingEmpty}
   <Card>
-    <EmptyState title={neverSynced ? `No data synced for ${ui.site?.domain} yet` : 'No data in this range yet'} icon="sync">
-      <p>{neverSynced ? 'Syncs every 15 minutes, then backfills 16 months. Run one now, or check Settings.' : 'Try a longer range.'}</p>
+    <EmptyState title={neverSynced ? `Data for ${ui.site?.domain} is on its way` : 'No data in this range yet'} icon="sync">
+      <p>{neverSynced ? 'The progress above shows what is syncing. This page fills in as data arrives, no reload needed.' : 'Try a longer range.'}</p>
       {#snippet actions()}
         <a class="btn primary" href={href('settings', 'sync')}><Icon name="sync" size={14} /> Sync now</a>
       {/snippet}

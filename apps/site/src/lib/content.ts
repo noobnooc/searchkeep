@@ -389,7 +389,7 @@ export const SECRETS: Secret[] = [
     name: 'SYNC_DAILY_WRITE_BUDGET',
     required: 'optional',
     description:
-      'Maximum rows the history backfill may write per UTC day; daily increments always run. Defaults to `80000`, below the D1 Free limit of 100,000 rows written per day.',
+      'Maximum rows history (the Search Console backfill and the Cloudflare lookback) may write per UTC day; the latest days always sync. Defaults to `80000`, below the D1 Free limit of 100,000 rows written per day.',
     example: '80000',
   },
   {

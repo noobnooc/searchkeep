@@ -29,6 +29,7 @@ import {
   safeMessage,
   SearchkeepError,
   setupStatus,
+  syncProgress,
   toIsoDate,
   validateSite,
   withStoredSites,
@@ -425,6 +426,10 @@ app.post(
 app.get(
   '/api/setup-status',
   handle(async (c) => setupStatus(opsContext(c), { readiness: await readiness(c), probe: c.req.query('probe') !== '0' })),
+);
+app.get(
+  '/api/sync-progress',
+  handle((c) => syncProgress(opsContext(c))),
 );
 app.get(
   '/api/sync-runs',
