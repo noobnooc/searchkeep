@@ -149,6 +149,12 @@ Because users sync `main` at any time, the `Unreleased` section is always accura
   busy database stops the pass without failing a task; the next pass continues. The final writes of
   a pass retry while the database is busy, and a run left as `running` for 20 minutes is marked as
   interrupted.
+- Brand classification no longer resets D1 ("D1 DB exceeded its CPU time limit and was reset"),
+  which failed every sync pass once a site had many queries. Writing the brand flags joined the
+  queries table to the batch, and without planner statistics SQLite scanned all of a site's queries
+  once per query in the batch (1.5 million rows read for 500 flags on a site with 3,000 queries). It
+  now looks each query up by its id. A failure while writing brand flags no longer fails the pass:
+  the synced data and the daily write count are kept, and the next pass continues the flags.
 
 ### Upgrade notes
 

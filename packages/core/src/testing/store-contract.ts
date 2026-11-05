@@ -360,6 +360,38 @@ export function storeContract(name: string, makeStore: () => Promise<Store>): vo
       expect(await store.listQueriesForBrandClassification('acme', 'v2', 10)).toHaveLength(1);
     });
 
+    it('sets brand and non-brand flags in one call, only for the given site', async () => {
+      const texts = Array.from({ length: 1_200 }, (_, i) => (i % 3 === 0 ? `acme ${i}` : `widget ${i}`));
+      await store.writeSearchFacts(
+        'acme',
+        'gsc',
+        texts.map((query) => ({ date: '2026-10-01', kind: 'query_page' as const, query, page: '/', clicks: 1, impressions: 1 })),
+      );
+      await store.writeSearchFacts('shop', 'gsc', [
+        { date: '2026-10-01', kind: 'query_page', query: 'acme 0', page: '/', clicks: 1, impressions: 1 },
+      ]);
+      const acme = await store.listQueriesForBrandClassification('acme', 'v1', 5_000);
+      const [shop] = await store.listQueriesForBrandClassification('shop', 'v1', 10);
+      expect(acme).toHaveLength(1_200);
+      // More ids than one statement takes; the other site's id rides along and must be left alone.
+      await store.setBrandFlags('acme', 'v1', [
+        ...acme.map((q) => ({ id: q.id, isBrand: q.text.startsWith('acme') })),
+        { id: shop!.id, isBrand: true },
+      ]);
+      expect(await store.listQueriesForBrandClassification('acme', 'v1', 5_000)).toHaveLength(0);
+      expect(await store.listQueriesForBrandClassification('shop', 'v1', 10)).toHaveLength(1);
+      const rows = await store.queryPerformance({
+        siteId: 'acme',
+        source: 'gsc',
+        range: { start: '2026-10-01', end: '2026-10-01' },
+        dimensions: ['query'],
+        filters: { brand: 'brand' },
+        limit: 5_000,
+      });
+      expect(rows).toHaveLength(400);
+      expect(rows.every((r) => r.query?.startsWith('acme'))).toBe(true);
+    });
+
     describe('analysis on top of the store', () => {
       beforeEach(async () => {
         const facts: SearchFactInput[] = [];
@@ -872,6 +904,34 @@ export function storeContract(name: string, makeStore: () => Promise<Store>): vo
         expect(run.status).toBe('partial');
         expect(run.message).toMatch(/database busy/);
         expect(run.details!.some((d) => d.status === 'error')).toBe(false);
+      });
+
+      it('finishes the run when brand flags cannot be written, and classifies them next run', async () => {
+        // D1 answers a query that needs too much CPU with "exceeded its CPU time limit and was reset".
+        let fail = true;
+        const failingStore = new Proxy(store, {
+          get(target, prop) {
+            if (prop === 'setBrandFlags')
+              return async (...args: Parameters<Store['setBrandFlags']>) => {
+                if (fail) {
+                  fail = false;
+                  throw new Error('D1_ERROR: D1 DB exceeded its CPU time limit and was reset.');
+                }
+                return target.setBrandFlags(...args);
+              };
+            const v = Reflect.get(target, prop, target) as unknown;
+            return typeof v === 'function' ? (v as (...a: unknown[]) => unknown).bind(target) : v;
+          },
+        }) as Store;
+        const cfg = config({ SYNC_MAX_CALLS_PER_RUN: '900', GSC_BACKFILL_MONTHS: '0' }, [searchOnly(SITE)]);
+        const first = await sync(failingStore, { config: cfg, clients: clients(), trigger: 'cron', now: NOW });
+        expect(first.status).toBe('partial');
+        expect(first.message).toMatch(/Brand flags could not be updated/);
+        expect(first.details!.some((d) => d.status === 'error')).toBe(false);
+        expect(await store.latestDate('acme', 'gsc')).toBe('2026-10-19');
+        expect((await store.listQueriesForBrandClassification('acme', 'acme', 10)).length).toBeGreaterThan(0);
+        await sync(failingStore, { config: cfg, clients: clients(), trigger: 'cron', now: NOW });
+        expect(await store.listQueriesForBrandClassification('acme', 'acme', 10)).toHaveLength(0);
       });
 
       it('marks a run left as running as interrupted', async () => {

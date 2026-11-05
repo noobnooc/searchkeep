@@ -364,14 +364,19 @@ export async function runSync(ctx: SyncContext): Promise<SyncRunRecord> {
       stoppedFor = 'database busy';
     }
 
-    // A few thousand brand flags per run: new queries are classified over the next runs.
+    // A few thousand brand flags per run: new queries are classified over the next runs. A failure
+    // here leaves the flags for the next run; it must not fail a run whose data is already written.
     let brandLeft = BRAND_QUERIES_PER_RUN;
+    let brandFailed = false;
     for (const site of config.sites) {
       if (brandLeft <= 0) break;
       try {
         brandLeft -= await classifyBrandQueries(store, config, site, brandLeft);
       } catch (err) {
-        if (!store.isBusy?.(err)) throw err;
+        if (!store.isBusy?.(err)) {
+          brandFailed = true;
+          ctx.log?.(`sync brand ${site.id}: ${safeMessage(err)}`);
+        }
         break;
       }
     }
@@ -389,6 +394,7 @@ export async function runSync(ctx: SyncContext): Promise<SyncRunRecord> {
       if (!paused.has(source)) notes.push(`More ${SOURCE_NAMES[source]} calls are spread over the next runs to stay under its rate limit.`);
     }
     if (waiting.size) notes.push(`${waiting.size} failed ${waiting.size === 1 ? 'task waits' : 'tasks wait'} to be retried.`);
+    if (brandFailed) notes.push('Brand flags could not be updated; the next run continues.');
     const status: SyncRunRecord['status'] =
       details.length === 0
         ? 'skipped'
@@ -396,7 +402,7 @@ export async function runSync(ctx: SyncContext): Promise<SyncRunRecord> {
           ? anyOk
             ? 'partial'
             : 'error'
-          : stoppedFor || paused.size || capped.size || waiting.size
+          : stoppedFor || paused.size || capped.size || waiting.size || brandFailed
             ? 'partial'
             : 'ok';
     const message = notes.length ? notes.join(' ') : details.length === 0 ? 'Nothing due.' : null;
