@@ -1,6 +1,6 @@
 import { findSite, SearchkeepError } from '../config.js';
 import { AI_REFERRER_HOSTS } from '../crawlers.js';
-import type { CrawlerQuery, DateRange } from '../types.js';
+import type { CrawlerKind, CrawlerQuery, DateRange } from '../types.js';
 import { clampLimit, resolve, type AnalysisContext, type CommonParams } from './common.js';
 
 /** Keys the per-page funnel rows can be sorted by, descending. */
@@ -26,7 +26,7 @@ export async function geoFunnel(ctx: AnalysisContext, p: GeoFunnelParams) {
   const site = findSite(ctx.config, p.site);
   // Default the window to the newest date any funnel dataset has (Cloudflare data is fresher than GSC).
   const end = p.end ?? (p.start ? undefined : await latestOf(ctx, site.id, ['search', 'ai_crawlers', 'web_analytics', 'ai_citations']));
-  const r = await resolve(ctx, { ...p, source: 'gsc', brand: 'all', ...(end ? { end } : {}) }, { limit: 50 });
+  const r = await resolve(ctx, { ...p, source: 'gsc', searchType: 'web', brand: 'all', ...(end ? { end } : {}) }, { limit: 50 });
   const range = r.range;
   const siteId = r.site.id;
   const big = 5000;
@@ -123,14 +123,27 @@ export interface AiCrawlersParams extends Omit<CommonParams, 'source' | 'brand'>
 }
 
 export async function aiCrawlers(ctx: AnalysisContext, p: AiCrawlersParams) {
-  const r = await resolve(ctx, { ...p, source: 'gsc' }, { days: 7, limit: 50 });
+  return crawlerTraffic(ctx, p, 'ai');
+}
+
+/**
+ * Requests from search engine crawlers (Googlebot, Bingbot, ...) recorded by Cloudflare: the
+ * closest substitute for Search Console's Crawl stats report, which has no API.
+ */
+export async function searchCrawlers(ctx: AnalysisContext, p: AiCrawlersParams) {
+  return crawlerTraffic(ctx, p, 'search');
+}
+
+async function crawlerTraffic(ctx: AnalysisContext, p: AiCrawlersParams, kind: CrawlerKind) {
+  const r = await resolve(ctx, { ...p, source: 'gsc', searchType: 'web' }, { days: 7, limit: 50 });
   const groupBy: CrawlerQuery['groupBy'] = p.groupBy && p.groupBy.length > 0 ? p.groupBy : ['crawler'];
   for (const g of groupBy) {
     if (!CRAWLER_GROUPS.includes(g)) throw new SearchkeepError('bad_request', `Unknown groupBy "${g}". Use: ${CRAWLER_GROUPS.join(', ')}.`);
   }
-  const range = await crawlerRange(ctx, r.site.id, p, r.range);
+  const range = await crawlerRange(ctx, r.site.id, p, r.range, kind === 'ai' ? 'ai_crawlers' : 'search_crawlers');
   const rows = await ctx.store.queryCrawlers({
     siteId: r.site.id,
+    kind,
     range,
     groupBy,
     ...(p.crawler ? { crawler: p.crawler } : {}),
@@ -141,16 +154,27 @@ export async function aiCrawlers(ctx: AnalysisContext, p: AiCrawlersParams) {
   const notes: string[] = [];
   if (rows.length === 0)
     notes.push(
-      'No AI crawler requests recorded for this range. Check that cloudflareZoneId is set and the zone is proxied (orange cloud).',
+      `No ${kind === 'ai' ? 'AI' : 'search engine'} crawler requests recorded for this range. Check that cloudflareZoneId is set and the zone is proxied (orange cloud).`,
     );
+  if (kind === 'search') {
+    notes.push(
+      'Requests are matched by user agent, so impostors that send a search engine\'s user agent are counted too. Up to 2,000 page × status rows are kept per day; requests to the other pages are summed under "(other pages)".',
+    );
+  }
   return { site: r.site.id, range, groupBy, totalRequests: total, rows, notes };
 }
 
 /** Crawler data has its own latest date; default the window to it rather than to GSC's. */
-async function crawlerRange(ctx: AnalysisContext, siteId: string, p: CommonParams, fallback: DateRange): Promise<DateRange> {
+async function crawlerRange(
+  ctx: AnalysisContext,
+  siteId: string,
+  p: CommonParams,
+  fallback: DateRange,
+  dataset: 'ai_crawlers' | 'search_crawlers',
+): Promise<DateRange> {
   if (p.end || p.start) return fallback;
   const cov = await ctx.store.coverage(siteId);
-  const c = cov.find((x) => x.dataset === 'ai_crawlers');
+  const c = cov.find((x) => x.dataset === dataset);
   if (!c?.lastDate) return fallback;
   const days = Math.max(1, Math.floor(p.days ?? 7));
   const end = c.lastDate;
@@ -166,7 +190,7 @@ export async function aiReferrals(ctx: AnalysisContext, p: AiReferralsParams) {
   const site = findSite(ctx.config, p.site);
   if (!site.webAnalyticsSiteTag) throw new SearchkeepError('not_configured', 'webAnalyticsSiteTag is not set for this site.');
   const end = p.end ?? (p.start ? undefined : await latestOf(ctx, site.id, ['web_analytics']));
-  const r = await resolve(ctx, { ...p, source: 'gsc', ...(end ? { end } : {}) }, { limit: 50 });
+  const r = await resolve(ctx, { ...p, source: 'gsc', searchType: 'web', ...(end ? { end } : {}) }, { limit: 50 });
   const groupBy = p.groupBy && p.groupBy.length > 0 ? p.groupBy : (['refererHost'] as const);
   for (const g of groupBy) {
     if (!['path', 'refererHost', 'date'].includes(g))

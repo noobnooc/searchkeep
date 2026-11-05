@@ -17,13 +17,26 @@
   import { resource } from '../lib/resource.svelte';
   import { ui } from '../lib/state.svelte';
   import { compareValues, type Column, type SortState } from '../lib/table';
-  import type { Dimension, PerformanceResponse, PerformanceRow } from '../lib/types';
+  import type { Dimension, PerformanceResponse, PerformanceRow, SearchType } from '../lib/types';
 
   type Metric = 'clicks' | 'impressions' | 'ctr' | 'position';
   const TIME: Dimension[] = ['date', 'week', 'month'];
   const BREAKDOWN: Dimension[] = ['country', 'device'];
+  const SEARCH_TYPES: Array<{ value: SearchType; label: string }> = [
+    { value: 'web', label: 'Web search' },
+    { value: 'image', label: 'Image search' },
+    { value: 'video', label: 'Video search' },
+    { value: 'news', label: 'News tab' },
+    { value: 'discover', label: 'Discover' },
+    { value: 'googleNews', label: 'Google News' },
+  ];
+  /** Discover and Google News report pages only: no queries and no positions. */
+  const PAGE_ONLY: SearchType[] = ['discover', 'googleNews'];
 
   let dim = $state<Dimension>('query');
+  let searchType = $state<SearchType>('web');
+  let country = $state('');
+  let device = $state('');
   let queryText = $state('');
   let pageText = $state('');
   let limit = $state(100);
@@ -35,7 +48,15 @@
 
   const isTime = $derived(TIME.includes(dim));
   const isBreakdown = $derived(BREAKDOWN.includes(dim));
+  const isAppearance = $derived(dim === 'appearance');
+  /** Search appearance and country/device come without query and page filters. */
+  const standalone = $derived(isBreakdown || isAppearance);
   const bing = $derived(ui.source === 'bing');
+  const type = $derived<SearchType>(bing ? 'web' : searchType);
+  const pageOnly = $derived(PAGE_ONLY.includes(type));
+  // Country and device of queries and pages: only for sites with segments (GSC_SEGMENT_SITES).
+  const segments = $derived(!bing && type === 'web' && Boolean(ui.site?.sources.segments) && (dim === 'query' || dim === 'page'));
+  const cc = debounced(() => country.trim().toLowerCase(), 300);
 
   // Server-side ordering for metrics; text columns are sorted in the browser.
   const serverOrder = $derived.by(() => {
@@ -52,9 +73,12 @@
           source: ui.source,
           ...ui.rangeParams(),
           dimensions: dim,
-          brand: isBreakdown ? undefined : ui.brand,
-          queryContains: isBreakdown ? undefined : q.value,
-          pageContains: isBreakdown ? undefined : pg.value,
+          searchType: type === 'web' ? undefined : type,
+          brand: standalone || pageOnly ? undefined : ui.brand,
+          queryContains: standalone || pageOnly ? undefined : q.value,
+          pageContains: standalone ? undefined : pg.value,
+          country: segments ? cc.value : undefined,
+          device: segments ? device : undefined,
           limit: isTime ? 500 : limit,
           ...serverOrder,
         })
@@ -74,14 +98,28 @@
     { value: 'page', label: 'Page' },
     { value: 'country', label: 'Country' },
     { value: 'device', label: 'Device' },
+    { value: 'appearance', label: 'Appearance' },
     { value: 'date', label: 'Day' },
     { value: 'week', label: 'Week' },
     { value: 'month', label: 'Month' },
   ];
-  const dimOptions = $derived(DIMS.map((o) => (bing && BREAKDOWN.includes(o.value) ? { ...o, disabled: true, title: 'Bing does not provide country or device breakdowns' } : o)));
+  /** Why a breakdown is not available for the current source and search type, if it is not. */
+  function unavailable(d: Dimension): string | null {
+    if (bing && BREAKDOWN.includes(d)) return 'Bing does not provide country or device breakdowns';
+    if (bing && d === 'appearance') return 'Bing does not report search appearance';
+    if (type !== 'web' && (BREAKDOWN.includes(d) || d === 'appearance')) return 'Available for web search only';
+    if (pageOnly && d === 'query') return 'Discover and Google News report pages, not queries';
+    return null;
+  }
+  const dimOptions = $derived(
+    DIMS.map((o) => {
+      const why = unavailable(o.value);
+      return why ? { ...o, disabled: true, title: why } : o;
+    }),
+  );
 
   $effect(() => {
-    if (bing && BREAKDOWN.includes(dim)) dim = 'query';
+    if (unavailable(dim)) dim = pageOnly ? 'page' : 'query';
   });
 
   function setDim(v: Dimension) {
@@ -101,6 +139,10 @@
         return (r.country ?? '').toUpperCase() || '—';
       case 'device': {
         const v = (r.device ?? '').toLowerCase();
+        return v ? v.charAt(0).toUpperCase() + v.slice(1) : '—';
+      }
+      case 'appearance': {
+        const v = (r.appearance ?? '').toLowerCase().replace(/_/g, ' ');
         return v ? v.charAt(0).toUpperCase() + v.slice(1) : '—';
       }
       default:
@@ -137,7 +179,8 @@
     if (!d) return;
     const header = [dim, 'clicks', 'impressions', 'ctr', 'position'];
     const body = rows.map((r) => [r[dim as keyof PerformanceRow] ?? '', r.clicks, r.impressions, r.ctr, r.position ?? '']);
-    downloadText(`searchkeep-${d.site}-${d.source}-${dim}-${d.range.start}-to-${d.range.end}.csv`, toCsv(header, body));
+    const kind = type === 'web' ? d.source : `${d.source}-${type}`;
+    downloadText(`searchkeep-${d.site}-${kind}-${dim}-${d.range.start}-to-${d.range.end}.csv`, toCsv(header, body));
   }
 </script>
 
@@ -149,17 +192,43 @@
 
 <div class="stack">
   <div class="toolbar" role="group" aria-label="Breakdown and filters">
+    {#if !bing}
+      <label class="limit">
+        <span class="sr-only">Search type</span>
+        <select class="select" bind:value={searchType}>
+          {#each SEARCH_TYPES as t (t.value)}
+            <option value={t.value}>{t.label}</option>
+          {/each}
+        </select>
+      </label>
+    {/if}
     <Segmented label="Group by" options={dimOptions} value={dim} onchange={setDim} />
-    <label class="search" title={isBreakdown ? 'Search Console stores country and device separately from queries and pages' : undefined}>
+    <label class="search" title={standalone ? 'Search Console reports this separately from queries and pages' : pageOnly ? 'Discover and Google News report pages, not queries' : undefined}>
       <Icon name="search" size={14} />
       <span class="sr-only">Query contains</span>
-      <input class="input" type="search" placeholder="Query contains…" bind:value={queryText} disabled={isBreakdown} />
+      <input class="input" type="search" placeholder="Query contains…" bind:value={queryText} disabled={standalone || pageOnly} />
     </label>
-    <label class="search" title={isBreakdown ? 'Search Console stores country and device separately from queries and pages' : undefined}>
+    <label class="search" title={standalone ? 'Search Console reports this separately from queries and pages' : undefined}>
       <Icon name="file" size={14} />
       <span class="sr-only">Page contains</span>
-      <input class="input" type="search" placeholder="Page contains…" bind:value={pageText} disabled={isBreakdown} />
+      <input class="input" type="search" placeholder="Page contains…" bind:value={pageText} disabled={standalone} />
     </label>
+    {#if segments}
+      <label class="search narrow" title="ISO 3166-1 alpha-3 country code, e.g. usa">
+        <Icon name="globe" size={14} />
+        <span class="sr-only">Country</span>
+        <input class="input" type="search" placeholder="Country (usa)…" bind:value={country} maxlength="3" />
+      </label>
+      <label class="limit">
+        <span class="sr-only">Device</span>
+        <select class="select" bind:value={device}>
+          <option value="">All devices</option>
+          <option value="DESKTOP">Desktop</option>
+          <option value="MOBILE">Mobile</option>
+          <option value="TABLET">Tablet</option>
+        </select>
+      </label>
+    {/if}
     <span class="spacer"></span>
     {#if !isTime}
       <label class="limit">
@@ -175,8 +244,8 @@
     <button class="btn" onclick={download} disabled={!d || rows.length === 0}><Icon name="download" size={14} /> CSV</button>
   </div>
 
-  {#if isBreakdown && (ui.brand !== 'all' || queryText || pageText)}
-    <p class="hint"><Icon name="info" size={13} /> Brand, query and page filters don’t apply to country and device.</p>
+  {#if standalone && (ui.brand !== 'all' || queryText || pageText)}
+    <p class="hint"><Icon name="info" size={13} /> Brand, query and page filters don’t apply to {isAppearance ? 'search appearance' : 'country and device'}.</p>
   {/if}
 
   {#if perf.error}
@@ -262,6 +331,10 @@
   }
   .search .input:disabled {
     opacity: 0.5;
+  }
+  .search.narrow {
+    flex: 0 1 140px;
+    min-width: 120px;
   }
   .hint {
     display: flex;

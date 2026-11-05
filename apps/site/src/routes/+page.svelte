@@ -60,7 +60,7 @@
     { row: 'Price', sk: { v: 'Free, MIT licensed', good: true }, saas: { v: 'Monthly subscription' } },
     { row: 'History past GSC’s 16 months', sk: { v: 'Kept in D1, forever', good: true }, saas: { v: 'Varies; often only while subscribed' } },
     { row: 'AI crawled → cited → clicked, per page', sk: { v: 'Built in', good: true }, saas: { v: 'Rare' } },
-    { row: 'Ask from Claude, Cursor, ChatGPT', sk: { v: '12 read-only MCP tools', good: true }, saas: { v: 'Sometimes' } },
+    { row: 'Ask from Claude, Cursor, ChatGPT', sk: { v: '14 read-only MCP tools', good: true }, saas: { v: 'Sometimes' } },
     { row: 'Telemetry', sk: { v: 'None', good: true }, saas: { v: 'Usually' } },
     { row: 'Backlink index', sk: { v: 'No, by design', no: true }, saas: { v: 'Yes', good: true } },
     { row: 'Competitor research', sk: { v: 'No, by design', no: true }, saas: { v: 'Yes', good: true } },
@@ -160,8 +160,8 @@
       <ChatMock />
       <div class="tools card">
         <div class="tools-head">
-          <span>13 tools</span>
-          <span class="muted">12 read-only · 1 opt-in write</span>
+          <span>15 tools</span>
+          <span class="muted">14 read-only · 1 opt-in write</span>
         </div>
         <div class="groups">
           {#each groups as g (g.label)}

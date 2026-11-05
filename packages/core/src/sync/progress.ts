@@ -12,6 +12,7 @@ import {
   BING_DATASETS,
   CF_CRAWLER_LOOKBACK_DAYS,
   CF_RUM_LOOKBACK_DAYS,
+  CF_SEARCH_CRAWLER_LOOKBACK_DAYS,
   loadSyncMeta,
   parseJson,
   syncKeys,
@@ -28,7 +29,7 @@ import {
  * - `done`: everything that can be synced is in.
  */
 export type SyncPhase = 'waiting' | 'recent' | 'history' | 'done';
-export type SyncDataset = 'gsc' | 'bing' | 'ai_crawlers' | 'web_analytics';
+export type SyncDataset = 'gsc' | 'bing' | 'ai_crawlers' | 'search_crawlers' | 'web_analytics';
 
 export interface DatasetProgress {
   dataset: SyncDataset;
@@ -87,6 +88,7 @@ const TASKS: Record<SyncDataset, string[]> = {
   gsc: ['gsc.search_analytics', 'gsc.backfill', 'gsc.sitemaps'],
   bing: [...BING_DATASETS],
   ai_crawlers: ['cloudflare.ai_crawlers'],
+  search_crawlers: ['cloudflare.search_crawlers'],
   web_analytics: ['cloudflare.web_analytics'],
 };
 
@@ -219,6 +221,14 @@ export async function syncProgress(ctx: ProgressContext): Promise<SyncProgressRe
     if (clients.cloudflare && site.cloudflareZoneId) {
       datasets.push(
         cloudflare(site, 'ai_crawlers', syncKeys.cfCrawlers(site.id), syncKeys.cfCrawlersFrom(site.id), CF_CRAWLER_LOOKBACK_DAYS, 1),
+        cloudflare(
+          site,
+          'search_crawlers',
+          syncKeys.cfSearchCrawlers(site.id),
+          syncKeys.cfSearchCrawlersFrom(site.id),
+          CF_SEARCH_CRAWLER_LOOKBACK_DAYS,
+          1,
+        ),
       );
     }
     if (clients.cloudflare && site.webAnalyticsSiteTag && config.cloudflare.accountId) {

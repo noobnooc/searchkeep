@@ -9,11 +9,16 @@ import type { IsoDate, SourceId } from '../types.js';
 
 /** How many days the Cloudflare GraphQL datasets keep data we backfill from. */
 export const CF_CRAWLER_LOOKBACK_DAYS = 30;
+export const CF_SEARCH_CRAWLER_LOOKBACK_DAYS = 30;
 export const CF_RUM_LOOKBACK_DAYS = 90;
 /** GSC: re-pull at least this many recent days to catch late data. */
 export const GSC_REPULL_DAYS = 4;
 /** GSC: never try to fill gaps further back than this in the daily job. */
 export const GSC_MAX_GAP_DAYS = 30;
+/** GSC country × device segments of queries and pages (opt-in) keep this much history. */
+export const GSC_SEGMENT_MONTHS = 3;
+/** Index coverage: a URL is inspected again once its last inspection is this old. */
+export const REINSPECT_DAYS = 7;
 
 /**
  * Days per request. Search Console and both Cloudflare datasets answer for a
@@ -22,6 +27,12 @@ export const GSC_MAX_GAP_DAYS = 30;
  * Cloudflare's ranges stay inside the datasets' maximum (30 and 93 days).
  */
 export const CHUNK_DAYS = { gsc: 30, cfCrawlers: 30, cfRum: 90 } as const;
+
+/**
+ * Search Console datasets besides web search, each with its own cursors (so
+ * they backfill on their own when a deployment starts syncing them).
+ */
+export type GscExtraDataset = 'image' | 'video' | 'news' | 'discover' | 'googleNews' | 'appearance' | 'segments';
 
 /** A range is cut to a third when it has to be split: 30 → 10 → 3 → 1 day. */
 export const shrinkChunk = (days: number) => Math.max(1, Math.floor(days / 3));
@@ -37,12 +48,24 @@ export const syncKeys = {
   /** Oldest GSC day pulled; the history backfill walks it back. */
   gscBackfill: (site: string) => `gsc:backfill:${site}`,
   gscSitemaps: (site: string) => `gsc:sitemaps:${site}`,
+  /** The same three cursors for the other Search Console datasets (search types, appearance, segments). */
+  gscExtraDaily: (dataset: GscExtraDataset, site: string) => `gsc:${dataset}:daily:${site}:progress`,
+  gscExtraBackfill: (dataset: GscExtraDataset, site: string) => `gsc:${dataset}:backfill:${site}`,
+  gscExtraChunk: (dataset: GscExtraDataset, site: string) => `gsc:${dataset}:chunk:${site}`,
+  /** Day the tracked index coverage URLs were last refreshed from the sitemaps. */
+  gscIndexUrls: (site: string) => `gsc:index_urls:${site}`,
+  /** URL inspections done today: `{ day, done }`. */
+  gscInspections: (site: string) => `gsc:inspections:${site}`,
   /** Day a Bing dataset was last refreshed. */
   bing: (dataset: string, site: string) => `${dataset}:${site}`,
   /** Newest Cloudflare AI crawler day synced (moves forward). */
   cfCrawlers: (site: string) => `cf:crawlers:${site}`,
   /** Oldest Cloudflare AI crawler day synced (the lookback walks it back). */
   cfCrawlersFrom: (site: string) => `cf:crawlers:from:${site}`,
+  /** Newest and oldest Cloudflare search engine crawler day synced. */
+  cfSearchCrawlers: (site: string) => `cf:search_crawlers:${site}`,
+  cfSearchCrawlersFrom: (site: string) => `cf:search_crawlers:from:${site}`,
+  cfSearchCrawlersChunk: (site: string) => `cf:search_crawlers:chunk:${site}`,
   cfRum: (site: string) => `cf:rum:${site}`,
   cfRumFrom: (site: string) => `cf:rum:from:${site}`,
   /** Days per request, when smaller than the default (stored after a range had to be split). */

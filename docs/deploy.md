@@ -85,22 +85,26 @@ are never shown, which is expected.
 
 ### Configuration reference
 
-| Secret                    | Required | Set in step | What                                                                                                                  |
-| ------------------------- | -------- | ----------- | --------------------------------------------------------------------------------------------------------------------- |
-| `ACCESS_TEAM_DOMAIN`      | yes      | 9           | Your Access team domain, for example `myteam.cloudflareaccess.com`                                                    |
-| `ACCESS_AUD`              | yes      | 9           | Application Audience (AUD) tag of the Access application                                                              |
-| `CLOUDFLARE_ACCOUNT_ID`   | yes      | 10          | Your Cloudflare account ID                                                                                            |
-| `CLOUDFLARE_API_TOKEN`    | yes      | 10          | Read-only API token (Account Analytics, Zone Analytics, Access: Apps and Policies); needed for the Access check       |
-| `SITES`                   | no       | 11          | JSON array describing your sites; optional, sites can be added in the dashboard instead                               |
-| `GSC_CLIENT_EMAIL`        | for GSC  | 12          | `client_email` from the service account key JSON                                                                      |
-| `GSC_PRIVATE_KEY`         | for GSC  | 12          | `private_key` from the service account key JSON (real line breaks or literal `\n`)                                    |
-| `BING_API_KEY`            | for Bing | 13          | Bing Webmaster Tools API key (treat it as a password)                                                                 |
-| `BRAND_REGEX`             | optional | 14          | Default brand regex, matched case-insensitively, for example `acme\|acme\s?corp`                                      |
-| `ENABLE_WRITES`           | optional | 14          | `true` to enable `submit_sitemap` (requires GSC **Full** permission)                                                  |
-| `GSC_ROWS_PER_DAY`        | optional | 14          | Max query × page rows stored per day from GSC, 100–100000. Default `2500`                                             |
-| `GSC_BACKFILL_MONTHS`     | optional | 14          | Months of GSC history to backfill, 0–16. Default `16`                                                                 |
-| `SYNC_DAILY_WRITE_BUDGET` | optional | 14          | Max rows history (GSC backfill, Cloudflare lookback) writes per UTC day. Default `80000` (D1 Free allows 100000)      |
-| `SYNC_MAX_CALLS_PER_RUN`  | optional | 14          | Max outbound API calls per sync pass, 5–900. Default `35` (Workers Free allows 50); on Workers Paid use `100` or more |
+| Secret                    | Required | Set in step | What                                                                                                                   |
+| ------------------------- | -------- | ----------- | ---------------------------------------------------------------------------------------------------------------------- |
+| `ACCESS_TEAM_DOMAIN`      | yes      | 9           | Your Access team domain, for example `myteam.cloudflareaccess.com`                                                     |
+| `ACCESS_AUD`              | yes      | 9           | Application Audience (AUD) tag of the Access application                                                               |
+| `CLOUDFLARE_ACCOUNT_ID`   | yes      | 10          | Your Cloudflare account ID                                                                                             |
+| `CLOUDFLARE_API_TOKEN`    | yes      | 10          | Read-only API token (Account Analytics, Zone Analytics, Access: Apps and Policies); needed for the Access check        |
+| `SITES`                   | no       | 11          | JSON array describing your sites; optional, sites can be added in the dashboard instead                                |
+| `GSC_CLIENT_EMAIL`        | for GSC  | 12          | `client_email` from the service account key JSON                                                                       |
+| `GSC_PRIVATE_KEY`         | for GSC  | 12          | `private_key` from the service account key JSON (real line breaks or literal `\n`)                                     |
+| `BING_API_KEY`            | for Bing | 13          | Bing Webmaster Tools API key (treat it as a password)                                                                  |
+| `BRAND_REGEX`             | optional | 14          | Default brand regex, matched case-insensitively, for example `acme\|acme\s?corp`                                       |
+| `ENABLE_WRITES`           | optional | 14          | `true` to enable `submit_sitemap` (requires GSC **Full** permission)                                                   |
+| `GSC_ROWS_PER_DAY`        | optional | 14          | Max query × page rows stored per day from GSC, 100–100000. Default `2500`                                              |
+| `GSC_BACKFILL_MONTHS`     | optional | 14          | Months of GSC history to backfill, 0–16. Default `16`                                                                  |
+| `SYNC_DAILY_WRITE_BUDGET` | optional | 14          | Max rows history (GSC backfill, Cloudflare lookback) writes per UTC day. Default `80000` (D1 Free allows 100000)       |
+| `SYNC_MAX_CALLS_PER_RUN`  | optional | 14          | Max outbound API calls per sync pass, 5–900. Default `35` (Workers Free allows 50); on Workers Paid use `100` or more  |
+| `GSC_SEARCH_TYPES`        | optional | 14          | Search Console search types synced besides web search. Default `image,video,news,discover,googleNews`; `none` for none |
+| `GSC_SEARCH_APPEARANCE`   | optional | 14          | `false` to stop syncing search appearance (rich results, videos, ...). Default `true`                                  |
+| `GSC_SEGMENT_SITES`       | optional | 14          | Site ids (comma-separated) or `all` whose queries and pages are also synced per country and device. Default none       |
+| `GSC_INSPECTIONS_PER_DAY` | optional | 14          | URL inspections per site and day for index coverage, 0–2000. Default `200`; `0` turns index coverage off               |
 
 `CLOUDFLARE_ACCOUNT_ID` and `CLOUDFLARE_API_TOKEN` are required even if you use no Cloudflare data:
 they are how Searchkeep checks your Access setup. Values that do not parse (invalid JSON in `SITES`,
@@ -679,6 +683,16 @@ The output lists your sites, including each `bingSiteUrl` from `SITES`.
   Paid includes 50 million rows written a month). Change them only if you have a reason, for example a lower
   `GSC_ROWS_PER_DAY` when sync units keep being skipped (see
   [Troubleshooting](#sync-is-slow-or-units-are-skipped)).
+- **More Search Console data**: `GSC_SEARCH_TYPES` (default all five: `image`, `video`, `news` for
+  the News tab, `discover`, `googleNews`) and `GSC_SEARCH_APPEARANCE` (default `true`) need nothing
+  else; a search type without traffic costs one call per 30 days. `GSC_SEGMENT_SITES` (default off)
+  also syncs each site's top 1,000 queries and pages per day by country and device, for the last 3
+  months, so `query_performance` can answer "top queries in the US" or "top pages on mobile". It
+  writes the most rows of these options: set it only for the sites you need it for.
+- **Index coverage**: `GSC_INSPECTIONS_PER_DAY` (default `200`) is how many sitemap URLs per site
+  and day are inspected with the URL Inspection API (2,000 per property and day; `inspect_url`
+  uses the same quota). It needs no new permission: the service account's Restricted access is
+  enough. Set `0` to turn it off.
 
 **Verify:** `wrangler secret list` shows the names you set. `setup_status` reports whether writes are
 enabled.
@@ -781,9 +795,19 @@ How the sync works:
   and Web Analytics with Web Vitals (a new site starts with yesterday). This work goes round-robin
   over the sites, so with many sites each one gets its latest days early instead of waiting for all
   the sites before it.
+- **Then the other datasets' latest days:** Search Console's other search types
+  (`GSC_SEARCH_TYPES`), search appearance and, for `GSC_SEGMENT_SITES`, the country × device
+  segments, plus search engine crawler requests from Cloudflare. Each dataset keeps its own cursors,
+  so one added by an upgrade backfills on its own without re-pulling the others.
 - **Then history, for all sites at once, newest day first:** GSC history back 16 months
-  (`GSC_BACKFILL_MONTHS`), Cloudflare AI crawler requests back 30 days and Web Analytics back 90
-  days. Every site moves back in time together. A small site's full history takes a few dozen
+  (`GSC_BACKFILL_MONTHS`; 3 months for the segments), Cloudflare AI and search engine crawler
+  requests back 30 days and Web Analytics back 90 days. Every site moves back in time together.
+- **Index coverage last, with the calls left over:** once a day the URLs of the sitemaps Search
+  Console knows are read from your site (at most 25 sitemap files and 5,000 URLs per site; URLs
+  outside the property are skipped), then up to `GSC_INSPECTIONS_PER_DAY` URLs are inspected, the
+  ones never inspected first and then those inspected longest ago (each again after about 7 days).
+  This work never makes a pass `partial`, and reaching the URL Inspection quota stops it for the
+  day without pausing the rest of Search Console. A small site's full history takes a few dozen
   requests; on the free D1 write quota, sites with a lot of data take days.
 - **Rate limits pause a source, not the sync:** when an API rate-limits Searchkeep (Bing answers
   `ThrottleUser`), that source is paused for every site for 30 minutes, doubling on each repeat up
@@ -909,8 +933,9 @@ hostname. The zone must be active in the same Cloudflare account as the Worker.
 
 ### Cloudflare data is empty
 
-- **AI crawler data:** the site must be proxied through Cloudflare (orange cloud), and the API token's
-  zone resources must include its zone. On Free plans, crawlers are identified by user agent only.
+- **AI and search engine crawler data:** the site must be proxied through Cloudflare (orange
+  cloud), and the API token's zone resources must include its zone. On Free plans, crawlers are
+  identified by user agent only, so requests that fake Googlebot's user agent count as Googlebot.
   Cloudflare's GraphQL API keeps at least 31 days of HTTP request data, so the first sync goes back
   30 days; older crawler traffic cannot be recovered.
 - **Web Analytics:** `webAnalyticsSiteTag` must be the site tag, not the snippet token, and
@@ -932,6 +957,23 @@ cloudflared access curl "https://<your-domain>/api/import/ai-citations?site=<id>
 Columns are detected by name: a URL or page column, a citations column, and an optional date column
 (without one, every row gets `date`, today by default). The response reports how many rows were
 imported and skipped.
+
+### Index coverage stays empty
+
+**Who:** Agent or human.
+
+- `index_coverage` lists URLs only from sitemaps Search Console knows: `list_sitemaps` must show at
+  least one. Submit one in Search Console (**Sitemaps**) if it shows none.
+- The Worker reads the sitemaps from your site once a day, as `Searchkeep sitemap reader`. If a bot
+  protection (Bot Fight Mode, a WAF rule, a challenge) blocks it, the URLs are not found: allow that
+  user agent for the sitemap paths, or exempt them. Only sitemaps on the site's own domain and its
+  subdomains are read.
+- Inspections use the calls each pass has left over, so on Workers Free they start once the first
+  sync is mostly done. `index_coverage` reports how many URLs are still waiting.
+- `GSC_INSPECTIONS_PER_DAY=0` turns it off.
+
+**Verify:** `index_coverage` reports `totals.urls` greater than 0 the day after a sitemap is listed,
+and `totals.inspected` grows each day.
 
 ### Sync is slow or units are skipped
 

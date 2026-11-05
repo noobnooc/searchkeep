@@ -1,27 +1,46 @@
 import type { SearchkeepConfig } from '../config.js';
 import { classifyBrandQueries } from '../brand.js';
-import { AI_CRAWLERS, classifyCrawler } from '../crawlers.js';
+import { segmentsEnabled } from '../config.js';
+import { AI_CRAWLERS, classifyCrawler, classifySearchCrawler, SEARCH_CRAWLERS, type CrawlerSignature } from '../crawlers.js';
 import { addDays, addMonths, toIsoDate } from '../dates.js';
 import { safeMessage } from '../errors.js';
-import { isRateLimited } from '../http.js';
-import type { GscRow, SourceClients } from '../sources.js';
+import { isRateLimited, SourceError } from '../http.js';
+import type { GscClient, GscRow, GscSearchAnalyticsRequest, GscUrlInspection, SitemapReader, SourceClients } from '../sources.js';
 import type { Store } from '../store.js';
-import type { CrawlerRequestInput, DateRange, IsoDate, SearchFactInput, SourceId, SyncRunRecord, SyncTaskResult } from '../types.js';
+import {
+  PAGE_ONLY_SEARCH_TYPES,
+  type AppearanceInput,
+  type CrawlerKind,
+  type CrawlerRequestInput,
+  type DateRange,
+  type GscSearchType,
+  type IsoDate,
+  type SearchFactInput,
+  type SegmentInput,
+  type SiteConfig,
+  type SourceId,
+  type SyncRunRecord,
+  type SyncTaskResult,
+  type UrlInspectionInput,
+} from '../types.js';
 import { normalizePage } from '../url.js';
 import {
   activeBackoff,
   BING_DATASETS,
   CF_CRAWLER_LOOKBACK_DAYS,
   CF_RUM_LOOKBACK_DAYS,
+  CF_SEARCH_CRAWLER_LOOKBACK_DAYS,
   CHUNK_DAYS,
   errorDelay,
   formatUntil,
   GSC_MAX_GAP_DAYS,
   GSC_REPULL_DAYS,
+  GSC_SEGMENT_MONTHS,
   loadSyncMeta,
   parseJson,
   pruneBackoff,
   rateLimitDelay,
+  REINSPECT_DAYS,
   shrinkChunk,
   SOURCE_NAMES,
   sourceBackoffKey,
@@ -29,6 +48,7 @@ import {
   taskBackoffKey,
   type BackoffMap,
   type GscDailyProgress,
+  type GscExtraDataset,
   type LastRunMeta,
 } from './state.js';
 
@@ -72,7 +92,8 @@ interface Unit {
   calls: number;
   /** Stable id used to detect invocations killed mid-unit (e.g. CPU limit). */
   key: string;
-  run: () => Promise<number>;
+  /** Rows written; null when there turned out to be nothing to do (the unit is then not reported). */
+  run: () => Promise<number | null>;
   /**
    * Gives up on this unit after repeated interruptions: a range is split for the next run
    * (returning what was done), a single day is passed over.
@@ -80,6 +101,13 @@ interface Unit {
   skip: () => Promise<string | void>;
   /** Splits a multi-day range after an error; false for a single day. */
   shrink?: () => Promise<boolean>;
+  /** Also split the range when it needed more calls than one run allows (default true; false when calls do not depend on days). */
+  splitOnBudget?: boolean;
+  /**
+   * Spare-capacity work (index coverage): runs only with calls and time left over after
+   * everything else, and never makes a run partial when it stops for lack of either.
+   */
+  idle?: boolean;
 }
 
 /** The call budget shared by every unit of a run. */
@@ -88,6 +116,10 @@ interface Budget {
   spend(source: SourceId): void;
   /** Hands back reserved calls a unit did not need. */
   refund(source: SourceId, calls: number): void;
+  /** Calls still left in this run. */
+  left(): number;
+  /** True once the run's time budget is spent. */
+  expired(): boolean;
 }
 
 /** The range had too many rows for one request: it was split, and the next run continues with smaller ranges. */
@@ -213,9 +245,11 @@ export async function runSync(ctx: SyncContext): Promise<SyncRunRecord> {
         callsLeft += calls;
         sourceCalls.set(source, Math.max(0, (sourceCalls.get(source) ?? 0) - calls));
       },
+      left: () => callsLeft,
+      expired: () => Date.now() - started > timeBudget,
     };
     const retried = new Set<SourceId>();
-    const units = await planUnits(ctx, today, budget);
+    const units = await planUnits(ctx, today, nowMs, budget);
     // Any write of the loop (progress markers, cursors, backoff) may find the database busy too.
     try {
       for (const unit of units) {
@@ -235,11 +269,11 @@ export async function runSync(ctx: SyncContext): Promise<SyncRunRecord> {
           continue;
         }
         if (Date.now() - started > timeBudget) {
-          stoppedFor = 'time budget reached';
+          if (!unit.idle) stoppedFor = 'time budget reached';
           break;
         }
         if (unit.calls > callsLeft) {
-          stoppedFor = 'API call budget reached';
+          if (!unit.idle) stoppedFor = 'API call budget reached';
           break;
         }
         const cap = SOURCE_CALLS_PER_RUN[unit.source];
@@ -283,10 +317,11 @@ export async function runSync(ctx: SyncContext): Promise<SyncRunRecord> {
         callsLeft -= unit.calls;
         sourceCalls.set(unit.source, (sourceCalls.get(unit.source) ?? 0) + unit.calls);
         try {
-          const rows = await unit.run();
+          const out = await unit.run();
+          const rows = out ?? 0;
           rowsWritten += rows;
           writesToday += rows;
-          record(unit, 'ok', rows);
+          if (out !== null) record(unit, 'ok', rows);
           // Spread large writes out: D1 limits the work one database does per 10 seconds.
           if (rows > 1_000) await sleep(Math.min(3_000, rows * WRITE_PAUSE_MS_PER_ROW));
           await store.deleteMeta(INFLIGHT_KEY);
@@ -307,10 +342,16 @@ export async function runSync(ctx: SyncContext): Promise<SyncRunRecord> {
           await store.deleteMeta(INFLIGHT_KEY);
           inflight = null;
           if (err instanceof BudgetExceeded) {
+            if (unit.idle) break;
             stoppedFor = 'API call budget reached';
             // A range that ran out after half a run's budget or more might never fit one: split it, so
             // it can finish. One that ran out with little budget left gets more once earlier work is done.
-            if ((callsBefore - callsLeft) * 2 >= config.sync.maxCallsPerRun && unit.shrink && (await unit.shrink())) {
+            if (
+              (callsBefore - callsLeft) * 2 >= config.sync.maxCallsPerRun &&
+              unit.splitOnBudget !== false &&
+              unit.shrink &&
+              (await unit.shrink())
+            ) {
               record(unit, 'skipped', 0, 'Needs more calls than one run allows; continues with shorter ranges.');
             }
             break;
@@ -442,201 +483,223 @@ function spanDays(range: DateRange): number {
 const minDate = (a: IsoDate, b: IsoDate) => (a < b ? a : b);
 const maxDate = (a: IsoDate, b: IsoDate) => (a > b ? a : b);
 
-async function planUnits(ctx: SyncContext, today: IsoDate, budget: Budget): Promise<Unit[]> {
+async function planUnits(ctx: SyncContext, today: IsoDate, nowMs: number, budget: Budget): Promise<Unit[]> {
   const { config, clients, store } = ctx;
   const meta = await loadSyncMeta(store);
   const get = (key: string): string | null => meta[key] ?? null;
   const increments: Unit[][] = [];
+  const extraIncrements: Unit[][] = [];
+  const spareWork: Unit[][] = [];
   const history: Unit[] = [];
   const yesterday = addDays(today, -1);
 
   for (const site of config.sites) {
+    // Tiers: web search, Bing and the main Cloudflare datasets first; then the other datasets.
     const daily: Unit[] = [];
+    const extras: Unit[] = [];
+    const spare: Unit[] = [];
     increments.push(daily);
+    extraIncrements.push(extras);
+    spareWork.push(spare);
 
     // ---------------- Google Search Console ----------------
     if (clients.gsc && site.gscProperty) {
       const gsc = clients.gsc;
       const property = site.gscProperty;
       const rowsPerDay = config.gsc.rowsPerDay;
-      const chunkKey = syncKeys.gscChunk(site.id);
-      const chunk = Math.max(1, Math.min(CHUNK_DAYS.gsc, Number(get(chunkKey)) || CHUNK_DAYS.gsc));
-      const splitRange = async (days: number): Promise<boolean> => {
-        if (days <= 1) return false;
-        await store.setMeta(chunkKey, String(shrinkChunk(Math.min(days, chunk))));
-        return true;
-      };
       /** Rows one request may return: as before for one day; for a range at most 10,000 and a tenth of the daily write budget. */
       const pageRows = Math.min(25_000, rowsPerDay);
-      const rangeCap = (days: number) =>
-        Math.max(rowsPerDay, Math.min(rowsPerDay * days, Math.floor(config.sync.dailyWriteBudget / 10), MAX_ROWS_PER_REQUEST));
-      // Totals, the first country × device page and the first query × page page.
-      const reserved = 3;
+      const rangeCap = (days: number, perDay = rowsPerDay) =>
+        Math.max(perDay, Math.min(perDay * days, Math.floor(config.sync.dailyWriteBudget / 10), MAX_ROWS_PER_REQUEST));
+      let latestWeb: Promise<IsoDate | null> | undefined;
+
+      type Req = Omit<GscSearchAnalyticsRequest, 'property' | 'startDate' | 'endDate' | 'rowLimit' | 'startRow'>;
+      const query = (range: DateRange, req: Req, rowLimit: number, startRow = 0) =>
+        gsc.searchAnalytics({ property, startDate: range.start, endDate: range.end, rowLimit, startRow, ...req });
 
       /** All pages of one request, up to `cap` rows; `complete` is false when more rows were left. */
-      const pages = async (
-        range: DateRange,
-        dimensions: Array<'date' | 'query' | 'page' | 'country' | 'device'>,
-        size: number,
-        cap: number,
-      ) => {
+      const pages = async (range: DateRange, req: Req, size: number, cap: number) => {
         const rows: GscRow[] = [];
         for (let startRow = 0; ; startRow += size) {
           if (startRow > 0) budget.spend('gsc');
-          const page = await gsc.searchAnalytics({
-            property,
-            startDate: range.start,
-            endDate: range.end,
-            dimensions,
-            rowLimit: size,
-            startRow,
-          });
+          const page = await query(range, req, size, startRow);
           rows.push(...page);
           if (page.length < size) return { rows, complete: true };
           if (rows.length >= cap) return { rows, complete: false };
         }
       };
 
-      /**
-       * One request set for the days of `range`: totals per day, country × device and query × page,
-       * each with one row per day. Returns null when the range has more rows than one request may
-       * return; nothing is written then and the caller splits the range.
-       */
-      const pullRange = async (range: DateRange): Promise<number | null> => {
-        const totals = await gsc.searchAnalytics({
-          property,
-          startDate: range.start,
-          endDate: range.end,
-          dimensions: ['date'],
-          rowLimit: 25_000,
-        });
-        // No impressions in the whole range (or not final yet): the other breakdowns are empty too.
-        // Common for the latest days (GSC lags 2-3 days) and for the older history of small sites.
-        if (totals.length === 0) {
-          budget.refund('gsc', reserved - 1);
-          return 0;
-        }
-        const days = new Set(totals.map((r) => r.keys[0]!)).size;
-        const breakdowns = await pages(range, ['date', 'country', 'device'], MAX_ROWS_PER_REQUEST, MAX_ROWS_PER_REQUEST);
-        const queryPages = await pages(range, ['date', 'query', 'page'], pageRows, rangeCap(days));
-        // One day keeps the top rows like it always has; a longer range is split instead.
-        if (spanDays(range) > 1 && (!queryPages.complete || !breakdowns.complete)) return null;
-
-        // At most GSC_ROWS_PER_DAY query × page rows per day, the most clicked first.
+      /** At most `perDay` rows per day (keys[0] is the date), the most clicked first. */
+      const topPerDay = (rows: GscRow[], perDay: number): GscRow[] => {
         const byDay = new Map<string, GscRow[]>();
-        for (const r of queryPages.rows) {
+        for (const r of rows) {
           const list = byDay.get(r.keys[0]!) ?? [];
           list.push(r);
           byDay.set(r.keys[0]!, list);
         }
-        const facts: SearchFactInput[] = [];
+        const out: GscRow[] = [];
         for (const list of byDay.values()) {
           list.sort((a, b) => b.clicks - a.clicks || b.impressions - a.impressions);
-          for (const r of list.slice(0, rowsPerDay)) {
-            facts.push({
-              date: r.keys[0]!,
-              kind: 'query_page',
-              query: r.keys[1]!,
-              page: normalizePage(r.keys[2]!, site.domain),
-              clicks: r.clicks,
-              impressions: r.impressions,
-              position: r.position,
-            });
-          }
+          out.push(...list.slice(0, perDay));
         }
-        let written = await store.writeSearchFacts(
-          site.id,
-          'gsc',
-          totals.map((r) => ({ date: r.keys[0]!, kind: 'total', clicks: r.clicks, impressions: r.impressions, position: r.position })),
-        );
-        written += await store.writeBreakdowns(
-          site.id,
-          'gsc',
-          breakdowns.rows.map((r) => ({
+        return out;
+      };
+
+      /**
+       * One Search Console dataset: a daily increment (the most recent days plus any recent gap)
+       * and a history backfill, newest to oldest, `chunk` days per request. Each dataset keeps
+       * its own cursors, so a dataset added later backfills on its own. `pull` returns the rows
+       * written, or null when the range has more rows than one request set may return: nothing
+       * is written then and the range is split for the next run.
+       */
+      const dataset = (opts: {
+        task: string;
+        historyTask: string;
+        keys: { daily: string; backfill: string; chunk: string };
+        months: number;
+        /** Calls reserved per range; extra pages take more from the budget as they go. */
+        calls: number;
+        /** Web search goes first; the other datasets follow every site's web increment. */
+        tier: Unit[];
+        splitOnBudget?: boolean;
+        pull: (range: DateRange) => Promise<number | null>;
+      }) => {
+        const chunk = Math.max(1, Math.min(CHUNK_DAYS.gsc, Number(get(opts.keys.chunk)) || CHUNK_DAYS.gsc));
+        const splitRange = async (days: number): Promise<boolean> => {
+          if (days <= 1) return false;
+          await store.setMeta(opts.keys.chunk, String(shrinkChunk(Math.min(days, chunk))));
+          return true;
+        };
+        /** A unit for one range: `done` records it; a range with too many rows is split for the next run. */
+        const rangeUnit = (task: string, range: DateRange, isHistory: boolean, done: () => Promise<void>): Unit => {
+          const days = spanDays(range);
+          const label = `${range.start}..${range.end}`;
+          return {
+            task,
+            siteId: site.id,
+            source: 'gsc',
+            backfill: isHistory,
+            ...(isHistory ? { date: range.end } : {}),
+            calls: opts.calls,
+            key: `${task}:${site.id}:${label}`,
+            run: async () => {
+              const n = await opts.pull(range);
+              if (n === null) {
+                await splitRange(days);
+                throw new Replan(`More Search Console rows for ${label} than one request may return; continues with shorter ranges.`);
+              }
+              await done();
+              return n;
+            },
+            skip: async () => {
+              if (await splitRange(days)) return `Interrupted 3 times on ${label}; continues with shorter ranges.`;
+              await done();
+            },
+            shrink: () => splitRange(days),
+            ...(opts.splitOnBudget === false ? { splitOnBudget: false } : {}),
+          };
+        };
+        return (async () => {
+          const progress = parseJson<GscDailyProgress>(get(opts.keys.daily));
+          let pending: IsoDate[];
+          let ready: boolean;
+          if (progress && progress.day === today) {
+            pending = progress.pending;
+            ready = progress.ready ?? pending.length === 0;
+          } else {
+            const latest = await (latestWeb ??= store.latestDate(site.id, 'gsc'));
+            let start = addDays(today, -GSC_REPULL_DAYS);
+            if (latest && addDays(latest, -3) < start) start = addDays(latest, -3);
+            const floor = addDays(today, -GSC_MAX_GAP_DAYS);
+            if (start < floor) start = floor;
+            pending = [];
+            for (let d = yesterday; d >= start; d = addDays(d, -1)) pending.push(d);
+            // A site that synced on an earlier day had its first increment then (older records carry no flag).
+            ready = progress ? (progress.ready ?? true) : false;
+            await store.setMeta(opts.keys.daily, JSON.stringify({ day: today, pending, ready } satisfies GscDailyProgress));
+            // The backfill cursor starts where the first increment begins.
+            if (!get(opts.keys.backfill)) {
+              await store.setMeta(opts.keys.backfill, start);
+              meta[opts.keys.backfill] = start;
+            }
+          }
+          // The pending days are consecutive, newest first: one request per `chunk` days.
+          for (let i = 0; i < pending.length; i += chunk) {
+            const group = pending.slice(i, i + chunk);
+            const range = { start: group[group.length - 1]!, end: group[0]! };
+            const done = async () => {
+              pending = pending.filter((d) => !group.includes(d));
+              if (pending.length === 0) ready = true;
+              await store.setMeta(opts.keys.daily, JSON.stringify({ day: today, pending, ready } satisfies GscDailyProgress));
+            };
+            opts.tier.push(rangeUnit(opts.task, range, false, done));
+          }
+          // History, newest to oldest.
+          const target = addMonths(today, -opts.months);
+          const cursor = get(opts.keys.backfill);
+          if (cursor && cursor > target) {
+            let end = addDays(cursor, -1);
+            for (let i = 0; i < GSC_HISTORY_UNITS_PER_RUN && end >= target; i++) {
+              const range = { start: maxDate(target, addDays(end, -(chunk - 1))), end };
+              history.push(rangeUnit(opts.historyTask, range, true, () => store.setMeta(opts.keys.backfill, range.start)));
+              end = addDays(range.start, -1);
+            }
+          }
+        })();
+      };
+
+      // Web search: totals per day, country × device and query × page, each with one row per day.
+      // A range without impressions (the latest days, GSC lags 2-3 days; old history of small sites)
+      // costs only the totals call.
+      const reservedWeb = 3;
+      await dataset({
+        task: 'gsc.search_analytics',
+        historyTask: 'gsc.backfill',
+        keys: { daily: syncKeys.gscDaily(site.id), backfill: syncKeys.gscBackfill(site.id), chunk: syncKeys.gscChunk(site.id) },
+        months: config.sync.backfillMonths,
+        calls: reservedWeb,
+        tier: daily,
+        pull: async (range) => {
+          const totals = await query(range, { dimensions: ['date'] }, 25_000);
+          if (totals.length === 0) {
+            budget.refund('gsc', reservedWeb - 1);
+            return 0;
+          }
+          const days = new Set(totals.map((r) => r.keys[0]!)).size;
+          const breakdowns = await pages(range, { dimensions: ['date', 'country', 'device'] }, MAX_ROWS_PER_REQUEST, MAX_ROWS_PER_REQUEST);
+          const queryPages = await pages(range, { dimensions: ['date', 'query', 'page'] }, pageRows, rangeCap(days));
+          // One day keeps the top rows like it always has; a longer range is split instead.
+          if (spanDays(range) > 1 && (!queryPages.complete || !breakdowns.complete)) return null;
+          const facts: SearchFactInput[] = topPerDay(queryPages.rows, rowsPerDay).map((r) => ({
             date: r.keys[0]!,
-            country: r.keys[1]!,
-            device: r.keys[2]!,
+            kind: 'query_page',
+            query: r.keys[1]!,
+            page: normalizePage(r.keys[2]!, site.domain),
             clicks: r.clicks,
             impressions: r.impressions,
             position: r.position,
-          })),
-        );
-        written += await store.writeSearchFacts(site.id, 'gsc', facts);
-        return written;
-      };
-
-      /** A unit for one range: `done` records it; a range with too many rows is split for the next run. */
-      const rangeUnit = (opts: {
-        task: string;
-        range: DateRange;
-        history: boolean;
-        done: () => Promise<void>;
-        passOver: () => Promise<void>;
-      }): Unit => {
-        const days = spanDays(opts.range);
-        const label = `${opts.range.start}..${opts.range.end}`;
-        return {
-          task: opts.task,
-          siteId: site.id,
-          source: 'gsc',
-          backfill: opts.history,
-          ...(opts.history ? { date: opts.range.end } : {}),
-          calls: reserved,
-          key: `${opts.task}:${site.id}:${label}`,
-          run: async () => {
-            const n = await pullRange(opts.range);
-            if (n === null) {
-              await splitRange(days);
-              throw new Replan(`More Search Console rows for ${label} than one request may return; continues with shorter ranges.`);
-            }
-            await opts.done();
-            return n;
-          },
-          skip: async () => {
-            if (await splitRange(days)) return `Interrupted 3 times on ${label}; continues with shorter ranges.`;
-            await opts.passOver();
-          },
-          shrink: () => splitRange(days),
-        };
-      };
-
-      // Daily increment: re-pull the most recent days plus any recent gap.
-      const progressKey = syncKeys.gscDaily(site.id);
-      const backfillKey = syncKeys.gscBackfill(site.id);
-      const progress = parseJson<GscDailyProgress>(get(progressKey));
-      let pending: IsoDate[];
-      let ready: boolean;
-      if (progress && progress.day === today) {
-        pending = progress.pending;
-        ready = progress.ready ?? pending.length === 0;
-      } else {
-        const latest = await store.latestDate(site.id, 'gsc');
-        let start = addDays(today, -GSC_REPULL_DAYS);
-        if (latest && addDays(latest, -3) < start) start = addDays(latest, -3);
-        const floor = addDays(today, -GSC_MAX_GAP_DAYS);
-        if (start < floor) start = floor;
-        pending = [];
-        for (let d = yesterday; d >= start; d = addDays(d, -1)) pending.push(d);
-        // A site that synced on an earlier day had its first increment then (older records carry no flag).
-        ready = progress ? (progress.ready ?? true) : false;
-        await store.setMeta(progressKey, JSON.stringify({ day: today, pending, ready } satisfies GscDailyProgress));
-        // The backfill cursor starts where the first increment begins.
-        if (!get(backfillKey)) {
-          await store.setMeta(backfillKey, start);
-          meta[backfillKey] = start;
-        }
-      }
-      // The pending days are consecutive, newest first: one request per `chunk` days.
-      for (let i = 0; i < pending.length; i += chunk) {
-        const group = pending.slice(i, i + chunk);
-        const range = { start: group[group.length - 1]!, end: group[0]! };
-        const done = async () => {
-          pending = pending.filter((d) => !group.includes(d));
-          if (pending.length === 0) ready = true;
-          await store.setMeta(progressKey, JSON.stringify({ day: today, pending, ready } satisfies GscDailyProgress));
-        };
-        daily.push(rangeUnit({ task: 'gsc.search_analytics', range, history: false, done, passOver: done }));
-      }
+          }));
+          let written = await store.writeSearchFacts(
+            site.id,
+            'gsc',
+            totals.map((r) => ({ date: r.keys[0]!, kind: 'total', clicks: r.clicks, impressions: r.impressions, position: r.position })),
+          );
+          written += await store.writeBreakdowns(
+            site.id,
+            'gsc',
+            breakdowns.rows.map((r) => ({
+              date: r.keys[0]!,
+              country: r.keys[1]!,
+              device: r.keys[2]!,
+              clicks: r.clicks,
+              impressions: r.impressions,
+              position: r.position,
+            })),
+          );
+          written += await store.writeSearchFacts(site.id, 'gsc', facts);
+          return written;
+        },
+      });
 
       // Sitemaps snapshot once a day.
       if (get(syncKeys.gscSitemaps(site.id)) !== today) {
@@ -657,17 +720,142 @@ async function planUnits(ctx: SyncContext, today: IsoDate, budget: Budget): Prom
         });
       }
 
-      // History backfill, newest to oldest, `chunk` days per request.
-      const target = addMonths(today, -config.sync.backfillMonths);
-      const cursor = get(backfillKey);
-      if (cursor && cursor > target) {
-        let end = addDays(cursor, -1);
-        for (let i = 0; i < GSC_HISTORY_UNITS_PER_RUN && end >= target; i++) {
-          const range = { start: maxDate(target, addDays(end, -(chunk - 1))), end };
-          const advance = () => store.setMeta(backfillKey, range.start);
-          history.push(rangeUnit({ task: 'gsc.backfill', range, history: true, done: advance, passOver: advance }));
-          end = addDays(range.start, -1);
-        }
+      const extraKeys = (d: GscExtraDataset) => ({
+        daily: syncKeys.gscExtraDaily(d, site.id),
+        backfill: syncKeys.gscExtraBackfill(d, site.id),
+        chunk: syncKeys.gscExtraChunk(d, site.id),
+      });
+
+      // Other search types (image, video, News tab, Discover, Google News): totals per day and
+      // query × page (Discover and Google News: page only; they have no queries and no position).
+      for (const type of config.gsc.searchTypes) {
+        const pageOnly = PAGE_ONLY_SEARCH_TYPES.includes(type);
+        const reserved = 2;
+        await dataset({
+          task: `gsc.${type}`,
+          historyTask: `gsc.${type}_backfill`,
+          keys: extraKeys(type as GscExtraDataset),
+          months: config.sync.backfillMonths,
+          calls: reserved,
+          tier: extras,
+          pull: async (range) => {
+            const totals = await query(range, { dimensions: ['date'], type }, 25_000);
+            if (totals.length === 0) {
+              budget.refund('gsc', reserved - 1);
+              return 0;
+            }
+            const days = new Set(totals.map((r) => r.keys[0]!)).size;
+            const detail = await pages(
+              range,
+              { dimensions: pageOnly ? ['date', 'page'] : ['date', 'query', 'page'], type },
+              pageRows,
+              rangeCap(days),
+            );
+            if (spanDays(range) > 1 && !detail.complete) return null;
+            const position = (r: GscRow) => (pageOnly || !(r.position > 0) ? null : r.position);
+            const facts: SearchFactInput[] = topPerDay(detail.rows, rowsPerDay).map((r) =>
+              pageOnly
+                ? {
+                    date: r.keys[0]!,
+                    kind: 'page',
+                    page: normalizePage(r.keys[1]!, site.domain),
+                    clicks: r.clicks,
+                    impressions: r.impressions,
+                  }
+                : {
+                    date: r.keys[0]!,
+                    kind: 'query_page',
+                    query: r.keys[1]!,
+                    page: normalizePage(r.keys[2]!, site.domain),
+                    clicks: r.clicks,
+                    impressions: r.impressions,
+                    position: position(r),
+                  },
+            );
+            let written = await store.writeSearchFacts(
+              site.id,
+              'gsc',
+              totals.map((r) => ({ date: r.keys[0]!, kind: 'total', clicks: r.clicks, impressions: r.impressions, position: position(r) })),
+              type,
+            );
+            written += await store.writeSearchFacts(site.id, 'gsc', facts, type);
+            return written;
+          },
+        });
+      }
+
+      // Search appearance (web search). Search Console reports it only on its own, so it takes two
+      // steps: the appearances of the range, then one daily series per appearance.
+      if (config.gsc.searchAppearance) {
+        // The calls depend on the number of appearances, not on the days: never split for the budget,
+        // and leave room in one run for the list and the series.
+        const maxSeries = Math.max(1, config.sync.maxCallsPerRun - 2);
+        await dataset({
+          task: 'gsc.appearance',
+          historyTask: 'gsc.appearance_backfill',
+          keys: extraKeys('appearance'),
+          months: config.sync.backfillMonths,
+          calls: 1,
+          tier: extras,
+          splitOnBudget: false,
+          pull: async (range) => {
+            const list = await query(range, { dimensions: ['searchAppearance'] }, 1_000);
+            const rows: AppearanceInput[] = [];
+            for (const a of list.slice(0, maxSeries)) {
+              const appearance = a.keys[0]!;
+              budget.spend('gsc');
+              const series = await query(range, { dimensions: ['date'], searchAppearance: appearance }, 25_000);
+              for (const r of series) {
+                rows.push({ date: r.keys[0]!, appearance, clicks: r.clicks, impressions: r.impressions, position: r.position });
+              }
+            }
+            return store.writeSearchAppearances(site.id, 'web', rows);
+          },
+        });
+      }
+
+      // Opt-in: query and page rows per country and device, for a shorter history (row volume).
+      if (segmentsEnabled(config, site.id)) {
+        const perDay = Math.min(rowsPerDay, SEGMENT_ROWS_PER_DAY);
+        await dataset({
+          task: 'gsc.segments',
+          historyTask: 'gsc.segments_backfill',
+          keys: extraKeys('segments'),
+          months: Math.min(config.sync.backfillMonths, GSC_SEGMENT_MONTHS),
+          calls: 2,
+          tier: extras,
+          pull: async (range) => {
+            const cap = rangeCap(spanDays(range), perDay);
+            const byQuery = await pages(range, { dimensions: ['date', 'query', 'country', 'device'] }, pageRows, cap);
+            if (spanDays(range) > 1 && !byQuery.complete) return null;
+            const byPage = await pages(range, { dimensions: ['date', 'page', 'country', 'device'] }, pageRows, cap);
+            if (spanDays(range) > 1 && !byPage.complete) return null;
+            const rows: SegmentInput[] = [];
+            for (const [kind, res] of [
+              ['query', byQuery],
+              ['page', byPage],
+            ] as const) {
+              for (const r of topPerDay(res.rows, perDay)) {
+                rows.push({
+                  date: r.keys[0]!,
+                  kind,
+                  key: kind === 'page' ? normalizePage(r.keys[1]!, site.domain) : r.keys[1]!,
+                  country: r.keys[2]!,
+                  device: r.keys[3]!,
+                  clicks: r.clicks,
+                  impressions: r.impressions,
+                  position: r.position,
+                });
+              }
+            }
+            return store.writeSearchSegments(site.id, rows);
+          },
+        });
+      }
+
+      // Index coverage: sitemap URLs inspected in batches with the calls left over after everything else.
+      if (clients.sitemaps && config.gsc.inspectionsPerDay > 0) {
+        spare.push(...indexCoverageUnits({ site, gsc, property, reader: clients.sitemaps, store, budget, today, nowMs, config, get }));
       }
     }
 
@@ -757,6 +945,8 @@ async function planUnits(ctx: SyncContext, today: IsoDate, budget: Budget): Prom
       lastKey: string;
       fromKey: string;
       chunkKey: string;
+      /** Where the daily units go (default: with the other sources' increments). */
+      tier?: Unit[];
       /** Rows written, or null when the range has more rows than one request returns. */
       pull: (range: DateRange) => Promise<number | null>;
     }) => {
@@ -800,7 +990,7 @@ async function planUnits(ctx: SyncContext, today: IsoDate, budget: Budget): Prom
       if (d < floor) d = floor;
       while (d <= yesterday) {
         const range = { start: d, end: minDate(addDays(d, chunk - 1), yesterday) };
-        daily.push(
+        (opts.tier ?? daily).push(
           unit(range, false, async () => {
             await store.setMeta(opts.lastKey, range.end);
             if (fresh && !(await store.getMeta(opts.fromKey))) await store.setMeta(opts.fromKey, range.start);
@@ -824,21 +1014,15 @@ async function planUnits(ctx: SyncContext, today: IsoDate, budget: Budget): Prom
       const cf = clients.cloudflare;
       if (site.cloudflareZoneId) {
         const zoneId = site.cloudflareZoneId;
-        const patterns = AI_CRAWLERS.map((c) => c.match);
-        cloudflareDays({
-          task: 'cloudflare.ai_crawlers',
-          lookbackDays: CF_CRAWLER_LOOKBACK_DAYS,
-          defaultChunk: CHUNK_DAYS.cfCrawlers,
-          calls: 1,
-          lastKey: syncKeys.cfCrawlers(site.id),
-          fromKey: syncKeys.cfCrawlersFrom(site.id),
-          chunkKey: syncKeys.cfCrawlersChunk(site.id),
-          pull: async (range) => {
-            const res = await cf.aiCrawlerRequests(zoneId, range, patterns);
+        /** Requests per day, crawler, page and status; `perDay` caps the rows per day (the rest is folded into one row per crawler and status). */
+        const crawlerPull =
+          (kind: CrawlerKind, patterns: string[], classify: (ua: string) => CrawlerSignature | null, perDay?: number) =>
+          async (range: DateRange) => {
+            const res = await cf.crawlerRequests(zoneId, range, patterns);
             if (!res.complete && spanDays(range) > 1) return null;
             const merged = new Map<string, CrawlerRequestInput>();
             for (const r of res.rows) {
-              const sig = classifyCrawler(r.userAgent);
+              const sig = classify(r.userAgent);
               if (!sig) continue;
               const path = normalizePage(r.path, site.domain, r.host);
               const k = `${r.date}|${sig.name}|${path}|${r.status}`;
@@ -855,8 +1039,35 @@ async function planUnits(ctx: SyncContext, today: IsoDate, budget: Budget): Prom
                   requests: r.requests,
                 });
             }
-            return store.writeCrawlerRequests(site.id, [...merged.values()]);
-          },
+            const rows = perDay ? capCrawlerRows([...merged.values()], perDay) : [...merged.values()];
+            return store.writeCrawlerRequests(site.id, rows, kind);
+          };
+        cloudflareDays({
+          task: 'cloudflare.ai_crawlers',
+          lookbackDays: CF_CRAWLER_LOOKBACK_DAYS,
+          defaultChunk: CHUNK_DAYS.cfCrawlers,
+          calls: 1,
+          lastKey: syncKeys.cfCrawlers(site.id),
+          fromKey: syncKeys.cfCrawlersFrom(site.id),
+          chunkKey: syncKeys.cfCrawlersChunk(site.id),
+          pull: crawlerPull(
+            'ai',
+            AI_CRAWLERS.map((c) => c.match),
+            classifyCrawler,
+          ),
+        });
+        // Search engine crawlers (Googlebot, Bingbot, ...): the closest thing to Search Console's
+        // Crawl stats report, which has no API.
+        cloudflareDays({
+          task: 'cloudflare.search_crawlers',
+          lookbackDays: CF_SEARCH_CRAWLER_LOOKBACK_DAYS,
+          defaultChunk: CHUNK_DAYS.cfCrawlers,
+          calls: 1,
+          lastKey: syncKeys.cfSearchCrawlers(site.id),
+          fromKey: syncKeys.cfSearchCrawlersFrom(site.id),
+          chunkKey: syncKeys.cfSearchCrawlersChunk(site.id),
+          tier: extras,
+          pull: crawlerPull('search', SEARCH_CRAWLER_PATTERNS, classifySearchCrawler, SEARCH_CRAWLER_ROWS_PER_DAY),
         });
       }
       if (site.webAnalyticsSiteTag && config.cloudflare.accountId) {
@@ -909,7 +1120,268 @@ async function planUnits(ctx: SyncContext, today: IsoDate, budget: Budget): Prom
 
   // Stable sort: on the same day, sites keep their order and each site keeps GSC before Cloudflare.
   history.sort((a, b) => (a.date! < b.date! ? 1 : a.date! > b.date! ? -1 : 0));
-  return [...interleave(increments), ...history];
+  return [...interleave(increments), ...interleave(extraIncrements), ...history, ...interleave(spareWork)];
+}
+
+/** User agent patterns for the Cloudflare query: a pattern that contains another one adds nothing. */
+const SEARCH_CRAWLER_PATTERNS = SEARCH_CRAWLERS.map((c) => c.match).filter((p, _i, all) => !all.some((q) => q !== p && p.includes(q)));
+
+/** Search engine crawler rows kept per site and day; the rest is folded into `OTHER_PAGES`. */
+const SEARCH_CRAWLER_ROWS_PER_DAY = 2_000;
+/** Page key for the requests to pages beyond the per-day cap. */
+export const OTHER_PAGES = '(other pages)';
+
+/** Keeps the `perDay` largest rows of each day; the others are summed per crawler and status into `OTHER_PAGES`. */
+export function capCrawlerRows(rows: CrawlerRequestInput[], perDay: number): CrawlerRequestInput[] {
+  const byDay = new Map<string, CrawlerRequestInput[]>();
+  for (const r of rows) {
+    const list = byDay.get(r.date) ?? [];
+    list.push(r);
+    byDay.set(r.date, list);
+  }
+  const out: CrawlerRequestInput[] = [];
+  for (const list of byDay.values()) {
+    if (list.length <= perDay) {
+      out.push(...list);
+      continue;
+    }
+    list.sort((a, b) => b.requests - a.requests);
+    out.push(...list.slice(0, perDay - 1));
+    const rest = new Map<string, CrawlerRequestInput>();
+    for (const r of list.slice(perDay - 1)) {
+      const k = `${r.crawler}|${r.status}`;
+      const prev = rest.get(k);
+      if (prev) prev.requests += r.requests;
+      else rest.set(k, { ...r, path: OTHER_PAGES });
+    }
+    out.push(...rest.values());
+  }
+  return out;
+}
+
+/** GSC query and page rows per country and device kept per day and kind (opt-in segments). */
+const SEGMENT_ROWS_PER_DAY = 1_000;
+/** Sitemap files read per site and day, and URLs tracked per site. */
+const MAX_SITEMAP_FILES = 25;
+export const MAX_INDEX_URLS = 5_000;
+/** URL inspections per unit; several units per site and run go round-robin over the sites. */
+const INSPECTIONS_PER_UNIT = 10;
+const UNITS_PER_SITE_AND_RUN = 4;
+
+/** Whether `url` belongs to the Search Console property (the URL Inspection API refuses others). */
+export function inPropertyScope(url: string, property: string): boolean {
+  let u: URL;
+  try {
+    u = new URL(url);
+  } catch {
+    return false;
+  }
+  if (u.protocol !== 'https:' && u.protocol !== 'http:') return false;
+  if (property.startsWith('sc-domain:')) {
+    const d = property.slice('sc-domain:'.length).toLowerCase();
+    const host = u.hostname.toLowerCase();
+    return host === d || host.endsWith(`.${d}`);
+  }
+  return url.toLowerCase().startsWith(property.toLowerCase());
+}
+
+/** Whether a sitemap URL may be fetched: http(s) on the site's domain or one of its subdomains. */
+function onSiteDomain(url: string, domain: string): boolean {
+  try {
+    const u = new URL(url);
+    const d = domain.toLowerCase().replace(/^www\./, '');
+    const host = u.hostname.toLowerCase();
+    return (u.protocol === 'https:' || u.protocol === 'http:') && (host === d || host.endsWith(`.${d}`));
+  } catch {
+    return false;
+  }
+}
+
+function inspectionInput(r: GscUrlInspection, inspectedAt: string): UrlInspectionInput {
+  return {
+    url: r.url,
+    inspectedAt,
+    verdict: r.verdict,
+    coverageState: r.coverageState,
+    indexingState: r.indexingState,
+    pageFetchState: r.pageFetchState,
+    robotsTxtState: r.robotsTxtState,
+    lastCrawlTime: r.lastCrawlTime,
+    googleCanonical: r.googleCanonical,
+    userCanonical: r.userCanonical,
+    crawledAs: r.crawledAs,
+    richResultsVerdict: r.richResultsVerdict,
+    richResultTypes: r.richResultTypes,
+    richResultIssues: r.richResultIssues,
+    error: null,
+  };
+}
+
+function failedInspection(url: string, inspectedAt: string, error: string): UrlInspectionInput {
+  return {
+    url,
+    inspectedAt,
+    verdict: null,
+    coverageState: null,
+    indexingState: null,
+    pageFetchState: null,
+    robotsTxtState: null,
+    lastCrawlTime: null,
+    googleCanonical: null,
+    userCanonical: null,
+    crawledAs: null,
+    richResultsVerdict: null,
+    richResultTypes: [],
+    richResultIssues: [],
+    error: error.slice(0, 300),
+  };
+}
+
+/**
+ * Index coverage for one site: once a day the tracked URLs are refreshed from the sitemaps,
+ * then due URLs are inspected (never inspected first, then those inspected longest ago), up to
+ * GSC_INSPECTIONS_PER_DAY. Both run with spare capacity only (see `Unit.idle`). Reaching the
+ * URL Inspection quota stops the inspections for the day without pausing Search Console.
+ */
+function indexCoverageUnits(o: {
+  site: SiteConfig;
+  gsc: GscClient;
+  property: string;
+  reader: SitemapReader;
+  store: Store;
+  budget: Budget;
+  today: IsoDate;
+  nowMs: number;
+  config: SearchkeepConfig;
+  get: (key: string) => string | null;
+}): Unit[] {
+  const { site, gsc, property, reader, store, budget, today, nowMs, config, get } = o;
+  const units: Unit[] = [];
+  const urlsKey = syncKeys.gscIndexUrls(site.id);
+  if (get(urlsKey) !== today) {
+    units.push({
+      task: 'gsc.index_urls',
+      siteId: site.id,
+      source: 'gsc',
+      backfill: false,
+      idle: true,
+      calls: 1,
+      key: `gsc.index_urls:${site.id}:${today}`,
+      run: async () => {
+        const queue = (await store.listSitemaps(site.id, 'gsc')).map((m) => m.path).filter((u) => onSiteDomain(u, site.domain));
+        const seen = new Set<string>();
+        const urls = new Set<string>();
+        // Complete only when every sitemap was read in full: only then are URLs that left the sitemaps dropped.
+        let complete = queue.length > 0;
+        let files = 0;
+        while (queue.length > 0) {
+          const next = queue.shift()!;
+          if (seen.has(next)) continue;
+          seen.add(next);
+          if (files >= MAX_SITEMAP_FILES || urls.size >= MAX_INDEX_URLS) {
+            complete = false;
+            break;
+          }
+          if (files > 0) budget.spend('gsc');
+          files++;
+          let contents;
+          try {
+            contents = await reader.read(next);
+          } catch {
+            // One unreadable sitemap must not stop the others; its URLs are kept as they are.
+            complete = false;
+            continue;
+          }
+          if (contents.truncated) complete = false;
+          for (const u of contents.urls) {
+            if (urls.size >= MAX_INDEX_URLS) {
+              complete = false;
+              break;
+            }
+            if (inPropertyScope(u, property)) urls.add(u);
+          }
+          for (const m of contents.sitemaps) if (onSiteDomain(m, site.domain) && !seen.has(m)) queue.push(m);
+        }
+        const known = new Set(await store.listIndexUrls(site.id));
+        const add = [...urls].filter((u) => !known.has(u));
+        const remove = complete ? [...known].filter((u) => !urls.has(u)) : [];
+        const n = await store.updateIndexUrls(site.id, add, remove, today);
+        await store.setMeta(urlsKey, today);
+        return n;
+      },
+      skip: () => store.setMeta(urlsKey, today),
+    });
+  }
+
+  const quotaKey = syncKeys.gscInspections(site.id);
+  const state = parseJson<{ day: IsoDate; done: number }>(get(quotaKey));
+  let done = state?.day === today ? state.done : 0;
+  const allowance = config.gsc.inspectionsPerDay;
+  const unitsToday = Math.min(UNITS_PER_SITE_AND_RUN, Math.ceil(Math.max(0, allowance - done) / INSPECTIONS_PER_UNIT));
+  for (let i = 0; i < unitsToday; i++) {
+    units.push({
+      task: 'gsc.inspect',
+      siteId: site.id,
+      source: 'gsc',
+      backfill: false,
+      idle: true,
+      calls: 1,
+      key: `gsc.inspect:${site.id}:${today}:${done}:${i}`,
+      run: async () => {
+        const left = allowance - done;
+        if (left <= 0) {
+          budget.refund('gsc', 1);
+          return null;
+        }
+        const nowIso = new Date(nowMs).toISOString();
+        const cutoff = new Date(nowMs - REINSPECT_DAYS * 86_400_000).toISOString();
+        const due = await store.listUrlsToInspect(site.id, cutoff, Math.min(left, INSPECTIONS_PER_UNIT));
+        if (due.length === 0) {
+          budget.refund('gsc', 1);
+          return null;
+        }
+        const results: UrlInspectionInput[] = [];
+        let quotaReached = false;
+        let failure: unknown = null;
+        try {
+          for (const url of due) {
+            if (results.length > 0) {
+              if (budget.left() < 1 || budget.expired()) break;
+              budget.spend('gsc');
+            }
+            try {
+              results.push(inspectionInput(await gsc.inspectUrl(property, url), nowIso));
+            } catch (err) {
+              // The daily URL Inspection quota: stop for today, but keep Search Console's other calls going.
+              if (isRateLimited(err)) {
+                quotaReached = true;
+                break;
+              }
+              // A URL Google refuses to inspect (not in the property, malformed) is recorded and not retried before the others.
+              if (err instanceof SourceError && (err.status === 400 || err.status === 404)) {
+                results.push(failedInspection(url, nowIso, safeMessage(err)));
+                continue;
+              }
+              throw err;
+            }
+          }
+        } catch (err) {
+          failure = err;
+        }
+        // What was inspected before a failure is kept; the failure then backs the task off.
+        done = quotaReached ? allowance : done + results.length;
+        await store.setMeta(quotaKey, JSON.stringify({ day: today, done }));
+        const n = results.length ? await store.writeUrlInspections(site.id, results) : 0;
+        if (failure) throw failure;
+        return n;
+      },
+      skip: async () => {
+        done = allowance;
+        await store.setMeta(quotaKey, JSON.stringify({ day: today, done }));
+      },
+    });
+  }
+  return units;
 }
 
 export { BudgetExceeded };

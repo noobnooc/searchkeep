@@ -1,26 +1,36 @@
-import type {
-  AiCitationInput,
-  BreakdownInput,
-  CrawlIssueInput,
-  CrawlerQuery,
-  CrawlerRequestInput,
-  CrawlerRow,
-  DataCoverage,
-  DateRange,
-  IsoDate,
-  PageCount,
-  PerformanceQuery,
-  PerformanceRow,
-  ReferralQuery,
-  ReferralRow,
-  SearchFactInput,
-  SearchSource,
-  SiteConfig,
-  SitemapRecord,
-  Store,
-  SyncRunRecord,
-  WebAnalyticsInput,
-  WebVitalsInput,
+import {
+  GSC_SEARCH_TYPES,
+  type AiCitationInput,
+  type AppearanceInput,
+  type BreakdownInput,
+  type CrawlerKind,
+  type CrawlIssueInput,
+  type CrawlerQuery,
+  type CrawlerRequestInput,
+  type CrawlerRow,
+  type DataCoverage,
+  type DateRange,
+  type GscSearchType,
+  type IndexCoverageQuery,
+  type IndexCoverageResult,
+  type IndexStatusRow,
+  type IsoDate,
+  type PageCount,
+  type PerformanceQuery,
+  type PerformanceRow,
+  type ReferralQuery,
+  type ReferralRow,
+  type RichResultIssue,
+  type SearchFactInput,
+  type SearchSource,
+  type SegmentInput,
+  type SiteConfig,
+  type SitemapRecord,
+  type Store,
+  type SyncRunRecord,
+  type UrlInspectionInput,
+  type WebAnalyticsInput,
+  type WebVitalsInput,
 } from '@searchkeep/core';
 import { desc, eq } from 'drizzle-orm';
 import { drizzle, type DrizzleD1Database } from 'drizzle-orm/d1';
@@ -42,13 +52,48 @@ function allow<T extends string>(values: readonly string[], allowed: readonly T[
   for (const v of values) if (!(allowed as readonly string[]).includes(v)) throw new Error(`Unknown ${what} "${String(v).slice(0, 40)}"`);
   return values as T[];
 }
-const PERF_DIMS = ['date', 'week', 'month', 'query', 'page', 'country', 'device'] as const;
+const PERF_DIMS = ['date', 'week', 'month', 'query', 'page', 'country', 'device', 'appearance'] as const;
 const PERF_ORDER = ['clicks', 'impressions', 'ctr', 'position', 'date'] as const;
 const CRAWLER_GROUPS = ['crawler', 'operator', 'purpose', 'path', 'status', 'date'] as const;
 const REFERRAL_GROUPS = ['path', 'refererHost', 'date'] as const;
 
 function round6(n: number): number {
   return Math.round(n * 1e6) / 1e6;
+}
+
+/** `source` as stored: web search is `gsc`, the other Search Console search types `gsc:<type>`. */
+function storedSource(source: SearchSource, searchType: GscSearchType | undefined): string {
+  if (searchType === undefined || searchType === 'web') return source;
+  allow([searchType], GSC_SEARCH_TYPES, 'search type');
+  if (source !== 'gsc') throw new Error('Search types other than web exist only for Search Console');
+  return `gsc:${searchType}`;
+}
+
+const CRAWLER_TABLES: Record<CrawlerKind, string> = { ai: 'ai_crawler_requests', search: 'search_crawler_requests' };
+function crawlerTable(kind: CrawlerKind | undefined): string {
+  const table = CRAWLER_TABLES[kind ?? 'ai'];
+  if (!table) throw new Error(`Unknown crawler kind "${String(kind).slice(0, 20)}"`);
+  return table;
+}
+
+/** Stored as `[{"t": type, "i": [{"s": severity, "m": message}]}]`, or null when no rich result was detected. */
+function richResultsJson(types: string[], issues: RichResultIssue[]): string | null {
+  const all = [...new Set([...types, ...issues.map((i) => i.type)])];
+  if (all.length === 0) return null;
+  return JSON.stringify(all.map((t) => ({ t, i: issues.filter((i) => i.type === t).map((i) => ({ s: i.severity, m: i.message })) })));
+}
+
+function parseRichResults(json: unknown): { richResultTypes: string[]; richResultIssues: RichResultIssue[] } {
+  if (typeof json !== 'string') return { richResultTypes: [], richResultIssues: [] };
+  try {
+    const list = JSON.parse(json) as Array<{ t: string; i?: Array<{ s: string; m: string }> }>;
+    return {
+      richResultTypes: list.map((x) => x.t),
+      richResultIssues: list.flatMap((x) => (x.i ?? []).map((i) => ({ type: x.t, severity: i.s, message: i.m }))),
+    };
+  } catch {
+    return { richResultTypes: [], richResultIssues: [] };
+  }
 }
 
 /**
@@ -214,8 +259,9 @@ export class D1Store implements Store {
 
   // ---------------------------------------------------------------- writes
 
-  async writeSearchFacts(siteId: string, source: SearchSource, rows: SearchFactInput[]): Promise<number> {
+  async writeSearchFacts(siteId: string, source: SearchSource, rows: SearchFactInput[], searchType?: GscSearchType): Promise<number> {
     if (rows.length === 0) return 0;
+    const stored = storedSource(source, searchType);
     // Aggregate duplicates (e.g. URLs that normalize to the same page).
     const agg = new Map<string, { k: string; d: string; p: string; q: string; c: number; i: number; ps: number | null }>();
     for (const r of rows) {
@@ -258,9 +304,83 @@ export class D1Store implements Store {
            WHERE search_facts.clicks != excluded.clicks OR search_facts.impressions != excluded.impressions
              OR search_facts.position_sum IS NOT excluded.position_sum`,
         )
-        .bind(siteId, source, JSON.stringify(group)),
+        .bind(siteId, stored, JSON.stringify(group)),
     );
     return dims + (await this.batch(facts));
+  }
+
+  async writeSearchAppearances(siteId: string, searchType: GscSearchType, rows: AppearanceInput[]): Promise<number> {
+    if (rows.length === 0) return 0;
+    const source = storedSource('gsc', searchType);
+    const items = rows.map((r) => ({
+      d: r.date,
+      a: r.appearance,
+      c: r.clicks,
+      i: r.impressions,
+      ps: r.position != null && Number.isFinite(r.position) && r.position > 0 ? round6(r.position * r.impressions) : null,
+    }));
+    return this.batch(
+      chunks(items).map((group) =>
+        this.db
+          .prepare(
+            `INSERT INTO search_appearances (site_id, source, date, appearance, clicks, impressions, position_sum)
+             SELECT ?1, ?2, j.value->>'d', j.value->>'a', j.value->>'c', j.value->>'i', j.value->>'ps'
+             FROM json_each(?3) j WHERE true
+             ON CONFLICT (site_id, source, date, appearance) DO UPDATE SET
+               clicks = excluded.clicks, impressions = excluded.impressions, position_sum = excluded.position_sum
+             WHERE search_appearances.clicks != excluded.clicks OR search_appearances.impressions != excluded.impressions
+               OR search_appearances.position_sum IS NOT excluded.position_sum`,
+          )
+          .bind(siteId, source, JSON.stringify(group)),
+      ),
+    );
+  }
+
+  async writeSearchSegments(siteId: string, rows: SegmentInput[]): Promise<number> {
+    if (rows.length === 0) return 0;
+    // Aggregate duplicates (URLs that normalize to the same page).
+    const agg = new Map<string, { k: string; d: string; x: string; co: string; de: string; c: number; i: number; ps: number | null }>();
+    for (const r of rows) {
+      const co = r.country.toLowerCase();
+      const de = r.device.toUpperCase();
+      const key = `${r.kind}\u0000${r.date}\u0000${r.key}\u0000${co}\u0000${de}`;
+      const ps = r.position != null && Number.isFinite(r.position) ? r.position * r.impressions : null;
+      const prev = agg.get(key);
+      if (prev) {
+        prev.c += r.clicks;
+        prev.i += r.impressions;
+        prev.ps = prev.ps === null && ps === null ? null : (prev.ps ?? 0) + (ps ?? 0);
+      } else agg.set(key, { k: r.kind, d: r.date, x: r.key, co, de, c: r.clicks, i: r.impressions, ps });
+    }
+    const items = [...agg.values()].map((x) => ({ ...x, ps: x.ps === null ? null : round6(x.ps) }));
+    const dims = await this.batch([
+      ...this.ensurePagesStatements(
+        siteId,
+        items.filter((x) => x.k === 'page').map((x) => x.x),
+      ),
+      ...this.ensureQueriesStatements(
+        siteId,
+        items.filter((x) => x.k === 'query').map((x) => x.x),
+      ),
+    ]);
+    const statements = chunks(items).map((group) =>
+      this.db
+        .prepare(
+          `INSERT INTO search_segments (site_id, source, kind, date, item_id, country, device, clicks, impressions, position_sum)
+           SELECT ?1, 'gsc', j.value->>'k', j.value->>'d',
+             CASE WHEN j.value->>'k' = 'page'
+               THEN COALESCE((SELECT id FROM pages WHERE site_id = ?1 AND path = j.value->>'x'), 0)
+               ELSE COALESCE((SELECT id FROM queries WHERE site_id = ?1 AND text = j.value->>'x'), 0) END,
+             j.value->>'co', j.value->>'de', j.value->>'c', j.value->>'i', j.value->>'ps'
+           FROM json_each(?2) j WHERE true
+           ON CONFLICT (site_id, source, kind, date, item_id, country, device) DO UPDATE SET
+             clicks = excluded.clicks, impressions = excluded.impressions, position_sum = excluded.position_sum
+           WHERE search_segments.clicks != excluded.clicks OR search_segments.impressions != excluded.impressions
+             OR search_segments.position_sum IS NOT excluded.position_sum`,
+        )
+        .bind(siteId, JSON.stringify(group)),
+    );
+    return dims + (await this.batch(statements));
   }
 
   async writeBreakdowns(siteId: string, source: SearchSource, rows: BreakdownInput[]): Promise<number> {
@@ -289,8 +409,9 @@ export class D1Store implements Store {
     );
   }
 
-  async writeCrawlerRequests(siteId: string, rows: CrawlerRequestInput[]): Promise<number> {
+  async writeCrawlerRequests(siteId: string, rows: CrawlerRequestInput[], kind?: CrawlerKind): Promise<number> {
     if (rows.length === 0) return 0;
+    const table = crawlerTable(kind);
     const dims = await this.batch(
       this.ensurePagesStatements(
         siteId,
@@ -304,11 +425,11 @@ export class D1Store implements Store {
         chunks(items).map((group) =>
           this.db
             .prepare(
-              `INSERT INTO ai_crawler_requests (site_id, date, crawler, operator, purpose, page_id, status, requests)
+              `INSERT INTO ${table} (site_id, date, crawler, operator, purpose, page_id, status, requests)
                SELECT ?1, j.value->>'d', j.value->>'cr', j.value->>'op', j.value->>'pu', ${D1Store.pageIdExpr()}, j.value->>'s', j.value->>'n'
                FROM json_each(?2) j WHERE true
                ON CONFLICT (site_id, date, crawler, page_id, status) DO UPDATE SET requests = excluded.requests
-               WHERE ai_crawler_requests.requests != excluded.requests`,
+               WHERE ${table}.requests != excluded.requests`,
             )
             .bind(siteId, JSON.stringify(group)),
         ),
@@ -457,6 +578,194 @@ export class D1Store implements Store {
     return rows.length;
   }
 
+  // --------------------------------------------------------- index coverage
+
+  async listIndexUrls(siteId: string): Promise<string[]> {
+    return (await this.all<{ url: string }>('SELECT url FROM index_status WHERE site_id = ?1', siteId)).map((r) => r.url);
+  }
+
+  async updateIndexUrls(siteId: string, add: string[], remove: string[], day: IsoDate): Promise<number> {
+    return this.batch([
+      ...chunks([...new Set(add)]).map((group) =>
+        this.db
+          .prepare(
+            'INSERT INTO index_status (site_id, url, first_seen) SELECT ?1, value, ?2 FROM json_each(?3) WHERE true ON CONFLICT (site_id, url) DO NOTHING',
+          )
+          .bind(siteId, day, JSON.stringify(group)),
+      ),
+      ...chunks([...new Set(remove)]).map((group) =>
+        this.db
+          .prepare('DELETE FROM index_status WHERE site_id = ?1 AND url IN (SELECT value FROM json_each(?2))')
+          .bind(siteId, JSON.stringify(group)),
+      ),
+    ]);
+  }
+
+  async listUrlsToInspect(siteId: string, inspectedBefore: string, limit: number): Promise<string[]> {
+    // NULLs sort first: URLs never inspected come before the oldest inspections.
+    const rows = await this.all<{ url: string }>(
+      `SELECT url FROM index_status WHERE site_id = ?1 AND (inspected_at IS NULL OR inspected_at < ?2)
+       ORDER BY inspected_at, url LIMIT ?3`,
+      siteId,
+      inspectedBefore,
+      Math.max(1, Math.floor(limit)),
+    );
+    return rows.map((r) => r.url);
+  }
+
+  async writeUrlInspections(siteId: string, rows: UrlInspectionInput[]): Promise<number> {
+    // Only tracked URLs are updated. A failed inspection keeps the URL's last known state.
+    const ok = `UPDATE index_status SET
+        previous_coverage_state = CASE WHEN inspected_at IS NOT NULL AND verdict IS NOT NULL AND coverage_state IS NOT ?4 THEN coverage_state ELSE previous_coverage_state END,
+        changed_at = CASE WHEN inspected_at IS NOT NULL AND verdict IS NOT NULL AND coverage_state IS NOT ?4 THEN ?3 ELSE changed_at END,
+        inspected_at = ?3, coverage_state = ?4, verdict = ?5, indexing_state = ?6, page_fetch_state = ?7, robots_txt_state = ?8,
+        last_crawl_time = ?9, google_canonical = ?10, user_canonical = ?11, crawled_as = ?12, rich_results_verdict = ?13,
+        rich_results = ?14, error = NULL
+      WHERE site_id = ?1 AND url = ?2`;
+    const failed = 'UPDATE index_status SET inspected_at = ?3, error = ?4 WHERE site_id = ?1 AND url = ?2';
+    return this.batch(
+      rows.map((r) =>
+        r.error
+          ? this.db.prepare(failed).bind(siteId, r.url, r.inspectedAt, r.error)
+          : this.db
+              .prepare(ok)
+              .bind(
+                siteId,
+                r.url,
+                r.inspectedAt,
+                r.coverageState,
+                r.verdict,
+                r.indexingState,
+                r.pageFetchState,
+                r.robotsTxtState,
+                r.lastCrawlTime,
+                r.googleCanonical,
+                r.userCanonical,
+                r.crawledAs,
+                r.richResultsVerdict,
+                richResultsJson(r.richResultTypes, r.richResultIssues),
+              ),
+      ),
+    );
+  }
+
+  async indexCoverage(q: IndexCoverageQuery): Promise<IndexCoverageResult> {
+    const limit = Math.max(1, Math.min(Math.floor(q.limit) || 50, 5_000));
+    const binds: Bind[] = [q.siteId];
+    const where = ['site_id = ?1'];
+    const arg = (v: Bind) => {
+      binds.push(v);
+      return `?${binds.length}`;
+    };
+    if (q.coverageState) where.push(`instr(lower(coverage_state), lower(${arg(q.coverageState)})) > 0`);
+    const verdict = q.verdict?.toUpperCase();
+    if (verdict === 'PENDING') where.push('inspected_at IS NULL');
+    else if (verdict === 'ERROR') where.push('error IS NOT NULL');
+    else if (verdict) where.push(`verdict = ${arg(verdict)}`);
+    if (q.richResultIssues) where.push("EXISTS (SELECT 1 FROM json_each(rich_results) t WHERE json_array_length(t.value, '$.i') > 0)");
+    const stateLabel =
+      "CASE WHEN inspected_at IS NULL THEN 'PENDING' WHEN verdict IS NULL AND error IS NOT NULL THEN 'ERROR' ELSE verdict END";
+    const [totals, states, verdicts, types, issues, urls, changes] = await this.db.batch([
+      this.db
+        .prepare(
+          `SELECT COUNT(*) AS urls, COUNT(inspected_at) AS inspected, SUM(CASE WHEN error IS NULL THEN 0 ELSE 1 END) AS errors,
+             MIN(inspected_at) AS oldest, MAX(inspected_at) AS newest FROM index_status WHERE site_id = ?1`,
+        )
+        .bind(q.siteId),
+      this.db
+        .prepare(
+          `SELECT ${stateLabel} AS verdict, coverage_state, COUNT(*) AS urls FROM index_status WHERE site_id = ?1
+           GROUP BY 1, 2 ORDER BY urls DESC, 1, 2 LIMIT 100`,
+        )
+        .bind(q.siteId),
+      this.db
+        .prepare(
+          `SELECT rich_results_verdict AS verdict, COUNT(*) AS urls FROM index_status
+           WHERE site_id = ?1 AND rich_results_verdict IS NOT NULL GROUP BY 1 ORDER BY urls DESC, 1`,
+        )
+        .bind(q.siteId),
+      this.db
+        .prepare(
+          `SELECT t.value->>'t' AS type, COUNT(*) AS urls, SUM(CASE WHEN json_array_length(t.value, '$.i') > 0 THEN 1 ELSE 0 END) AS with_issues
+           FROM index_status s, json_each(s.rich_results) t WHERE s.site_id = ?1 AND s.rich_results IS NOT NULL
+           GROUP BY 1 ORDER BY urls DESC, 1 LIMIT 50`,
+        )
+        .bind(q.siteId),
+      this.db
+        .prepare(
+          `SELECT t.value->>'t' AS type, i.value->>'s' AS severity, i.value->>'m' AS message, COUNT(DISTINCT s.url) AS urls
+           FROM index_status s, json_each(s.rich_results) t, json_each(t.value, '$.i') i
+           WHERE s.site_id = ?1 AND s.rich_results IS NOT NULL GROUP BY 1, 2, 3 ORDER BY urls DESC, 1, 2, 3 LIMIT 50`,
+        )
+        .bind(q.siteId),
+      this.db
+        .prepare(
+          `SELECT * FROM index_status WHERE ${where.join(' AND ')}
+           ORDER BY CASE WHEN verdict = 'PASS' THEN 2 WHEN inspected_at IS NULL THEN 1 ELSE 0 END, coverage_state, url LIMIT ${limit}`,
+        )
+        .bind(...binds),
+      this.db
+        .prepare(
+          `SELECT url, previous_coverage_state, coverage_state, changed_at FROM index_status
+           WHERE site_id = ?1 AND changed_at >= ?2 ORDER BY changed_at DESC, url LIMIT ?3`,
+        )
+        .bind(q.siteId, q.changedSince, limit),
+    ]);
+    const rows = <T>(r: D1Result | undefined) => (r?.results ?? []) as T[];
+    const t = rows<{ urls: number; inspected: number; errors: number | null; oldest: string | null; newest: string | null }>(totals)[0];
+    const str = (v: unknown) => (v == null ? null : String(v));
+    return {
+      totals: {
+        urls: Number(t?.urls ?? 0),
+        inspected: Number(t?.inspected ?? 0),
+        errors: Number(t?.errors ?? 0),
+        oldestInspectedAt: t?.oldest ?? null,
+        newestInspectedAt: t?.newest ?? null,
+      },
+      states: rows<{ verdict: string | null; coverage_state: string | null; urls: number }>(states).map((r) => ({
+        verdict: r.verdict ?? 'UNKNOWN',
+        coverageState: r.coverage_state,
+        urls: Number(r.urls),
+      })),
+      richResults: {
+        verdicts: rows<{ verdict: string; urls: number }>(verdicts).map((r) => ({ verdict: r.verdict, urls: Number(r.urls) })),
+        types: rows<{ type: string; urls: number; with_issues: number }>(types).map((r) => ({
+          type: r.type,
+          urls: Number(r.urls),
+          urlsWithIssues: Number(r.with_issues ?? 0),
+        })),
+        issues: rows<{ type: string; severity: string; message: string; urls: number }>(issues).map((r) => ({
+          type: r.type,
+          severity: r.severity,
+          message: r.message,
+          urls: Number(r.urls),
+        })),
+      },
+      urls: rows<Record<string, unknown>>(urls).map((r): IndexStatusRow => ({
+        url: String(r.url),
+        firstSeen: String(r.first_seen),
+        inspectedAt: str(r.inspected_at),
+        verdict: str(r.verdict),
+        coverageState: str(r.coverage_state),
+        indexingState: str(r.indexing_state),
+        pageFetchState: str(r.page_fetch_state),
+        robotsTxtState: str(r.robots_txt_state),
+        lastCrawlTime: str(r.last_crawl_time),
+        googleCanonical: str(r.google_canonical),
+        userCanonical: str(r.user_canonical),
+        crawledAs: str(r.crawled_as),
+        richResultsVerdict: str(r.rich_results_verdict),
+        ...parseRichResults(r.rich_results),
+        error: str(r.error),
+        previousCoverageState: str(r.previous_coverage_state),
+        changedAt: str(r.changed_at),
+      })),
+      changes: rows<{ url: string; previous_coverage_state: string | null; coverage_state: string | null; changed_at: string }>(
+        changes,
+      ).map((r) => ({ url: r.url, from: r.previous_coverage_state, to: r.coverage_state, changedAt: r.changed_at })),
+    };
+  }
+
   // ------------------------------------------------------------------ brand
 
   async listQueriesForBrandClassification(siteId: string, version: string, limit: number) {
@@ -533,18 +842,40 @@ export class D1Store implements Store {
     const dims = allow(q.dimensions, PERF_DIMS, 'dimension');
     if (q.orderBy !== undefined) allow([q.orderBy], PERF_ORDER, 'orderBy');
     const breakdown = dims.includes('country') || dims.includes('device') || Boolean(f.country) || Boolean(f.device);
+    const appearance = dims.includes('appearance') || Boolean(f.appearance);
     const brand = f.brand ?? 'all';
     const hasQuery = dims.includes('query') || Boolean(f.queryContains) || brand !== 'all';
     const hasPage = dims.includes('page') || Boolean(f.pageContains);
-    if (breakdown && (hasQuery || hasPage)) throw new Error('country/device cannot be combined with query/page');
+    if (appearance && (breakdown || hasQuery || hasPage))
+      throw new Error('appearance cannot be combined with query, page, country or device');
+    if (breakdown && hasQuery && hasPage) throw new Error('country/device can be combined with query or page, not both');
 
-    const binds: Bind[] = [q.siteId, q.source, q.range.start, q.range.end];
+    const binds: Bind[] = [q.siteId, storedSource(q.source, q.searchType), q.range.start, q.range.end];
     const where: string[] = ['f.site_id = ?1', 'f.source = ?2', 'f.date >= ?3', 'f.date <= ?4'];
     const joins: string[] = [];
-    const table = breakdown ? 'search_breakdowns' : 'search_facts';
-    if (!breakdown) {
-      const kinds =
-        hasQuery && hasPage ? ['query_page'] : hasQuery ? ['query_page', 'query'] : hasPage ? ['query_page', 'page'] : ['total'];
+    let table: string;
+    // Bing reports no position for site totals: they take the impression-weighted position of its query rows.
+    const bingTotals = q.source === 'bing' && !breakdown && !appearance && !hasQuery && !hasPage;
+    if (appearance) {
+      table = 'search_appearances';
+    } else if (breakdown && (hasQuery || hasPage)) {
+      table = 'search_segments';
+      where.push(`f.kind = '${hasQuery ? 'query' : 'page'}'`);
+      if (hasPage) joins.push('JOIN pages p ON p.id = f.item_id');
+      if (hasQuery) joins.push('JOIN queries q ON q.id = f.item_id');
+    } else if (breakdown) {
+      table = 'search_breakdowns';
+    } else {
+      table = 'search_facts';
+      const kinds = bingTotals
+        ? ['total', 'query']
+        : hasQuery && hasPage
+          ? ['query_page']
+          : hasQuery
+            ? ['query_page', 'query']
+            : hasPage
+              ? ['query_page', 'page']
+              : ['total'];
       where.push(`f.kind IN (${kinds.map((k) => `'${k}'`).join(', ')})`);
       if (hasPage) joins.push('JOIN pages p ON p.id = f.page_id');
       if (hasQuery) joins.push('JOIN queries q ON q.id = f.query_id');
@@ -559,6 +890,13 @@ export class D1Store implements Store {
     if (brand === 'non_brand') where.push('q.is_brand = 0');
     if (f.country) where.push(`f.country = ${arg(f.country.toLowerCase())}`);
     if (f.device) where.push(`f.device = ${arg(f.device.toUpperCase())}`);
+    if (f.appearance) where.push(`f.appearance = ${arg(f.appearance)}`);
+    const clicks = bingTotals ? "CASE WHEN f.kind = 'total' THEN f.clicks END" : 'f.clicks';
+    const impressions = bingTotals ? "CASE WHEN f.kind = 'total' THEN f.impressions END" : 'f.impressions';
+    const positionSum = bingTotals ? "CASE WHEN f.kind = 'query' THEN f.position_sum END" : 'f.position_sum';
+    const positionImpressions = bingTotals
+      ? "CASE WHEN f.kind = 'query' AND f.position_sum IS NOT NULL THEN f.impressions ELSE 0 END"
+      : 'CASE WHEN f.position_sum IS NULL THEN 0 ELSE f.impressions END';
 
     const select: string[] = [];
     const group: string[] = [];
@@ -570,22 +908,25 @@ export class D1Store implements Store {
       page: 'p.path',
       country: 'f.country',
       device: 'f.device',
+      appearance: 'f.appearance',
     };
     for (const d of dims) {
       select.push(`${dimExpr[d]} AS ${d}`);
       group.push(dimExpr[d]!);
     }
     select.push(
-      'SUM(f.clicks) AS clicks',
-      'SUM(f.impressions) AS impressions',
-      'SUM(f.position_sum) AS position_sum',
-      'SUM(CASE WHEN f.position_sum IS NULL THEN 0 ELSE f.impressions END) AS position_impressions',
+      `SUM(${clicks}) AS clicks`,
+      `SUM(${impressions}) AS impressions`,
+      `SUM(${positionSum}) AS position_sum`,
+      `SUM(${positionImpressions}) AS position_impressions`,
     );
     const having: string[] = [];
     const h = q.having ?? {};
-    const posExpr = 'SUM(f.position_sum) / NULLIF(SUM(CASE WHEN f.position_sum IS NULL THEN 0 ELSE f.impressions END), 0)';
-    if (h.minImpressions !== undefined) having.push(`SUM(f.impressions) >= ${arg(h.minImpressions)}`);
-    if (h.minClicks !== undefined) having.push(`SUM(f.clicks) >= ${arg(h.minClicks)}`);
+    const posExpr = `SUM(${positionSum}) / NULLIF(SUM(${positionImpressions}), 0)`;
+    // Bing's weekly query rows fall on days without totals; those days are not rows of their own.
+    if (bingTotals) having.push(`SUM(${impressions}) IS NOT NULL`);
+    if (h.minImpressions !== undefined) having.push(`SUM(${impressions}) >= ${arg(h.minImpressions)}`);
+    if (h.minClicks !== undefined) having.push(`SUM(${clicks}) >= ${arg(h.minClicks)}`);
     if (h.minPosition !== undefined) having.push(`${posExpr} >= ${arg(h.minPosition)}`);
     if (h.maxPosition !== undefined) having.push(`${posExpr} <= ${arg(h.maxPosition)}`);
 
@@ -595,7 +936,7 @@ export class D1Store implements Store {
       q.orderBy === 'date'
         ? (timeDim ?? null)
         : q.orderBy === 'ctr'
-          ? 'CAST(SUM(f.clicks) AS REAL) / NULLIF(SUM(f.impressions), 0)'
+          ? `CAST(SUM(${clicks}) AS REAL) / NULLIF(SUM(${impressions}), 0)`
           : q.orderBy === 'position'
             ? posExpr
             : (q.orderBy ?? 'clicks');
@@ -644,7 +985,7 @@ export class D1Store implements Store {
     };
     const select = q.groupBy.map((g) => `${cols[g]} AS ${g}`);
     const group = q.groupBy.map((g) => cols[g]!);
-    const sql = `SELECT ${[...select, 'SUM(c.requests) AS requests'].join(', ')} FROM ai_crawler_requests c
+    const sql = `SELECT ${[...select, 'SUM(c.requests) AS requests'].join(', ')} FROM ${crawlerTable(q.kind)} c
       ${needPage ? 'JOIN pages p ON p.id = c.page_id' : ''} WHERE ${where.join(' AND ')}
       ${group.length ? `GROUP BY ${group.join(', ')}` : ''}
       ORDER BY ${q.groupBy.length === 1 && q.groupBy[0] === 'date' ? 'c.date ASC' : 'requests DESC'} LIMIT ${Math.max(1, Math.min(Math.floor(Number(q.limit ?? 100)) || 100, 50_000))}`;
@@ -757,7 +1098,7 @@ export class D1Store implements Store {
     const out: DataCoverage[] = [];
     for (const id of sites) {
       // Every query below is an index range seek (no full scans): D1 bills rows read.
-      const [gsc, bing, crawl, rum, cites] = await this.db.batch([
+      const [gsc, bing, crawl, rum, cites, searchCrawl] = await this.db.batch([
         this.db
           .prepare(
             "SELECT MIN(date) AS first, MAX(date) AS last, COUNT(*) AS days FROM search_facts WHERE site_id = ?1 AND source = 'gsc' AND kind = 'total'",
@@ -771,6 +1112,7 @@ export class D1Store implements Store {
         this.db.prepare('SELECT MIN(date) AS first, MAX(date) AS last FROM ai_crawler_requests WHERE site_id = ?1').bind(id),
         this.db.prepare('SELECT MIN(date) AS first, MAX(date) AS last FROM web_analytics WHERE site_id = ?1').bind(id),
         this.db.prepare('SELECT MIN(date) AS first, MAX(date) AS last FROM ai_citations WHERE site_id = ?1').bind(id),
+        this.db.prepare('SELECT MIN(date) AS first, MAX(date) AS last FROM search_crawler_requests WHERE site_id = ?1').bind(id),
       ]);
       const push = (source: string, dataset: string, res: D1Result | undefined) => {
         const r = (res?.results?.[0] ?? {}) as { first?: string | null; last?: string | null; days?: number };
@@ -786,6 +1128,7 @@ export class D1Store implements Store {
       push('gsc', 'search', gsc);
       push('bing', 'search', bing);
       push('cloudflare', 'ai_crawlers', crawl);
+      push('cloudflare', 'search_crawlers', searchCrawl);
       push('cloudflare', 'web_analytics', rum);
       push('import', 'ai_citations', cites);
     }

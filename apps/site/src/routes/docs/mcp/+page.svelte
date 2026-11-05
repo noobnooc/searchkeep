@@ -44,6 +44,9 @@
     'Which docs pages have been losing clicks for the last three months, and why?',
     'Is any AI crawler getting 404s or 5xx from us? Group by crawler and path.',
     'Inspect https://acme.com/pricing in Google and tell me if it is indexed.',
+    'Which of our sitemap pages are not indexed, and why? Any structured data errors?',
+    'How often did Googlebot crawl us this week, and which pages answered 404?',
+    'Which pages get traffic from Google Discover or image search?',
     'Which pages get the most visits from AI assistants, and do they also rank in search?',
   ];
 </script>
@@ -127,8 +130,9 @@
     <tbody>
       <tr><td><code>site</code></td><td><code>string</code></td><td>Site <code>id</code> or domain from <code>SITES</code>. May be omitted when only one site is configured.</td></tr>
       <tr><td><code>start</code>, <code>end</code></td><td><code>YYYY-MM-DD</code></td><td>Inclusive UTC date range. <code>end</code> defaults to the latest day with data, <code>start</code> to <code>end</code> minus <code>days</code> plus one.</td></tr>
-      <tr><td><code>days</code></td><td><code>number</code></td><td>Window length when <code>start</code> is omitted. Defaults to 28 (7 for <code>ai_crawlers</code>).</td></tr>
+      <tr><td><code>days</code></td><td><code>number</code></td><td>Window length when <code>start</code> is omitted. Defaults to 28 (7 for <code>ai_crawlers</code> and <code>search_crawlers</code>).</td></tr>
       <tr><td><code>source</code></td><td><code>"gsc" | "bing"</code></td><td>Search engine for search-performance tools. Defaults to <code>gsc</code>. Bing data is weekly, so Bing ranges are aligned to whole weeks.</td></tr>
+      <tr><td><code>searchType</code></td><td><code>"web" | "image" | "video" | "news" | "discover" | "googleNews"</code></td><td>Search Console search type for search-performance tools. Defaults to <code>web</code>. Discover and Google News report pages only.</td></tr>
       <tr><td><code>brand</code></td><td><code>"all" | "brand" | "non_brand"</code></td><td>Brand split using the configured brand regex. Defaults to <code>all</code>.</td></tr>
       <tr><td><code>limit</code></td><td><code>number</code></td><td>Maximum rows returned (at most 500). Results are aggregated on the server and capped.</td></tr>
     </tbody>

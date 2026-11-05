@@ -15,6 +15,13 @@
       "when": 1793789244806,
       "tag": "0001_site_configs",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1793895656507,
+      "tag": "0002_coverage_crawlers_search_types",
+      "breakpoints": true
     }
   ]
 }

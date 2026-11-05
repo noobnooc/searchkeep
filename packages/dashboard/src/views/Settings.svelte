@@ -129,7 +129,7 @@
   }
 
   // ---- coverage ---------------------------------------------------------
-  const DATASET_LABEL: Record<string, string> = { search: 'Search performance', ai_crawlers: 'AI crawler requests', web_analytics: 'Web Analytics', ai_citations: 'AI citations', web_vitals: 'Web Vitals' };
+  const DATASET_LABEL: Record<string, string> = { search: 'Search performance', ai_crawlers: 'AI crawler requests', search_crawlers: 'Search engine crawler requests', web_analytics: 'Web Analytics', ai_citations: 'AI citations', web_vitals: 'Web Vitals' };
   const SOURCE_LABEL: Record<string, string> = { gsc: 'Search Console', bing: 'Bing', cloudflare: 'Cloudflare', import: 'CSV import' };
   type CovRow = Coverage & { siteId: string };
   const covCols: Column<CovRow>[] = [

@@ -92,7 +92,7 @@ describe('cloudflare', () => {
       fetch: (async () =>
         new Response(JSON.stringify({ data: null, errors: [{ message: 'zone not authorized' }] }))) as unknown as typeof fetch,
     });
-    await expect(cf.aiCrawlerRequests('z', { start: '2026-10-01', end: '2026-10-01' }, ['GPTBot'])).rejects.toThrow(/zone not authorized/);
+    await expect(cf.crawlerRequests('z', { start: '2026-10-01', end: '2026-10-01' }, ['GPTBot'])).rejects.toThrow(/zone not authorized/);
   });
 
   it('asks for whole days and flags a range that hit the page limit', async () => {
@@ -114,7 +114,7 @@ describe('cloudflare', () => {
         return new Response(JSON.stringify({ data: { viewer: { zones: [{ httpRequestsAdaptiveGroups: full }] } } }));
       }) as unknown as typeof fetch,
     });
-    const res = await cf.aiCrawlerRequests('z', { start: '2026-10-01', end: '2026-10-30' }, ['GPTBot']);
+    const res = await cf.crawlerRequests('z', { start: '2026-10-01', end: '2026-10-30' }, ['GPTBot']);
     expect(variables).toMatchObject({ start: '2026-10-01T00:00:00Z', end: '2026-10-31T00:00:00Z' });
     expect(res.complete).toBe(false);
   });

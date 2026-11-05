@@ -3,7 +3,7 @@
  * Adapters are thin API clients built on `fetch`; all scheduling, budgeting and
  * normalization lives in core.
  */
-import type { DateRange, IsoDate, SitemapRecord } from './types.js';
+import type { DateRange, GscSearchType, IsoDate, RichResultIssue, SitemapRecord } from './types.js';
 
 /**
  * Rows of a query over several days. `complete` is false when the result hit
@@ -22,15 +22,22 @@ export interface GscRow {
   position: number;
 }
 
+export type GscDimension = 'date' | 'query' | 'page' | 'country' | 'device' | 'searchAppearance';
+
 export interface GscSearchAnalyticsRequest {
   property: string;
   startDate: IsoDate;
   endDate: IsoDate;
-  dimensions: Array<'date' | 'query' | 'page' | 'country' | 'device'>;
+  /** `searchAppearance` can only be requested on its own; filter by it to get a series. */
+  dimensions: GscDimension[];
   rowLimit: number;
   startRow?: number;
   /** `final` (default) or `all` (includes fresh, not-yet-final data). */
   dataState?: 'final' | 'all';
+  /** Default `web`. */
+  type?: GscSearchType;
+  /** Only rows with this search appearance. */
+  searchAppearance?: string;
 }
 
 export interface GscUrlInspection {
@@ -46,6 +53,9 @@ export interface GscUrlInspection {
   crawledAs: string | null;
   mobileUsabilityVerdict: string | null;
   richResultsVerdict: string | null;
+  /** Rich result types detected on the page. */
+  richResultTypes: string[];
+  richResultIssues: RichResultIssue[];
   inspectionResultLink: string | null;
 }
 
@@ -123,8 +133,11 @@ export interface CloudflareVitalsRow {
 }
 
 export interface CloudflareAnalyticsClient {
-  /** Requests from known AI crawlers on a zone, per day, for the days of `range` (both ends included). */
-  aiCrawlerRequests(zoneId: string, range: DateRange, userAgentPatterns: string[]): Promise<RangeResult<CloudflareCrawlerRow>>;
+  /**
+   * Requests on a zone whose user agent contains one of `userAgentPatterns` (case-sensitive),
+   * per day, for the days of `range` (both ends included). Used for AI and search engine crawlers.
+   */
+  crawlerRequests(zoneId: string, range: DateRange, userAgentPatterns: string[]): Promise<RangeResult<CloudflareCrawlerRow>>;
   /** Web Analytics (RUM) page loads per day, path and referrer host for the days of `range`. */
   webAnalytics(accountId: string, siteTag: string, range: DateRange): Promise<RangeResult<CloudflareRumRow>>;
   /** Web Vitals p75 per day and path for the days of `range`. */
@@ -137,8 +150,22 @@ export interface CloudflareAnalyticsClient {
   listWebAnalyticsSites?(accountId: string): Promise<Array<{ siteTag: string; host: string | null }>>;
 }
 
+/** One sitemap file: page URLs (`urlset`) or further sitemaps (`sitemapindex`). */
+export interface SitemapContents {
+  urls: string[];
+  sitemaps: string[];
+  /** The file was larger than the reader reads; `urls` holds what it read. */
+  truncated?: boolean;
+}
+
+/** Reads the site's own sitemaps (plain HTTPS GET), for the index coverage snapshot. */
+export interface SitemapReader {
+  read(url: string): Promise<SitemapContents>;
+}
+
 export interface SourceClients {
   gsc?: GscClient;
   bing?: BingClient;
   cloudflare?: CloudflareAnalyticsClient;
+  sitemaps?: SitemapReader;
 }

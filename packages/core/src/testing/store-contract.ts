@@ -6,9 +6,9 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { loadConfig, type SearchkeepConfig } from '../config.js';
 import { addDays } from '../dates.js';
-import type { SourceClients } from '../sources.js';
+import type { SitemapContents, SourceClients } from '../sources.js';
 import type { Store } from '../store.js';
-import type { SearchFactInput } from '../types.js';
+import type { GscSearchType, PerformanceDimension, SearchFactInput, UrlInspectionInput } from '../types.js';
 import { SourceError } from '../http.js';
 import { runSync, type SyncContext } from '../sync/run-sync.js';
 import { syncProgress } from '../sync/progress.js';
@@ -22,8 +22,8 @@ import {
   findQuickWins,
   queryPerformance,
 } from '../analysis/search.js';
-import { aiCrawlers, geoFunnel } from '../analysis/geo.js';
-import { listSites, setupStatus } from '../analysis/ops.js';
+import { aiCrawlers, geoFunnel, searchCrawlers } from '../analysis/geo.js';
+import { indexCoverage, listSites, setupStatus } from '../analysis/ops.js';
 import { evaluateReadiness } from '../auth/readiness.js';
 
 const SITE = {
@@ -47,8 +47,19 @@ const SITE_2 = {
 /** Without Cloudflare: for tests about the search sources (the Cloudflare lookback is many units). */
 const searchOnly = (site: typeof SITE) => ({ ...site, cloudflareZoneId: undefined, webAnalyticsSiteTag: undefined });
 
+/**
+ * Search types and search appearance are off unless a test turns them on, so the tests about
+ * budgets and call counts keep counting web search only.
+ */
 function config(extra: Record<string, string> = {}, sites: object[] = [SITE]): SearchkeepConfig {
-  return loadConfig({ SITES: JSON.stringify(sites), BRAND_REGEX: 'acme', CLOUDFLARE_ACCOUNT_ID: 'acct', ...extra });
+  return loadConfig({
+    SITES: JSON.stringify(sites),
+    BRAND_REGEX: 'acme',
+    CLOUDFLARE_ACCOUNT_ID: 'acct',
+    GSC_SEARCH_TYPES: 'none',
+    GSC_SEARCH_APPEARANCE: 'false',
+    ...extra,
+  });
 }
 
 export function storeContract(name: string, makeStore: () => Promise<Store>): void {
@@ -236,6 +247,156 @@ export function storeContract(name: string, makeStore: () => Promise<Store>): vo
         });
       });
 
+      it("gives Bing site totals the impression-weighted position of Bing's query rows", async () => {
+        // A weekly query row on a day without totals adds to the position, not to the totals.
+        await store.writeSearchFacts('acme', 'bing', [
+          { date: '2026-10-08', kind: 'query', query: 'shoe laces', clicks: 1, impressions: 10, position: 10 },
+        ]);
+        const r = { start: '2026-10-05', end: '2026-10-11' };
+        expect(await store.queryPerformance({ siteId: 'acme', source: 'bing', range: r, dimensions: [] })).toEqual([
+          { clicks: 5, impressions: 60, ctr: 0.0833, position: 5.2 },
+        ]);
+        expect(await store.queryPerformance({ siteId: 'acme', source: 'bing', range: r, dimensions: ['date'], orderBy: 'date' })).toEqual([
+          { date: '2026-10-06', clicks: 5, impressions: 60, ctr: 0.0833, position: 4 },
+        ]);
+        const [week] = await store.queryPerformance({
+          siteId: 'acme',
+          source: 'bing',
+          range: r,
+          dimensions: ['week'],
+          orderBy: 'position',
+        });
+        expect(week).toMatchObject({ week: '2026-10-05', clicks: 5, position: 5.2 });
+        // Search Console totals keep their own position.
+        expect((await store.queryPerformance({ siteId: 'acme', source: 'gsc', range, dimensions: [] }))[0]!.position).toBe(6);
+      });
+
+      it('keeps the other search types apart from web search', async () => {
+        await store.writeSearchFacts(
+          'acme',
+          'gsc',
+          [
+            { date: '2026-10-02', kind: 'total', clicks: 3, impressions: 90, position: 8 },
+            { date: '2026-10-02', kind: 'query_page', query: 'acme shoes', page: '/shoes', clicks: 3, impressions: 90, position: 8 },
+          ],
+          'image',
+        );
+        await store.writeSearchFacts(
+          'acme',
+          'gsc',
+          [{ date: '2026-10-02', kind: 'page', page: '/blog/running', clicks: 7, impressions: 70 }],
+          'discover',
+        );
+        const q = (searchType: GscSearchType, dimensions: PerformanceDimension[]) =>
+          store.queryPerformance({ siteId: 'acme', source: 'gsc', searchType, range, dimensions });
+        expect((await q('web', []))[0]).toMatchObject({ clicks: 280, impressions: 5600 });
+        expect(await q('image', [])).toEqual([{ clicks: 3, impressions: 90, ctr: 0.0333, position: 8 }]);
+        expect(await q('image', ['query'])).toEqual([{ query: 'acme shoes', clicks: 3, impressions: 90, ctr: 0.0333, position: 8 }]);
+        expect(await q('discover', ['page'])).toEqual([{ page: '/blog/running', clicks: 7, impressions: 70, ctr: 0.1, position: null }]);
+        expect(await q('video', [])).toEqual([]);
+        // Web search data stays as it was; the latest date is web search's.
+        expect((await q('web', ['page'])).map((r) => r.page)).toEqual(['/shoes', '/blog/running']);
+        expect(await store.latestDate('acme', 'gsc')).toBe('2026-10-14');
+      });
+
+      it('stores search appearance on its own', async () => {
+        await store.writeSearchAppearances('acme', 'web', [
+          { date: '2026-10-01', appearance: 'VIDEO', clicks: 4, impressions: 40, position: 3 },
+          { date: '2026-10-02', appearance: 'VIDEO', clicks: 2, impressions: 60, position: 5 },
+          { date: '2026-10-02', appearance: 'REVIEW_SNIPPET', clicks: 1, impressions: 10, position: 7 },
+        ]);
+        expect(
+          await store.writeSearchAppearances('acme', 'web', [
+            { date: '2026-10-01', appearance: 'VIDEO', clicks: 4, impressions: 40, position: 3 },
+          ]),
+        ).toBe(0);
+        const rows = await store.queryPerformance({ siteId: 'acme', source: 'gsc', range, dimensions: ['appearance'] });
+        expect(rows).toEqual([
+          { appearance: 'VIDEO', clicks: 6, impressions: 100, ctr: 0.06, position: 4.2 },
+          { appearance: 'REVIEW_SNIPPET', clicks: 1, impressions: 10, ctr: 0.1, position: 7 },
+        ]);
+        const video = await store.queryPerformance({
+          siteId: 'acme',
+          source: 'gsc',
+          range,
+          dimensions: ['date'],
+          filters: { appearance: 'VIDEO' },
+          orderBy: 'date',
+          order: 'asc',
+        });
+        expect(video.map((r) => [r.date, r.clicks])).toEqual([
+          ['2026-10-01', 4],
+          ['2026-10-02', 2],
+        ]);
+        await expect(
+          store.queryPerformance({ siteId: 'acme', source: 'gsc', range, dimensions: ['appearance', 'query'] }),
+        ).rejects.toThrow();
+      });
+
+      it('stores query and page rows per country and device', async () => {
+        await store.writeSearchSegments('acme', [
+          {
+            date: '2026-10-01',
+            kind: 'query',
+            key: 'acme shoes',
+            country: 'USA',
+            device: 'mobile',
+            clicks: 5,
+            impressions: 50,
+            position: 2,
+          },
+          {
+            date: '2026-10-01',
+            kind: 'query',
+            key: 'running shoes',
+            country: 'usa',
+            device: 'DESKTOP',
+            clicks: 1,
+            impressions: 30,
+            position: 9,
+          },
+          {
+            date: '2026-10-01',
+            kind: 'query',
+            key: 'running shoes',
+            country: 'deu',
+            device: 'MOBILE',
+            clicks: 2,
+            impressions: 20,
+            position: 11,
+          },
+          { date: '2026-10-01', kind: 'page', key: '/shoes', country: 'usa', device: 'MOBILE', clicks: 6, impressions: 70, position: 3 },
+        ]);
+        const usa = await store.queryPerformance({
+          siteId: 'acme',
+          source: 'gsc',
+          range,
+          dimensions: ['query'],
+          filters: { country: 'usa' },
+        });
+        expect(usa.map((r) => [r.query, r.clicks])).toEqual([
+          ['acme shoes', 5],
+          ['running shoes', 1],
+        ]);
+        const byCountry = await store.queryPerformance({
+          siteId: 'acme',
+          source: 'gsc',
+          range,
+          dimensions: ['query', 'country'],
+          filters: { brand: 'non_brand' },
+          orderBy: 'clicks',
+        });
+        expect(byCountry.map((r) => [r.query, r.country, r.clicks])).toEqual([
+          ['running shoes', 'deu', 2],
+          ['running shoes', 'usa', 1],
+        ]);
+        const pages = await store.queryPerformance({ siteId: 'acme', source: 'gsc', range, dimensions: ['page', 'device'] });
+        expect(pages).toEqual([{ page: '/shoes', device: 'MOBILE', clicks: 6, impressions: 70, ctr: 0.0857, position: 3 }]);
+        await expect(
+          store.queryPerformance({ siteId: 'acme', source: 'gsc', range, dimensions: ['query', 'page'], filters: { country: 'usa' } }),
+        ).rejects.toThrow();
+      });
+
       it('reports coverage and latest date', async () => {
         expect(await store.latestDate('acme', 'gsc')).toBe('2026-10-14');
         const cov = await store.coverage('acme');
@@ -296,6 +457,127 @@ export function storeContract(name: string, makeStore: () => Promise<Store>): vo
       expect((await store.queryWebVitals('acme', range, 10))[0]).toMatchObject({ page: '/a', lcpP75: 2000, samples: 10 });
       await store.writeAiCitations('acme', [{ date: '2026-10-01', page: '/a', surface: 'bing_copilot', citations: 7 }]);
       expect(await store.queryAiCitations('acme', range, 10)).toEqual([{ page: '/a', value: 7 }]);
+    });
+
+    it('keeps search engine crawlers apart from AI crawlers', async () => {
+      await store.writeCrawlerRequests('acme', [
+        { date: '2026-10-01', crawler: 'GPTBot', operator: 'OpenAI', purpose: 'training', path: '/a', status: 200, requests: 5 },
+      ]);
+      const rows = [
+        { date: '2026-10-01', crawler: 'Googlebot', operator: 'Google', purpose: 'search' as const, path: '/a', status: 200, requests: 9 },
+        {
+          date: '2026-10-01',
+          crawler: 'Googlebot',
+          operator: 'Google',
+          purpose: 'search' as const,
+          path: '/old',
+          status: 404,
+          requests: 3,
+        },
+        { date: '2026-10-02', crawler: 'Bingbot', operator: 'Microsoft', purpose: 'search' as const, path: '/a', status: 200, requests: 2 },
+      ];
+      expect(await store.writeCrawlerRequests('acme', rows, 'search')).toBeGreaterThan(0);
+      expect(await store.writeCrawlerRequests('acme', rows, 'search')).toBe(0);
+      const range = { start: '2026-10-01', end: '2026-10-02' };
+      expect(await store.queryCrawlers({ siteId: 'acme', range, groupBy: ['crawler'] })).toEqual([{ crawler: 'GPTBot', requests: 5 }]);
+      expect(await store.queryCrawlers({ siteId: 'acme', kind: 'search', range, groupBy: ['crawler'] })).toEqual([
+        { crawler: 'Googlebot', requests: 12 },
+        { crawler: 'Bingbot', requests: 2 },
+      ]);
+      expect(await store.queryCrawlers({ siteId: 'acme', kind: 'search', range, groupBy: ['status'], crawler: 'googlebot' })).toEqual([
+        { status: 200, requests: 9 },
+        { status: 404, requests: 3 },
+      ]);
+      const cov = await store.coverage('acme');
+      expect(cov.find((c) => c.dataset === 'search_crawlers')).toMatchObject({
+        source: 'cloudflare',
+        firstDate: '2026-10-01',
+        lastDate: '2026-10-02',
+      });
+    });
+
+    it('tracks index coverage: sitemap URLs, inspections and changes', async () => {
+      const u = (path: string) => `https://acme.com${path}`;
+      expect(await store.updateIndexUrls('acme', [u('/'), u('/a'), u('/b'), u('/c')], [], '2026-10-01')).toBe(4);
+      expect(await store.updateIndexUrls('acme', [u('/a')], [], '2026-10-02')).toBe(0);
+      expect((await store.listIndexUrls('acme')).sort()).toEqual([u('/'), u('/a'), u('/b'), u('/c')]);
+      const inspection = (url: string, at: string, over: Partial<UrlInspectionInput> = {}): UrlInspectionInput => ({
+        url,
+        inspectedAt: at,
+        verdict: 'PASS',
+        coverageState: 'Submitted and indexed',
+        indexingState: 'INDEXING_ALLOWED',
+        pageFetchState: 'SUCCESSFUL',
+        robotsTxtState: 'ALLOWED',
+        lastCrawlTime: '2026-09-30T10:00:00Z',
+        googleCanonical: url,
+        userCanonical: url,
+        crawledAs: 'MOBILE',
+        richResultsVerdict: null,
+        richResultTypes: [],
+        richResultIssues: [],
+        ...over,
+      });
+      const day1 = '2026-10-01T05:00:00.000Z';
+      await store.writeUrlInspections('acme', [
+        inspection(u('/'), day1, {
+          richResultsVerdict: 'PASS',
+          richResultTypes: ['Breadcrumbs', 'FAQ'],
+          richResultIssues: [{ type: 'FAQ', severity: 'WARNING', message: 'Missing field "acceptedAnswer"' }],
+        }),
+        inspection(u('/a'), day1, { verdict: 'NEUTRAL', coverageState: 'Crawled - currently not indexed', googleCanonical: null }),
+        inspection(u('/b'), day1, { verdict: 'FAIL', coverageState: 'Soft 404', pageFetchState: 'SOFT_404' }),
+        // Not tracked (not in a sitemap): ignored.
+        inspection(u('/elsewhere'), day1),
+      ]);
+      // Never inspected first, then the oldest inspections.
+      expect(await store.listUrlsToInspect('acme', '2026-10-08T00:00:00.000Z', 2)).toEqual([u('/c'), u('/')]);
+      expect(await store.listUrlsToInspect('acme', '2026-10-01T00:00:00.000Z', 10)).toEqual([u('/c')]);
+
+      // A week later: /a got indexed, /b failed to inspect (its last state is kept).
+      const day8 = '2026-10-08T05:00:00.000Z';
+      await store.writeUrlInspections('acme', [
+        inspection(u('/a'), day8),
+        { ...inspection(u('/b'), day8), error: 'gsc: HTTP 400: URL is not in the property' },
+      ]);
+      const all = await store.indexCoverage({ siteId: 'acme', changedSince: '2026-10-05T00:00:00.000Z', limit: 10 });
+      expect(all.totals).toMatchObject({ urls: 4, inspected: 3, errors: 1, oldestInspectedAt: day1, newestInspectedAt: day8 });
+      expect(all.states).toEqual(
+        expect.arrayContaining([
+          { verdict: 'PASS', coverageState: 'Submitted and indexed', urls: 2 },
+          { verdict: 'FAIL', coverageState: 'Soft 404', urls: 1 },
+          { verdict: 'PENDING', coverageState: null, urls: 1 },
+        ]),
+      );
+      expect(all.richResults).toEqual({
+        verdicts: [{ verdict: 'PASS', urls: 1 }],
+        types: [
+          { type: 'Breadcrumbs', urls: 1, urlsWithIssues: 0 },
+          { type: 'FAQ', urls: 1, urlsWithIssues: 1 },
+        ],
+        issues: [{ type: 'FAQ', severity: 'WARNING', message: 'Missing field "acceptedAnswer"', urls: 1 }],
+      });
+      // Problems first, then URLs not inspected yet, then indexed ones.
+      expect(all.urls.map((r) => r.url)).toEqual([u('/b'), u('/c'), u('/'), u('/a')]);
+      expect(all.urls[0]).toMatchObject({ coverageState: 'Soft 404', error: 'gsc: HTTP 400: URL is not in the property' });
+      expect(all.urls[2]).toMatchObject({
+        richResultTypes: ['Breadcrumbs', 'FAQ'],
+        richResultIssues: [{ type: 'FAQ', severity: 'WARNING' }],
+      });
+      expect(all.changes).toEqual([
+        { url: u('/a'), from: 'Crawled - currently not indexed', to: 'Submitted and indexed', changedAt: day8 },
+      ]);
+
+      const notIndexed = await store.indexCoverage({ siteId: 'acme', coverageState: 'soft', changedSince: day8, limit: 10 });
+      expect(notIndexed.urls.map((r) => r.url)).toEqual([u('/b')]);
+      const pending = await store.indexCoverage({ siteId: 'acme', verdict: 'PENDING', changedSince: day8, limit: 10 });
+      expect(pending.urls.map((r) => r.url)).toEqual([u('/c')]);
+      const rich = await store.indexCoverage({ siteId: 'acme', richResultIssues: true, changedSince: day8, limit: 10 });
+      expect(rich.urls.map((r) => r.url)).toEqual([u('/')]);
+
+      // URLs that left the sitemaps are dropped.
+      expect(await store.updateIndexUrls('acme', [], [u('/c')], '2026-10-09')).toBe(1);
+      expect((await store.indexCoverage({ siteId: 'acme', changedSince: day8, limit: 10 })).totals.urls).toBe(3);
     });
 
     it('replaces crawl issue and sitemap snapshots', async () => {
@@ -474,18 +756,33 @@ export function storeContract(name: string, makeStore: () => Promise<Store>): vo
         gsc: {
           async searchAnalytics(req) {
             const days = daysOf(req.startDate, req.endDate);
+            const type = req.type ?? 'web';
+            // Image search has data like web search, Discover has pages without positions, the others nothing.
+            if (type !== 'web' && type !== 'image' && type !== 'discover') return [];
+            const dims = req.dimensions;
+            const row = (keys: string[], clicks: number, impressions: number, position: number) => ({
+              keys,
+              clicks,
+              impressions,
+              ctr: clicks / impressions,
+              position: type === 'discover' ? 0 : position,
+            });
             const rows =
-              req.dimensions.length === 1
-                ? days.map((d) => ({ keys: [d], clicks: 10, impressions: 100, ctr: 0.1, position: 5 }))
-                : req.dimensions.includes('country')
-                  ? days.map((d) => ({ keys: [d, 'usa', 'MOBILE'], clicks: 10, impressions: 100, ctr: 0.1, position: 5 }))
-                  : days.map((d) => ({
-                      keys: [d, 'acme widgets', 'https://acme.com/widgets?ref=x'],
-                      clicks: 9,
-                      impressions: 80,
-                      ctr: 0.11,
-                      position: 3,
-                    }));
+              dims[0] === 'searchAppearance'
+                ? [row(['VIDEO'], 20, 200, 4), row(['REVIEW_SNIPPET'], 6, 90, 6)]
+                : req.searchAppearance
+                  ? days.map((d) => row([d], req.searchAppearance === 'VIDEO' ? 2 : 1, 20, req.searchAppearance === 'VIDEO' ? 4 : 6))
+                  : dims.length === 1
+                    ? days.map((d) => row([d], 10, 100, 5))
+                    : dims.length === 4
+                      ? days.map((d) =>
+                          row([d, dims[1] === 'query' ? 'acme widgets' : 'https://acme.com/widgets', 'usa', 'MOBILE'], 4, 40, 3),
+                        )
+                      : dims.includes('country')
+                        ? days.map((d) => row([d, 'usa', 'MOBILE'], 10, 100, 5))
+                        : dims.length === 2
+                          ? days.map((d) => row([d, 'https://acme.com/widgets'], 3, 30, 0))
+                          : days.map((d) => row([d, 'acme widgets', 'https://acme.com/widgets?ref=x'], 9, 80, 3));
             const from = req.startRow ?? 0;
             return rows.slice(from, from + req.rowLimit);
           },
@@ -518,12 +815,14 @@ export function storeContract(name: string, makeStore: () => Promise<Store>): vo
           },
         },
         cloudflare: {
-          async aiCrawlerRequests(_zone, range) {
+          async crawlerRequests(_zone, range, patterns) {
             return {
               complete: true,
               rows: daysOf(range.start, range.end).map((date) => ({
                 date,
-                userAgent: 'Mozilla/5.0 (compatible; GPTBot/1.2; +https://openai.com/gptbot)',
+                userAgent: patterns.includes('Googlebot')
+                  ? 'Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)'
+                  : 'Mozilla/5.0 (compatible; GPTBot/1.2; +https://openai.com/gptbot)',
                 host: 'acme.com',
                 path: '/widgets',
                 status: 200,
@@ -588,7 +887,12 @@ export function storeContract(name: string, makeStore: () => Promise<Store>): vo
         expect(funnel.totals.crawled).toBeGreaterThan(0);
         expect(funnel.totals.aiVisits).toBeGreaterThan(0);
         const crawlers = await aiCrawlers({ store, config: cfg }, { start: '2026-10-01', end: '2026-10-19' });
-        expect(crawlers.rows[0]).toMatchObject({ crawler: 'GPTBot' });
+        expect(crawlers.rows).toEqual([expect.objectContaining({ crawler: 'GPTBot' })]);
+        const engines = await searchCrawlers(
+          { store, config: cfg },
+          { start: '2026-10-01', end: '2026-10-19', groupBy: ['crawler', 'purpose'] },
+        );
+        expect(engines.rows).toEqual([{ crawler: 'Googlebot', purpose: 'search', requests: 76 }]);
 
         // Everything is in: the progress report says so.
         const progress = await syncProgress({ store, config: cfg, clients: clients(), now: () => NOW });
@@ -598,6 +902,7 @@ export function storeContract(name: string, makeStore: () => Promise<Store>): vo
         expect(byDataset.gsc).toMatchObject({ state: 'done', from: '2026-09-20', target: '2026-09-20' });
         expect(byDataset.bing).toMatchObject({ state: 'done', percent: 100 });
         expect(byDataset.ai_crawlers).toMatchObject({ state: 'done', from: '2026-09-20', target: '2026-09-20' });
+        expect(byDataset.search_crawlers).toMatchObject({ state: 'done', from: '2026-09-20', target: '2026-09-20' });
         expect(byDataset.web_analytics).toMatchObject({ state: 'done', from: '2026-07-22', target: '2026-07-22' });
 
         // A second pass the same day has nothing due.
@@ -787,8 +1092,8 @@ export function storeContract(name: string, makeStore: () => Promise<Store>): vo
 
       it('retries a Cloudflare range the API refuses as shorter ranges', async () => {
         const c = clients();
-        const crawl = c.cloudflare!.aiCrawlerRequests.bind(c.cloudflare);
-        c.cloudflare!.aiCrawlerRequests = async (zone, range, patterns) => {
+        const crawl = c.cloudflare!.crawlerRequests.bind(c.cloudflare);
+        c.cloudflare!.crawlerRequests = async (zone, range, patterns) => {
           if (daysOf(range.start, range.end).length > 7)
             throw new SourceError('cloudflare', 200, 'GraphQL: cannot request a time range wider than 1w');
           return crawl(zone, range, patterns);
@@ -1008,6 +1313,220 @@ export function storeContract(name: string, makeStore: () => Promise<Store>): vo
         expect(await store.getMeta(syncKeys.backoff)).toBeNull();
       });
 
+      it('syncs other search types, search appearance and opt-in segments, each with its own cursors', async () => {
+        const cfg = config(
+          {
+            SYNC_MAX_CALLS_PER_RUN: '900',
+            GSC_BACKFILL_MONTHS: '1',
+            GSC_SEARCH_TYPES: 'image,video,discover',
+            GSC_SEARCH_APPEARANCE: 'true',
+            GSC_SEGMENT_SITES: 'acme',
+          },
+          [searchOnly(SITE), searchOnly(SITE_2)],
+        );
+        const c = clients();
+        const calls: string[] = [];
+        const searchAnalytics = c.gsc!.searchAnalytics.bind(c.gsc);
+        c.gsc!.searchAnalytics = async (req) => {
+          calls.push(`${req.type ?? 'web'}:${req.dimensions.join('+')}${req.searchAppearance ? `=${req.searchAppearance}` : ''}`);
+          return searchAnalytics(req);
+        };
+        const run = await sync(store, { config: cfg, clients: c, trigger: 'manual', now: NOW, timeBudgetMs: 60_000 });
+        expect(run.status).toBe('ok');
+        const ctx = { store, config: cfg };
+        const range = { start: '2026-10-01', end: '2026-10-19' };
+        // Image search is kept apart from web search.
+        expect((await queryPerformance(ctx, { site: 'acme', ...range })).rows[0]).toMatchObject({ clicks: 190 });
+        const image = await queryPerformance(ctx, { site: 'acme', ...range, searchType: 'image', dimensions: ['query'] });
+        expect(image).toMatchObject({ searchType: 'image', rows: [{ query: 'acme widgets', clicks: 171, position: 3 }] });
+        // Discover: pages only, without positions; queries are refused.
+        const discover = await queryPerformance(ctx, { site: 'acme', ...range, searchType: 'discover', dimensions: ['page'] });
+        expect(discover.rows).toEqual([{ page: '/widgets', clicks: 57, impressions: 570, ctr: 0.1, position: null }]);
+        await expect(queryPerformance(ctx, { site: 'acme', ...range, searchType: 'discover', dimensions: ['query'] })).rejects.toThrow(
+          /pages, not queries/,
+        );
+        await expect(findQuickWins(ctx, { site: 'acme', ...range, searchType: 'discover' })).rejects.toThrow(/pages only/);
+        // Video search had no data: one call per range, nothing stored.
+        expect((await queryPerformance(ctx, { site: 'acme', ...range, searchType: 'video' })).rows).toEqual([]);
+        // News is not synced.
+        expect(calls.some((x) => x.startsWith('news:') || x.startsWith('googleNews:'))).toBe(false);
+        expect((await queryPerformance(ctx, { site: 'acme', ...range, searchType: 'news' })).notes).toContain(
+          'The news search type is not synced (GSC_SEARCH_TYPES), so there is no data for it.',
+        );
+        // Search appearance takes two steps: the appearances of a range, then one series each.
+        expect(calls.filter((x) => x === 'web:searchAppearance')).toHaveLength(4);
+        expect(calls.filter((x) => x === 'web:date=VIDEO')).toHaveLength(4);
+        const appearance = await queryPerformance(ctx, { site: 'acme', ...range, dimensions: ['appearance'] });
+        expect(appearance.rows.map((r) => [r.appearance, r.clicks])).toEqual([
+          ['VIDEO', 38],
+          ['REVIEW_SNIPPET', 19],
+        ]);
+        await expect(queryPerformance(ctx, { site: 'acme', ...range, dimensions: ['appearance', 'page'] })).rejects.toThrow(/on its own/);
+        // Country and device of queries and pages, for the opted-in site only.
+        const usa = await queryPerformance(ctx, { site: 'acme', ...range, dimensions: ['query'], country: 'usa' });
+        expect(usa.rows).toEqual([expect.objectContaining({ query: 'acme widgets', clicks: 76 })]);
+        const mobile = await queryPerformance(ctx, { site: 'acme', ...range, dimensions: ['page', 'device'] });
+        expect(mobile.rows).toEqual([expect.objectContaining({ page: '/widgets', device: 'MOBILE', clicks: 76 })]);
+        await expect(queryPerformance(ctx, { site: 'beta', ...range, dimensions: ['query'], country: 'usa' })).rejects.toThrow(
+          /GSC_SEGMENT_SITES/,
+        );
+        // Each dataset backfills on its own cursor (segments are capped at 3 months; 1 here).
+        const cursors = await store.listMeta('gsc:');
+        for (const d of ['image', 'video', 'discover', 'appearance', 'segments']) {
+          expect(cursors[`gsc:${d}:backfill:acme`]).toBe('2026-09-20');
+        }
+        expect(cursors['gsc:backfill:acme']).toBe('2026-09-20');
+        expect(cursors['gsc:segments:backfill:beta']).toBeUndefined();
+        // A second run the same day has nothing due.
+        expect((await sync(store, { config: cfg, clients: c, trigger: 'cron', now: NOW })).status).toBe('skipped');
+      });
+
+      describe('index coverage', () => {
+        const SITEMAPS: Record<string, SitemapContents> = {
+          'https://acme.com/sitemap.xml': {
+            urls: [],
+            sitemaps: ['https://acme.com/s1.xml', 'https://acme.com/s2.xml', 'https://elsewhere.example/s3.xml'],
+          },
+          'https://acme.com/s1.xml': { urls: ['https://acme.com/', 'https://acme.com/a', 'https://www.acme.com/b'], sitemaps: [] },
+          'https://acme.com/s2.xml': { urls: ['https://acme.com/c', 'https://other.example/x', 'https://acme.com/d'], sitemaps: [] },
+        };
+        const setup = () => {
+          const files = structuredClone(SITEMAPS);
+          const read: string[] = [];
+          const inspected: string[] = [];
+          const c: SourceClients = {
+            ...clients(),
+            sitemaps: {
+              async read(url) {
+                read.push(url);
+                const f = files[url];
+                if (!f) throw new SourceError('sitemap', 404, 'HTTP 404');
+                return f;
+              },
+            },
+          };
+          c.gsc!.inspectUrl = async (_property, url) => {
+            inspected.push(url);
+            if (url.endsWith('/d')) throw new SourceError('gsc', 400, 'HTTP 400: URL is not in the property');
+            const excluded = url.endsWith('/a');
+            return {
+              url,
+              verdict: excluded ? 'NEUTRAL' : 'PASS',
+              coverageState: excluded ? 'Crawled - currently not indexed' : 'Submitted and indexed',
+              indexingState: 'INDEXING_ALLOWED',
+              robotsTxtState: 'ALLOWED',
+              pageFetchState: 'SUCCESSFUL',
+              lastCrawlTime: '2026-10-10T08:00:00Z',
+              googleCanonical: excluded ? null : url,
+              userCanonical: null,
+              crawledAs: 'MOBILE',
+              mobileUsabilityVerdict: null,
+              richResultsVerdict: url.endsWith('/c') ? 'FAIL' : null,
+              richResultTypes: url.endsWith('/c') ? ['Product snippets'] : [],
+              richResultIssues: url.endsWith('/c')
+                ? [{ type: 'Product snippets', severity: 'ERROR', message: 'Missing field "name"' }]
+                : [],
+              inspectionResultLink: null,
+            };
+          };
+          return { c, files, read, inspected };
+        };
+        const gscOnly = [{ id: 'acme', domain: 'acme.com', gscProperty: 'sc-domain:acme.com' }];
+
+        it('inspects sitemap URLs in the property, up to the daily allowance, and keeps the changes', async () => {
+          const { c, files, read, inspected } = setup();
+          const cfg = config({ SYNC_MAX_CALLS_PER_RUN: '900', GSC_BACKFILL_MONTHS: '0', GSC_INSPECTIONS_PER_DAY: '3' }, gscOnly);
+          const ops = (now: Date) => ({ store, config: cfg, clients: c, now: () => now });
+          const run = await sync(store, { config: cfg, clients: c, trigger: 'cron', now: NOW });
+          expect(run.status).toBe('ok');
+          // Sitemaps on other hosts and URLs outside the property are left out.
+          expect(read).toEqual(['https://acme.com/sitemap.xml', 'https://acme.com/s1.xml', 'https://acme.com/s2.xml']);
+          expect(inspected).toEqual(['https://acme.com/', 'https://acme.com/a', 'https://acme.com/c']);
+          let cov = await indexCoverage(ops(NOW), { site: 'acme' });
+          expect(cov.totals).toMatchObject({ urls: 5, inspected: 3, indexed: 2, notIndexed: 1, pending: 2 });
+          expect(cov.richResults.issues).toEqual([
+            { type: 'Product snippets', severity: 'ERROR', message: 'Missing field "name"', urls: 1 },
+          ]);
+          expect(cov.urls[0]).toMatchObject({
+            url: 'https://acme.com/a',
+            verdict: 'NEUTRAL',
+            coverageState: 'Crawled - currently not indexed',
+          });
+
+          // The allowance for the day is spent.
+          expect((await sync(store, { config: cfg, clients: c, trigger: 'cron', now: NOW })).status).toBe('skipped');
+          expect(inspected).toHaveLength(3);
+
+          // The next day: the URLs not inspected yet. One Google refuses is recorded, not retried before the others.
+          const next = new Date('2026-10-21T04:00:00Z');
+          await sync(store, { config: cfg, clients: c, trigger: 'cron', now: next });
+          expect(inspected.slice(3)).toEqual(['https://acme.com/d', 'https://www.acme.com/b']);
+          cov = await indexCoverage(ops(next), { site: 'acme' });
+          expect(cov.totals).toMatchObject({ urls: 5, inspected: 5, errors: 1, pending: 0 });
+          expect((await indexCoverage(ops(next), { site: 'acme', verdict: 'ERROR' })).urls).toEqual([
+            expect.objectContaining({ url: 'https://acme.com/d', error: expect.stringContaining('not in the property') }),
+          ]);
+
+          // A week later every URL is due again. /a is indexed now, /c left the sitemaps.
+          files['https://acme.com/s2.xml']!.urls = ['https://acme.com/d'];
+          const inspect = c.gsc!.inspectUrl.bind(c.gsc);
+          c.gsc!.inspectUrl = async (property, url) => ({
+            ...(await inspect(property, url)),
+            verdict: 'PASS',
+            coverageState: 'Submitted and indexed',
+          });
+          const week = new Date('2026-10-28T04:00:00Z');
+          await sync(store, { config: cfg, clients: c, trigger: 'cron', now: week });
+          cov = await indexCoverage(ops(week), { site: 'acme' });
+          expect(cov.totals.urls).toBe(4);
+          expect(cov.changes).toEqual([
+            {
+              url: 'https://acme.com/a',
+              from: 'Crawled - currently not indexed',
+              to: 'Submitted and indexed',
+              changedAt: week.toISOString(),
+            },
+          ]);
+        });
+
+        it('stops for the day at the URL Inspection quota without pausing Search Console', async () => {
+          const { c, inspected } = setup();
+          c.gsc!.inspectUrl = async (_property, url) => {
+            inspected.push(url);
+            throw new SourceError('gsc', 429, 'HTTP 429: Quota exceeded', { rateLimited: true });
+          };
+          const cfg = config({ SYNC_MAX_CALLS_PER_RUN: '900', GSC_BACKFILL_MONTHS: '0' }, gscOnly);
+          const run = await sync(store, { config: cfg, clients: c, trigger: 'cron', now: NOW });
+          expect(run.status).toBe('ok');
+          expect(inspected).toHaveLength(1);
+          expect(await store.getMeta(syncKeys.backoff)).toBeNull();
+          await sync(store, { config: cfg, clients: c, trigger: 'cron', now: new Date('2026-10-20T05:00:00Z') });
+          expect(inspected).toHaveLength(1);
+        });
+
+        it('only uses the calls left over and never makes a run partial', async () => {
+          const { c, inspected } = setup();
+          const cfg = config({ SYNC_MAX_CALLS_PER_RUN: '5', GSC_BACKFILL_MONTHS: '0' }, gscOnly);
+          const statuses: string[] = [];
+          for (let i = 0; i < 4; i++) {
+            const r = await sync(store, { config: cfg, clients: c, trigger: 'cron', now: NOW });
+            statuses.push(r.message ? `${r.status}: ${r.message}` : r.status);
+          }
+          // Search Console first (4 calls), then index coverage with what is left, a few calls per run.
+          expect(statuses).toEqual(['ok', 'ok', 'ok', 'skipped: Nothing due.']);
+          expect(inspected).toHaveLength(5);
+          expect(await store.latestDate('acme', 'gsc')).toBe('2026-10-19');
+        });
+
+        it('is off with GSC_INSPECTIONS_PER_DAY=0', async () => {
+          const { c, read } = setup();
+          const cfg = config({ SYNC_MAX_CALLS_PER_RUN: '900', GSC_BACKFILL_MONTHS: '0', GSC_INSPECTIONS_PER_DAY: '0' }, gscOnly);
+          await sync(store, { config: cfg, clients: c, trigger: 'cron', now: NOW });
+          expect(read).toEqual([]);
+          expect((await indexCoverage({ store, config: cfg, clients: c }, { site: 'acme' })).notes[0]).toMatch(/off/);
+        });
+      });
+
       it('reports sync progress from waiting to done', async () => {
         const cfg = config({ SYNC_MAX_CALLS_PER_RUN: '10', GSC_BACKFILL_MONTHS: '1' }, [SITE, SITE_2]);
         const at = () => NOW;
@@ -1018,6 +1537,7 @@ export function storeContract(name: string, makeStore: () => Promise<Store>): vo
           ['gsc', 'waiting'],
           ['bing', 'waiting'],
           ['ai_crawlers', 'waiting'],
+          ['search_crawlers', 'waiting'],
           ['web_analytics', 'waiting'],
         ]);
 
@@ -1048,10 +1568,11 @@ export function storeContract(name: string, makeStore: () => Promise<Store>): vo
         await store.setMeta('cf:rum:acme', '2026-10-18');
         const cfg = config({ SYNC_MAX_CALLS_PER_RUN: '900', GSC_BACKFILL_MONTHS: '0' });
         const days: string[] = [];
+        const searchDays: string[] = [];
         const c = clients();
-        const crawl = c.cloudflare!.aiCrawlerRequests.bind(c.cloudflare);
-        c.cloudflare!.aiCrawlerRequests = async (zone, range, patterns) => {
-          days.push(`${range.start}..${range.end}`);
+        const crawl = c.cloudflare!.crawlerRequests.bind(c.cloudflare);
+        c.cloudflare!.crawlerRequests = async (zone, range, patterns) => {
+          (patterns.includes('GPTBot') ? days : searchDays).push(`${range.start}..${range.end}`);
           return crawl(zone, range, patterns);
         };
         const before = await syncProgress({ store, config: cfg, clients: c, now: () => NOW });
@@ -1063,6 +1584,8 @@ export function storeContract(name: string, makeStore: () => Promise<Store>): vo
         await sync(store, { config: cfg, clients: c, trigger: 'cron', now: NOW });
         expect(days).toEqual(['2026-10-19..2026-10-19']);
         expect(await store.getMeta('cf:crawlers:from:acme')).toBeNull();
+        // Search engine crawlers are new to such a deployment: yesterday, then their own lookback.
+        expect(searchDays).toEqual(['2026-10-19..2026-10-19', '2026-09-20..2026-10-18']);
       });
 
       it('reports setup status without secrets', async () => {
@@ -1087,7 +1610,15 @@ export function storeContract(name: string, makeStore: () => Promise<Store>): vo
         expect(status.checks.find((c) => c.id === 'sync.progress')).toMatchObject({ status: 'ok' });
         expect(status.syncProgress.phase).toBe('waiting');
         const sites = await listSites({ store, config: cfg, clients: clients() });
-        expect(sites.sites[0]!.sources).toEqual({ gsc: true, bing: true, aiCrawlers: true, webAnalytics: true });
+        expect(sites.sites[0]!.sources).toEqual({
+          gsc: true,
+          bing: true,
+          aiCrawlers: true,
+          searchCrawlers: true,
+          webAnalytics: true,
+          indexCoverage: false,
+          segments: false,
+        });
       });
     });
   });

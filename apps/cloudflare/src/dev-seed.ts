@@ -2,7 +2,17 @@
  * Demo data for local development (`pnpm dev`), so the dashboard has
  * something to show without real credentials. Never reachable in production.
  */
-import { addDays, AI_CRAWLERS, normalizePage, toIsoDate, type SearchFactInput, type Store } from '@searchkeep/core';
+import {
+  addDays,
+  AI_CRAWLERS,
+  normalizePage,
+  SEARCH_CRAWLERS,
+  toIsoDate,
+  type AppearanceInput,
+  type SearchFactInput,
+  type Store,
+  type UrlInspectionInput,
+} from '@searchkeep/core';
 
 function rng(seed: number) {
   let s = seed;
@@ -87,6 +97,32 @@ export async function seedDemo(store: Store, siteId: string, domain: string, tod
     }
   }
   n += await store.writeSearchFacts(siteId, 'bing', bing);
+  // Search Console image search and search appearance for the last 90 days.
+  const image: SearchFactInput[] = [];
+  const appearances: AppearanceInput[] = [];
+  for (let i = 0; i < 90; i++) {
+    const date = addDays(end, -i);
+    image.push({ date, kind: 'total', clicks: Math.round(4 + r() * 6), impressions: Math.round(300 + r() * 200), position: 14 });
+    image.push({
+      date,
+      kind: 'query_page',
+      query: 'gptbot user agent',
+      page: '/blog/ai-crawlers-explained',
+      clicks: Math.round(r() * 4),
+      impressions: Math.round(80 + r() * 60),
+      position: 9,
+    });
+    appearances.push({ date, appearance: 'VIDEO', clicks: Math.round(3 + r() * 5), impressions: Math.round(90 + r() * 40), position: 6.5 });
+    appearances.push({
+      date,
+      appearance: 'REVIEW_SNIPPET',
+      clicks: Math.round(r() * 3),
+      impressions: Math.round(30 + r() * 20),
+      position: 8,
+    });
+  }
+  n += await store.writeSearchFacts(siteId, 'gsc', image, 'image');
+  n += await store.writeSearchAppearances(siteId, 'web', appearances);
   // Cloudflare: AI crawlers and AI referrals for the last 30 days.
   const crawlers = AI_CRAWLERS.slice(0, 12);
   for (let i = 0; i < 30; i++) {
@@ -106,6 +142,23 @@ export async function seedDemo(store: Store, siteId: string, domain: string, tod
             requests: Math.round(2 + r() * (c.purpose === 'training' ? 30 : 10)),
           })),
       ),
+    );
+    n += await store.writeCrawlerRequests(
+      siteId,
+      PAGES.flatMap((path, pi) =>
+        SEARCH_CRAWLERS.filter((c) => ['Googlebot', 'Googlebot-Image', 'Bingbot', 'Applebot', 'YandexBot'].includes(c.name)).map(
+          (c, ci) => ({
+            date,
+            crawler: c.name,
+            operator: c.operator,
+            purpose: c.purpose,
+            path: normalizePage(path, domain),
+            status: (ci + pi + i) % 17 === 0 ? 404 : (ci + pi) % 9 === 0 ? 301 : 200,
+            requests: Math.round(1 + r() * (c.name === 'Googlebot' ? 40 : 8)),
+          }),
+        ),
+      ),
+      'search',
     );
     n += await store.writeWebAnalytics(
       siteId,
@@ -149,6 +202,38 @@ export async function seedDemo(store: Store, siteId: string, domain: string, tod
       indexed: null,
     },
   ]);
+  // Index coverage: the sitemap's URLs, most inspected.
+  const urls = PAGES.map((p) => `https://${domain}${p}`);
+  n += await store.updateIndexUrls(siteId, urls, [], addDays(today, -10));
+  const states: Array<[string, string]> = [
+    ['PASS', 'Submitted and indexed'],
+    ['PASS', 'Submitted and indexed'],
+    ['NEUTRAL', 'Crawled - currently not indexed'],
+    ['PASS', 'Submitted and indexed'],
+    ['NEUTRAL', 'Duplicate, Google chose different canonical than user'],
+    ['PASS', 'Submitted and indexed'],
+    ['PASS', 'Submitted and indexed'],
+    ['FAIL', 'Soft 404'],
+  ];
+  n += await store.writeUrlInspections(
+    siteId,
+    states.map(([verdict, coverageState], i): UrlInspectionInput => ({
+      url: urls[i]!,
+      inspectedAt: `${addDays(today, -1 - (i % 3))}T04:00:00.000Z`,
+      verdict,
+      coverageState,
+      indexingState: 'INDEXING_ALLOWED',
+      pageFetchState: verdict === 'FAIL' ? 'SOFT_404' : 'SUCCESSFUL',
+      robotsTxtState: 'ALLOWED',
+      lastCrawlTime: `${addDays(today, -4 - i)}T11:20:00Z`,
+      googleCanonical: verdict === 'PASS' ? urls[i]! : null,
+      userCanonical: urls[i]!,
+      crawledAs: 'MOBILE',
+      richResultsVerdict: i === 2 || i === 5 ? (i === 5 ? 'FAIL' : 'PASS') : null,
+      richResultTypes: i === 2 || i === 5 ? ['Breadcrumbs', 'FAQ'] : [],
+      richResultIssues: i === 5 ? [{ type: 'FAQ', severity: 'ERROR', message: 'Missing field "acceptedAnswer"' }] : [],
+    })),
+  );
   await store.replaceCrawlIssues(siteId, 'bing', [
     { url: `https://${domain}/old-page`, issue: 'Code4xx', httpCode: 404, detectedAt: today },
   ]);
