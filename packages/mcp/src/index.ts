@@ -101,7 +101,7 @@ export function createSearchkeepMcpServer(deps: McpDeps): McpServer {
     {
       jsonSchemaValidator: new CfWorkerJsonSchemaValidator(),
       instructions:
-        "Searchkeep answers SEO and GEO questions about the owner's own sites from first-party data (Google Search Console, Bing Webmaster Tools, Cloudflare AI crawler traffic and Web Analytics) kept in their own Cloudflare D1. Start with list_sites. Data is synced daily; GSC lags 2-3 days and Bing is weekly. Results are aggregated and capped; use filters and limit to narrow down.",
+        "Searchkeep answers SEO and GEO questions about the owner's own sites from first-party data (Google Search Console, Bing Webmaster Tools, Cloudflare AI crawler traffic and Web Analytics) kept in their own Cloudflare D1. Start with list_sites. Data is synced daily; GSC lags 2-3 days and Bing is weekly. Right after deploying, history is still being backfilled: if data looks incomplete, setup_status reports the sync progress. Results are aggregated and capped; use filters and limit to narrow down.",
     },
   );
 
@@ -321,7 +321,7 @@ export function createSearchkeepMcpServer(deps: McpDeps): McpServer {
     {
       title: 'Setup status',
       description:
-        'Checks the deployment: Access protection, credentials, live API probes, last sync and data coverage. Never returns secret values. Use after deploying.',
+        'Checks the deployment: Access protection, credentials, live API probes, last sync, sync progress (latest days and history per site and dataset, rate-limit pauses, failed tasks waiting to be retried) and data coverage. Never returns secret values. Use after deploying, and when data looks incomplete.',
       inputSchema: { probe: z.boolean().optional().describe('Call the source APIs to verify credentials. Default true.') },
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
     },

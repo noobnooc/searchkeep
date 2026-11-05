@@ -11,6 +11,8 @@ export * from './auth/oidc.js';
 export * from './auth/identity.js';
 export * from './auth/readiness.js';
 export * from './sync/run-sync.js';
+export * from './sync/progress.js';
+export { syncKeys, SOURCE_NAMES, type Backoff, type BackoffMap, type GscDailyProgress } from './sync/state.js';
 export * from './analysis/common.js';
 export * from './analysis/search.js';
 export * from './analysis/geo.js';

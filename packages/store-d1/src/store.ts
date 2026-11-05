@@ -138,6 +138,19 @@ export class D1Store implements Store {
     await this.orm.delete(schema.meta).where(eq(schema.meta.key, key)).run();
   }
 
+  async listMeta(prefix: string): Promise<Record<string, string>> {
+    // A primary-key range instead of LIKE: LIKE is case-insensitive and treats `_` and `%` as wildcards.
+    const rows =
+      prefix === ''
+        ? await this.all<{ key: string; value: string }>('SELECT key, value FROM meta')
+        : await this.all<{ key: string; value: string }>(
+            'SELECT key, value FROM meta WHERE key >= ?1 AND key < ?2',
+            prefix,
+            prefix.slice(0, -1) + String.fromCharCode(prefix.charCodeAt(prefix.length - 1) + 1),
+          );
+    return Object.fromEntries(rows.map((r) => [r.key, r.value]));
+  }
+
   // ----------------------------------------------------------------- sites
 
   async syncSites(sites: SiteConfig[]): Promise<void> {

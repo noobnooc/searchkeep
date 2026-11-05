@@ -57,17 +57,26 @@ cloudflared access curl "https://searchkeep.example.com/api/import/ai-citations?
 </p>
 <ul>
   <li>
-    <strong>Daily increments first.</strong> Every day each source is brought up to date before any history is
-    backfilled: Search Console re-pulls the last 4 days and fills gaps of up to 30 days, the sitemap snapshot is
-    refreshed, Bing is pulled in full, and Cloudflare adds each missing day of AI crawler requests and Web Analytics
-    (going back 30 and 90 days on the first run).
+    <strong>The latest days first, for every site.</strong> Every day each source is brought up to date before any
+    history is backfilled: Search Console re-pulls the last 4 days and fills gaps of up to 30 days, the sitemap snapshot
+    is refreshed, Bing is pulled in full, and Cloudflare adds each missing day of AI crawler requests and Web Analytics.
+    This work goes round-robin over the sites, so with many sites each one gets its latest days early.
   </li>
   <li>
-    <strong>Then the history backfill.</strong> Search Console history is backfilled one day at a time, newest first,
-    back 16 months (<code>GSC_BACKFILL_MONTHS</code>). The backfill stops for the day when it has written
-    <code>SYNC_DAILY_WRITE_BUDGET</code> rows (80,000 by default, under D1 Free’s 100,000 rows written per day), so on the
-    free plan the full backfill takes days to weeks. <code>list_sites</code> and <code>setup_status</code> show how far
-    back the stored range reaches.
+    <strong>Then history, for all sites at once.</strong> Search Console back 16 months
+    (<code>GSC_BACKFILL_MONTHS</code>), AI crawler requests back 30 days and Web Analytics back 90 days, newest day first
+    across all sites. History stops for the day when it has written <code>SYNC_DAILY_WRITE_BUDGET</code> rows (80,000 by
+    default, under D1 Free’s 100,000 rows written per day), so on the free plan it takes days to weeks.
+  </li>
+  <li>
+    <strong>Rate limits pause one source.</strong> When an API rate-limits Searchkeep (Bing does this quickly), that
+    source is paused for every site, from 30 minutes up to 8 hours, while the other sources keep syncing. A task that
+    fails is retried later with a growing delay instead of on every pass.
+  </li>
+  <li>
+    <strong>Progress is visible.</strong> While a site’s latest days are still coming in, the dashboard shows a banner
+    with each source’s progress and fills in the views as data arrives. <strong>Settings → Sync progress</strong> lists
+    every site and dataset, and <code>setup_status</code> reports the same to an AI client.
   </li>
   <li>
     <strong>Small batches.</strong> Workers Free allows 10 ms of CPU per invocation, so work is split into small units.
@@ -196,7 +205,7 @@ cloudflared access curl "https://searchkeep.example.com/api/import/ai-citations?
   </li>
   <li>
     <strong>Limited retention.</strong> Cloudflare’s GraphQL analytics keep HTTP request data for at least 31 days and
-    Web Analytics for about six months. Searchkeep backfills 30 and 90 days on the first run and then adds every day,
+    Web Analytics for about six months. Searchkeep backfills 30 and 90 days after you add a site and then adds every day,
     so a window that expired before you deployed cannot be recovered.
   </li>
   <li>

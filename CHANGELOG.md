@@ -26,6 +26,13 @@ Because users sync `main` at any time, the `Unreleased` section is always accura
 
 ### Added
 
+- Sync progress you can see. While a site's latest days are still coming in, every dashboard page
+  shows a banner with each source's progress (how far back the data goes, what is paused or
+  failing, and when it is retried), the sidebar shows the overall progress, and the views refresh
+  on their own when a sync brings new rows. **Settings** → **Sync progress** lists every site and
+  dataset. Overview shows no period-over-period deltas until the comparison period is synced. New
+  API: `GET /api/sync-progress`; `setup_status` returns the same as `syncProgress` and adds a
+  `sync.progress` check.
 - Manage sites in the dashboard: **Settings → Sites** adds, edits and removes the sites Searchkeep
   analyses. Sites are stored in D1 (`site_configs` table). **Auto-fill** looks the domain up in
   Search Console, Bing Webmaster Tools and Cloudflare with the configured credentials and fills in
@@ -34,6 +41,20 @@ Because users sync `main` at any time, the `Unreleased` section is always accura
 
 ### Changed
 
+- A faster first sync for many sites. The latest days now go round-robin over all sites, so every
+  site gets data early instead of waiting for the sites before it; history (16 months of Search
+  Console, 30 days of AI crawler requests, 90 days of Web Analytics) then fills in for all sites at
+  once, newest day first. The Cloudflare lookback now counts towards `SYNC_DAILY_WRITE_BUDGET`, like
+  the Search Console backfill. Deployments that already synced Cloudflare keep their data and are
+  not re-pulled.
+- Rate limits no longer stall the sync. Bing answers throttling with HTTP 400 `ThrottleUser`, which
+  used to fail every Bing task of every site on every pass and use up the API call budget, so the
+  other sources barely progressed. Now a rate-limited source is paused for every site for 30
+  minutes, doubling up to 8 hours, while the other sources keep syncing; Bing calls are spaced out
+  and capped at 8 per pass. HTTP 429 with `Retry-After` from any source is handled the same way.
+- Failed tasks are retried after 10 minutes, doubling up to 6 hours, instead of on every pass, so a
+  misconfigured site no longer uses up the budget of the others. **Sync now** retries them right
+  away.
 - New brand, "Horizon": the mark is a line that runs past a dashed 16-month horizon (what Search
   Console keeps) and ends in an orange dot (today). Lowercase `searchkeep` wordmark in Inter Tight,
   Inter Tight for website headings and IBM Plex Mono for labels, a cool Night/Fog palette with one

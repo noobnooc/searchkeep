@@ -372,7 +372,43 @@ export interface SetupStatusResponse {
   checks: SetupCheck[];
   sites: Array<{ id: string; domain: string; sources: SiteSources }>;
   coverage: Array<Coverage & { siteId: string }>;
+  syncProgress: SyncProgressResponse;
   recentSyncs: SyncSummary[];
+}
+
+/** waiting: nothing synced yet · recent: latest days coming in · history: older days coming in · done. */
+export type SyncPhase = 'waiting' | 'recent' | 'history' | 'done';
+export type SyncDataset = 'gsc' | 'bing' | 'ai_crawlers' | 'web_analytics';
+
+export interface DatasetProgress {
+  dataset: SyncDataset;
+  source: 'gsc' | 'bing' | 'cloudflare';
+  state: 'waiting' | 'syncing' | 'paused' | 'error' | 'done';
+  recent: boolean;
+  complete: boolean;
+  /** 0–100 */
+  percent: number;
+  from: string | null;
+  target: string | null;
+  message?: string;
+  retryAt?: string;
+}
+
+export interface SiteSyncProgress {
+  siteId: string;
+  domain: string;
+  phase: SyncPhase;
+  datasets: DatasetProgress[];
+}
+
+export interface SyncProgressResponse {
+  checkedAt: string;
+  phase: SyncPhase;
+  summary: { sites: number; sitesWithRecentData: number; historyPercent: number; issues: number };
+  paused: Array<{ source: 'gsc' | 'bing' | 'cloudflare'; until: string; reason: string }>;
+  writeBudget: { used: number; limit: number; reached: boolean };
+  lastRun: { at: string; status: SyncRun['status']; rowsWritten: number; message?: string | null } | null;
+  sites: SiteSyncProgress[];
 }
 
 export interface SyncTaskResult {

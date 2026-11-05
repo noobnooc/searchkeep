@@ -11,11 +11,13 @@
   import Segmented from '../components/Segmented.svelte';
   import SitesManager from '../components/SitesManager.svelte';
   import Skeleton from '../components/Skeleton.svelte';
+  import SyncProgressCard from '../components/SyncProgressCard.svelte';
   import { apiUrl, request } from '../lib/api';
   import { dateTime, int, isoDate, shortDate, timeAgo } from '../lib/format';
   import { refreshAll, resource } from '../lib/resource.svelte';
   import { router } from '../lib/router.svelte';
   import { ui, type ThemePref } from '../lib/state.svelte';
+  import { syncWatch } from '../lib/sync.svelte';
   import type { Column } from '../lib/table';
   import type { CheckStatus, Coverage, ImportResponse, SetupCheck, SetupStatusResponse, SiteSources, SyncRun, SyncRunsResponse, SyncTaskResult } from '../lib/types';
 
@@ -65,6 +67,7 @@
       syncResult = await request<SyncRun>('/api/sync', { method: 'POST' });
       refreshAll();
       await reloadSites();
+      void syncWatch.refresh({ quiet: true });
     } catch (err) {
       syncError = err;
     } finally {
@@ -159,6 +162,8 @@
 
 <div class="stack">
   <SitesManager {reloadSites} />
+
+  <SyncProgressCard />
 
   <div class="grid-2">
     <Card title="Setup checks" id="settings-checks" busy={setup.loading && Boolean(setup.data)}>

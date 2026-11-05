@@ -383,15 +383,16 @@ cloudflared access curl https://searchkeep.example.com/api/sync -X POST`;
 <CodeBlock lang="bash" code={firstSync} />
 <p>
   Each pass does only what fits its call, time and write budgets and resumes on the next one, so a result of
-  <code>partial</code> with “continues next run” is normal. Daily increments come first: Search Console’s recent days
-  (it lags two to three days), Bing’s full weekly data, 30 days of AI crawler requests and 90 days of Web Analytics.
-  The Search Console history backfill then runs one day at a time back 16 months; on the free D1 write quota that takes
-  days to weeks.
+  <code>partial</code> with “continues next run” is normal. Every site first gets its latest days, round-robin:
+  Search Console’s recent days (it lags two to three days), Bing’s full weekly data, and yesterday’s AI crawler requests
+  and Web Analytics. History then fills in for all sites at once, newest day first: 16 months of Search Console, 30 days
+  of AI crawler requests and 90 days of Web Analytics; on the free D1 write quota that takes days to weeks. If Bing
+  rate-limits the API key, Bing pauses and resumes on its own while the other sources continue.
 </p>
 <p>
-  <strong>Verify:</strong> <code>setup_status</code> shows a recent sync without errors, and <code>list_sites</code>
-  shows a date range for each connected dataset. Over the following days the Search Console range reaches back 16
-  months.
+  <strong>Verify:</strong> the dashboard shows the progress (a banner while a site’s latest days are coming in, and
+  <strong>Settings → Sync progress</strong> for every site), and <code>setup_status</code> reports it under
+  <code>syncProgress</code>. Over the following days history reaches back 16 months.
 </p>
 
 <h2 id="with-an-agent">Deploy with an agent</h2>

@@ -4,11 +4,14 @@ import {
   classifyCrawler,
   clearJwksCache,
   evaluateReadiness,
+  isRateLimited,
   loadConfig,
   normalizeDomain,
   normalizePage,
   OidcVerifier,
   parseAiCitationsCsv,
+  parseRetryAfter,
+  requestJson,
   safeMessage,
   validateSite,
   weekStart,
@@ -195,5 +198,39 @@ describe('helpers', () => {
       date: '2026-10-31',
       page: '/x',
     });
+  });
+});
+
+describe('requestJson', () => {
+  it('parses Retry-After as seconds or a date', () => {
+    expect(parseRetryAfter('120')).toBe(120_000);
+    expect(parseRetryAfter('Tue, 20 Oct 2026 04:01:00 GMT', Date.parse('2026-10-20T04:00:00Z'))).toBe(60_000);
+    expect(parseRetryAfter(null)).toBeNull();
+    expect(parseRetryAfter('soon')).toBeNull();
+  });
+
+  it('flags rate limits and leaves long waits to the caller', async () => {
+    let calls = 0;
+    const f = (async () => {
+      calls++;
+      return new Response('{"error":"slow down"}', { status: 429, headers: { 'retry-after': '3600' } });
+    }) as unknown as typeof fetch;
+    const err = await requestJson('x', 'https://x.test/', { fetch: f }).catch((e: unknown) => e);
+    expect(isRateLimited(err)).toBe(true);
+    expect((err as { retryAfterMs: number }).retryAfterMs).toBe(3_600_000);
+    expect(calls).toBe(1);
+
+    calls = 0;
+    const custom = (async () => {
+      calls++;
+      return new Response('{"code":"QUOTA"}', { status: 400 });
+    }) as unknown as typeof fetch;
+    const quota = await requestJson('x', 'https://x.test/', { fetch: custom, rateLimited: (_s, body) => body.includes('QUOTA') }).catch(
+      (e: unknown) => e,
+    );
+    expect(isRateLimited(quota)).toBe(true);
+    expect(calls).toBe(1);
+    const plain = await requestJson('x', 'https://x.test/', { fetch: custom }).catch((e: unknown) => e);
+    expect(isRateLimited(plain)).toBe(false);
   });
 });

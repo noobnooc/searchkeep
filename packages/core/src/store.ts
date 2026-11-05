@@ -36,6 +36,8 @@ export interface Store {
   getMeta(key: string): Promise<string | null>;
   setMeta(key: string, value: string): Promise<void>;
   deleteMeta(key: string): Promise<void>;
+  /** Every metadata entry whose key starts with `prefix` (sync cursors, for progress reports). */
+  listMeta(prefix: string): Promise<Record<string, string>>;
 
   // ---- sites --------------------------------------------------------------
   /** Make sure every configured site exists (by id). Existing data is kept. */

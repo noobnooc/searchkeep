@@ -131,6 +131,9 @@ describe('locked until ready', () => {
     const status = (await (await call(env, '/api/status', { headers })).json()) as { state: string; identity: { email: string } };
     expect(status).toMatchObject({ state: 'ready', identity: { email: 'owner@acme.com' } });
     expect((await call(env, '/api/sites', { headers })).status).toBe(200);
+    const progress = (await (await call(env, '/api/sync-progress', { headers })).json()) as { phase: string; sites: unknown[] };
+    // The test site has no sources connected, so there is nothing to sync.
+    expect(progress).toMatchObject({ phase: 'done', sites: [{ siteId: 'acme', phase: 'done', datasets: [] }] });
     expect(await (await call(env, '/', { headers })).text()).toContain('dashboard');
     expect(await new D1Store(env.DB).getMeta(READY_FLAG_KEY)).not.toBeNull();
     const mcp = await call(env, '/mcp', {

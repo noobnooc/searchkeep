@@ -84,6 +84,8 @@ you for your domain and email, and stops at the few steps only you can do.
 4. Add your credentials as Worker Secrets.
 5. Check readiness on the dashboard's status page, then with the `setup_status` MCP tool. Once it
    is `ready`, the cron syncs every 15 minutes; **Sync now** in the dashboard starts right away.
+   Every site gets its latest days first, then history fills in for all sites; the dashboard shows
+   the progress (**Settings** → **Sync progress**) and fills in as data arrives.
 
 The full runbook, with click paths, CLI/API alternatives and a verification for every step, is in
 **[docs/deploy.md](docs/deploy.md)**. You can hand that file to an AI agent and let it do the work;
@@ -141,7 +143,8 @@ Routes served by the Worker:
 The JSON API mirrors the tools: `/api/sites`, `/api/overview`, `/api/performance`, `/api/compare`,
 `/api/quick-wins`, `/api/cannibalization`, `/api/ctr-anomalies`, `/api/content-decay`,
 `/api/geo-funnel`, `/api/ai-crawlers`, `/api/ai-referrals`, `/api/web-vitals`, `/api/crawl-issues`,
-`/api/sitemaps`, `POST /api/inspect`, `/api/setup-status`, `/api/sync-runs`, `POST /api/sync` and
+`/api/sitemaps`, `POST /api/inspect`, `/api/setup-status`, `/api/sync-progress`, `/api/sync-runs`,
+`POST /api/sync` and
 `POST /api/import/ai-citations`. Query parameters use the same names as the MCP tools. Without a
 valid Access JWT, `/api/*` returns 403 `{"code":"locked","state":"no_access",...}` and `/mcp`
 returns a JSON-RPC error.

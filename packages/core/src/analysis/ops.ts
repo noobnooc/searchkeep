@@ -7,6 +7,8 @@ import type { SearchSource, SiteConfig } from '../types.js';
 import { previousPeriod, rangeLength } from '../dates.js';
 import { metrics, resolve, type AnalysisContext, type CommonParams } from './common.js';
 import { aiCrawlers } from './geo.js';
+import { syncProgress, type SyncProgressReport } from '../sync/progress.js';
+import { formatUntil, SOURCE_NAMES } from '../sync/state.js';
 
 export interface OpsContext extends AnalysisContext {
   clients: SourceClients;
@@ -177,6 +179,13 @@ export async function setupStatus(ctx: OpsContext, p: { readiness: ReadinessRepo
       ? `${last.status} at ${last.finishedAt ?? last.startedAt}; ${last.rowsWritten} rows written${last.message ? `; ${last.message}` : ''}`
       : 'No sync has run yet. Trigger one from the dashboard or with POST /api/sync.',
   });
+  const progress = await syncProgress(ctx);
+  add({
+    id: 'sync.progress',
+    label: 'Initial sync and history',
+    status: progress.summary.issues > 0 ? 'warn' : 'ok',
+    detail: describeProgress(progress),
+  });
   const errors = checks.filter((c) => c.status === 'error').length;
   return {
     state: p.readiness.state,
@@ -185,6 +194,7 @@ export async function setupStatus(ctx: OpsContext, p: { readiness: ReadinessRepo
     checks,
     sites: config.sites.map((s) => ({ id: s.id, domain: s.domain, sources: sourcesOf(ctx, s) })),
     coverage: await ctx.store.coverage(),
+    syncProgress: progress,
     recentSyncs: runs.map((r) => ({
       startedAt: r.startedAt,
       finishedAt: r.finishedAt,
@@ -194,6 +204,25 @@ export async function setupStatus(ctx: OpsContext, p: { readiness: ReadinessRepo
       message: r.message,
     })),
   };
+}
+
+/** One sentence on where the sync stands, for `setup_status`. */
+export function describeProgress(p: SyncProgressReport): string {
+  const today = p.checkedAt.slice(0, 10);
+  const parts: string[] = [];
+  if (p.summary.sites === 0) parts.push('No sites to sync.');
+  else if (p.phase === 'done') parts.push('Everything is synced; new days arrive with the daily increments.');
+  else
+    parts.push(
+      `Latest days are in for ${p.summary.sitesWithRecentData} of ${p.summary.sites} site${p.summary.sites === 1 ? '' : 's'}; history is ${p.summary.historyPercent}% synced.`,
+    );
+  for (const x of p.paused) parts.push(`${SOURCE_NAMES[x.source]} is paused until ${formatUntil(x.until, today)} (rate limited).`);
+  if (p.writeBudget.reached && p.phase !== 'done') parts.push('History continues after 00:00 UTC (daily write budget reached).');
+  if (p.summary.issues > 0)
+    parts.push(
+      `${p.summary.issues} dataset${p.summary.issues === 1 ? '' : 's'} failed and will be retried; see syncProgress for the errors.`,
+    );
+  return parts.join(' ');
 }
 
 /** Dashboard home: headline numbers and trends for one site. */
