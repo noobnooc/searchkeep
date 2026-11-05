@@ -3,7 +3,16 @@
  * Adapters are thin API clients built on `fetch`; all scheduling, budgeting and
  * normalization lives in core.
  */
-import type { IsoDate, SitemapRecord } from './types.js';
+import type { DateRange, IsoDate, SitemapRecord } from './types.js';
+
+/**
+ * Rows of a query over several days. `complete` is false when the result hit
+ * the API's page limit: the caller then asks again for a shorter range.
+ */
+export interface RangeResult<T> {
+  rows: T[];
+  complete: boolean;
+}
 
 export interface GscRow {
   keys: string[];
@@ -114,12 +123,12 @@ export interface CloudflareVitalsRow {
 }
 
 export interface CloudflareAnalyticsClient {
-  /** Requests from known AI crawlers on a zone for one day. */
-  aiCrawlerRequests(zoneId: string, date: IsoDate, userAgentPatterns: string[]): Promise<CloudflareCrawlerRow[]>;
-  /** Web Analytics (RUM) page loads grouped by path and referrer host for one day. */
-  webAnalytics(accountId: string, siteTag: string, date: IsoDate): Promise<CloudflareRumRow[]>;
-  /** Web Vitals p75 per path for one day. */
-  webVitals(accountId: string, siteTag: string, date: IsoDate): Promise<CloudflareVitalsRow[]>;
+  /** Requests from known AI crawlers on a zone, per day, for the days of `range` (both ends included). */
+  aiCrawlerRequests(zoneId: string, range: DateRange, userAgentPatterns: string[]): Promise<RangeResult<CloudflareCrawlerRow>>;
+  /** Web Analytics (RUM) page loads per day, path and referrer host for the days of `range`. */
+  webAnalytics(accountId: string, siteTag: string, range: DateRange): Promise<RangeResult<CloudflareRumRow>>;
+  /** Web Vitals p75 per day and path for the days of `range`. */
+  webVitals(accountId: string, siteTag: string, range: DateRange): Promise<RangeResult<CloudflareVitalsRow>>;
   /** Verifies the API token; returns its status. */
   verifyToken(): Promise<{ active: boolean; message?: string }>;
   /** Zones in the account (needs Zone: Read). Used to suggest settings in the dashboard. */

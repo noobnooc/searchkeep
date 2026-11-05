@@ -201,7 +201,9 @@ export function loadConfig(env: RawEnv): SearchkeepConfig {
     enableWrites: str(env, 'ENABLE_WRITES')?.toLowerCase() === 'true',
     sync: {
       dailyWriteBudget: int(env, 'SYNC_DAILY_WRITE_BUDGET', 80_000, 1_000, 100_000_000),
-      maxCallsPerRun: int(env, 'SYNC_MAX_CALLS_PER_RUN', 20, 5, 900),
+      // Workers Free allows 50 outbound requests per invocation; the rest is headroom for the
+      // Access check, the Search Console token and retries.
+      maxCallsPerRun: int(env, 'SYNC_MAX_CALLS_PER_RUN', 35, 5, 900),
       backfillMonths: int(env, 'GSC_BACKFILL_MONTHS', 16, 0, 16),
     },
     errors,

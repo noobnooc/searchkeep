@@ -15,6 +15,17 @@ export const GSC_REPULL_DAYS = 4;
 /** GSC: never try to fill gaps further back than this in the daily job. */
 export const GSC_MAX_GAP_DAYS = 30;
 
+/**
+ * Days per request. Search Console and both Cloudflare datasets answer for a
+ * range with one row per day, so one request covers many days. A range that
+ * returns too many rows, or that the API refuses, is split (see `shrinkChunk`).
+ * Cloudflare's ranges stay inside the datasets' maximum (30 and 93 days).
+ */
+export const CHUNK_DAYS = { gsc: 30, cfCrawlers: 30, cfRum: 90 } as const;
+
+/** A range is cut to a third when it has to be split: 30 → 10 → 3 → 1 day. */
+export const shrinkChunk = (days: number) => Math.max(1, Math.floor(days / 3));
+
 /** Bing datasets; each is one call that returns everything Bing holds. */
 export const BING_DATASETS = ['bing.traffic', 'bing.queries', 'bing.pages', 'bing.crawl_issues'] as const;
 
@@ -34,6 +45,10 @@ export const syncKeys = {
   cfCrawlersFrom: (site: string) => `cf:crawlers:from:${site}`,
   cfRum: (site: string) => `cf:rum:${site}`,
   cfRumFrom: (site: string) => `cf:rum:from:${site}`,
+  /** Days per request, when smaller than the default (stored after a range had to be split). */
+  gscChunk: (site: string) => `gsc:chunk:${site}`,
+  cfCrawlersChunk: (site: string) => `cf:crawlers:chunk:${site}`,
+  cfRumChunk: (site: string) => `cf:rum:chunk:${site}`,
   writes: (day: IsoDate) => `sync:writes:${day}`,
   backoff: 'sync:backoff',
   lastRun: 'sync:last_run',

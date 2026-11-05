@@ -51,6 +51,20 @@ Because users sync `main` at any time, the `Unreleased` section is always accura
 
 ### Changed
 
+- Much faster first sync: one request now covers many days. Search Console and Cloudflare answer
+  for a date range with one row per day, so a request covers up to 30 days of Search Console (totals,
+  country × device, query × page), 30 days of AI crawler requests or 90 days of Web Analytics, where
+  each used to cover one day. A small site's 16 months of Search Console history take about 50
+  requests instead of about 1,500. A range with more rows than one request returns (or than a tenth
+  of `SYNC_DAILY_WRITE_BUDGET`), or one the API refuses, is split into shorter ranges for the next
+  pass, down to single days, so sites with a lot of data sync as before. So is a range that needs
+  more calls than one pass allows. `GSC_ROWS_PER_DAY` still caps each day. Existing deployments
+  continue from where they are.
+- `SYNC_MAX_CALLS_PER_RUN` defaults to `35` instead of `20`: still within the Workers Free limit of
+  50 outbound requests per invocation, with headroom for the Access check, the Search Console token
+  and retries. Deployments that set it keep their value.
+- Cloudflare GraphQL rate limits ("Rate limiter budget depleted", code `budget`) now pause
+  Cloudflare like other rate limits instead of failing the task.
 - Dashboard tables: a sorted column's label no longer moves when its arrow appears, and every
   header label sits on the same line. In the GEO funnel table, impressions get a neutral bar like
   the steps, so each row's values line up.

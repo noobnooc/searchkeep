@@ -386,7 +386,7 @@ cloudflared access curl https://searchkeep.example.com/api/sync -X POST`;
   <code>partial</code> with “continues next run” is normal. Every site first gets its latest days, round-robin:
   Search Console’s recent days (it lags two to three days), Bing’s full weekly data, and yesterday’s AI crawler requests
   and Web Analytics. History then fills in for all sites at once, newest day first: 16 months of Search Console, 30 days
-  of AI crawler requests and 90 days of Web Analytics; on the free D1 write quota that takes days to weeks. If Bing
+  of AI crawler requests and 90 days of Web Analytics; one request covers up to 30 days, so a small site's history takes a few hours, and sites with a lot of data take days on the free D1 write quota. If Bing
   rate-limits the API key, Bing pauses and resumes on its own while the other sources continue.
 </p>
 <p>
