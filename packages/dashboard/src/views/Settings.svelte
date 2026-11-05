@@ -158,7 +158,7 @@
   <Pill tone={r.status === 'ok' ? 'ok' : r.status === 'error' ? 'error' : 'neutral'} title={r.message}>{r.status}</Pill>
 {/snippet}
 
-<PageHeader title="Settings" range={false} />
+<PageHeader title="Settings" range={false} hasMeta={false} />
 
 <div class="stack">
   <SitesManager {reloadSites} />

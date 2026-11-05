@@ -4,6 +4,8 @@
   interface Props {
     title?: string;
     subtitle?: string;
+    /** The subtitle comes from data that is still loading: hold its line with a skeleton. */
+    subtitlePending?: boolean;
     /** Right side of the header (controls, links). */
     actions?: Snippet;
     footer?: Snippet;
@@ -13,7 +15,7 @@
     class?: string;
     busy?: boolean;
   }
-  let { title, subtitle, actions, footer, children, flush = false, id, class: className = '', busy = false }: Props = $props();
+  let { title, subtitle, subtitlePending = false, actions, footer, children, flush = false, id, class: className = '', busy = false }: Props = $props();
 </script>
 
 <section class="card {className}" {id} aria-busy={busy}>
@@ -21,7 +23,7 @@
     <header class="card-head">
       <div class="titles">
         {#if title}<h2>{title}</h2>{/if}
-        {#if subtitle}<p>{subtitle}</p>{/if}
+        {#if subtitle}<p>{subtitle}</p>{:else if subtitlePending}<p><span class="skel sub-skel" aria-hidden="true"></span></p>{/if}
       </div>
       {#if actions}<div class="actions">{@render actions()}</div>{/if}
     </header>
@@ -64,6 +66,13 @@
     margin-top: 2px;
     font-size: 12.5px;
     color: var(--text-3);
+  }
+  .sub-skel {
+    display: inline-block;
+    vertical-align: middle;
+    width: 150px;
+    height: 10px;
+    border-radius: 4px;
   }
   .actions {
     display: flex;

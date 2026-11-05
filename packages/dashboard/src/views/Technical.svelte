@@ -201,7 +201,7 @@
   {/if}
 {/snippet}
 
-<PageHeader title="Technical" meta={vitals.data ? `Web Vitals: ${rangeLabel(vitals.data.range)}` : undefined} />
+<PageHeader title="Technical" meta={vitals.data ? `Web Vitals: ${rangeLabel(vitals.data.range)}` : vitals.error ? null : undefined} />
 
 <div class="stack">
   <Card title="Core Web Vitals" subtitle="p75 · real visitors" busy={vitals.loading && Boolean(vitals.data)} flush>

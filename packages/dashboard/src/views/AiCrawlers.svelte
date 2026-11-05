@@ -115,13 +115,13 @@
   {/if}
 {/snippet}
 
-<PageHeader title="AI crawlers" meta={chart ? rangeLabel({ start: chart.start, end: chart.end }) : undefined} />
+<PageHeader title="AI crawlers" meta={chart ? rangeLabel({ start: chart.start, end: chart.end }) : series.error || series.data ? null : undefined} />
 
 {#if series.error}
   <ErrorBanner error={series.error} retry={series.reload} />
 {:else}
   <div class="stack">
-    <Card title="Requests by purpose" subtitle={series.data ? `${int(total)} requests` : undefined} busy={series.loading && Boolean(series.data)}>
+    <Card title="Requests by purpose" subtitle={series.data ? `${int(total)} requests` : undefined} subtitlePending={!series.data && !series.error} busy={series.loading && Boolean(series.data)}>
       {#snippet actions()}
         {#if chart}
           <ul class="legend" aria-label="Legend">

@@ -78,7 +78,7 @@
   ];
 </script>
 
-<PageHeader title="Overview" description={ui.site?.domain} meta={d ? `${rangeLabel(d.range)} · vs ${rangeLabel(d.previousRange)}` : undefined} brand />
+<PageHeader title="Overview" description={ui.site?.domain} meta={d ? `${rangeLabel(d.range)} · vs ${rangeLabel(d.previousRange)}` : ov.error ? null : undefined} brand />
 
 {#if ov.error}
   <ErrorBanner error={ov.error} retry={ov.reload} />
