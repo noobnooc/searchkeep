@@ -469,15 +469,17 @@ export class D1Store implements Store {
   }
 
   async setBrandFlags(siteId: string, version: string, flags: Array<{ id: number; isBrand: boolean }>): Promise<void> {
-    await this.batch(
-      chunks(flags.map((f) => ({ id: f.id, b: f.isBrand ? 1 : 0 }))).map((group) =>
-        this.db
-          .prepare(
-            "UPDATE queries SET is_brand = j.value->>'b', brand_version = ?2 FROM json_each(?3) j WHERE queries.site_id = ?1 AND queries.id = j.value->>'id'",
-          )
-          .bind(siteId, version, JSON.stringify(group)),
+    // One primary-key lookup per id. `UPDATE ... FROM json_each(...)` let SQLite, which has no
+    // statistics on D1, scan all of the site's queries once per id: seconds per batch, and on
+    // sites with many queries more CPU than D1 allows, which resets the database. The unary
+    // `+` keeps the site check from being used as the index instead of the ids.
+    const sql = 'UPDATE queries SET is_brand = ?3, brand_version = ?2 WHERE id IN (SELECT value FROM json_each(?4)) AND +site_id = ?1';
+    const statements = [true, false].flatMap((isBrand) =>
+      chunks(flags.filter((f) => f.isBrand === isBrand).map((f) => f.id)).map((ids) =>
+        this.db.prepare(sql).bind(siteId, version, isBrand ? 1 : 0, JSON.stringify(ids)),
       ),
     );
+    await this.batch(statements);
   }
 
   // ------------------------------------------------------------- sync runs
