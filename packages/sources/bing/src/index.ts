@@ -62,19 +62,22 @@ export function crawlIssueNames(flags: unknown): string[] {
 
 /**
  * Bing `ApiErrorCode` values that mean "slow down". Bing answers them with HTTP
- * 400, not 429, so they are recognized from the body.
+ * 400, not 429, so they are recognized from the body. ThrottleIP (17, not in
+ * Microsoft's published enum) throttles the caller's IP address: Bing applies
+ * it to Cloudflare's shared egress IPs, so Workers see it however few calls
+ * they make, often for days.
  */
-const THROTTLE_CODES: Record<number, string> = { 4: 'ThrottleUser', 5: 'ThrottleHost' };
+const THROTTLE_CODES: Record<number, string> = { 4: 'ThrottleUser', 5: 'ThrottleHost', 17: 'ThrottleIP' };
 
-/** The throttling reason in a Bing error body, or null when it is another error. */
+/** The throttling reason in a Bing error body (e.g. `ThrottleIP`), or null when it is another error. */
 export function bingThrottle(body: string): string | null {
   try {
     const j = JSON.parse(body) as { Message?: unknown; ErrorCode?: unknown };
     const name = THROTTLE_CODES[Number(j.ErrorCode)];
     if (name) return name;
     if (typeof j.Message === 'string') {
-      const m = /throttle(user|host)?/i.exec(j.Message);
-      if (m) return m[1] ? `Throttle${m[1][0]!.toUpperCase()}${m[1].slice(1).toLowerCase()}` : 'throttled';
+      const m = /\b(Throttle[A-Za-z]*)/i.exec(j.Message);
+      if (m) return m[1]!;
     }
   } catch {
     // not JSON

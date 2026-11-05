@@ -150,15 +150,24 @@ export async function runSync(ctx: SyncContext): Promise<SyncRunRecord> {
   let inflight = parseJson<{ key: string; attempts: number }>(await store.getMeta(INFLIGHT_KEY));
   try {
     await saveBackoff();
-    const units = await planUnits(ctx, today);
+    // A unit that turns out to need fewer calls than planned hands the rest back.
+    const refund = (source: SourceId, calls: number) => {
+      callsLeft += calls;
+      sourceCalls.set(source, Math.max(0, (sourceCalls.get(source) ?? 0) - calls));
+    };
+    const retried = new Set<SourceId>();
+    const units = await planUnits(ctx, today, refund);
     for (const unit of units) {
       const taskKey = `${unit.task}|${unit.siteId}`;
       if (failedTasks.has(taskKey)) continue;
       const cooling = activeBackoff(backoff[sourceBackoffKey(unit.source)], nowMs);
-      if (cooling) {
+      // "Sync now" tries a paused source once: the limit may have lifted, and Bing's
+      // ThrottleIP depends on the egress IP, which differs between locations.
+      if (cooling && !(ctx.trigger === 'manual' && !retried.has(unit.source))) {
         paused.set(unit.source, cooling.until);
         continue;
       }
+      if (cooling) retried.add(unit.source);
       // "Sync now" retries failed tasks right away; the cron waits out their backoff.
       if (ctx.trigger === 'cron' && activeBackoff(backoff[taskBackoffKey(unit.task, unit.siteId)], nowMs)) {
         waiting.add(taskKey);
@@ -222,7 +231,9 @@ export async function runSync(ctx: SyncContext): Promise<SyncRunRecord> {
         const message = safeMessage(err);
         ctx.log?.(`sync ${unit.task} ${unit.siteId}: ${message}`);
         if (isRateLimited(err)) {
-          // Pause the whole source: every other call to it would be refused too.
+          // Pause the whole source: every other call to it would be refused too. A pause set
+          // during this run holds for the rest of it, also for "Sync now".
+          retried.add(unit.source);
           const key = sourceBackoffKey(unit.source);
           const failures = (backoff[key]?.failures ?? 0) + 1;
           const until = new Date(nowMs + rateLimitDelay(failures, err.retryAfterMs)).toISOString();
@@ -305,7 +316,7 @@ function interleave<T>(lists: T[][]): T[] {
   return out;
 }
 
-async function planUnits(ctx: SyncContext, today: IsoDate): Promise<Unit[]> {
+async function planUnits(ctx: SyncContext, today: IsoDate, refund: (source: SourceId, calls: number) => void): Promise<Unit[]> {
   const { config, clients, store } = ctx;
   const meta = await loadSyncMeta(store);
   const get = (key: string): string | null => meta[key] ?? null;
@@ -326,6 +337,12 @@ async function planUnits(ctx: SyncContext, today: IsoDate): Promise<Unit[]> {
       const pullDay = async (date: IsoDate): Promise<number> => {
         let written = 0;
         const totals = await gsc.searchAnalytics({ property, startDate: date, endDate: date, dimensions: ['date'], rowLimit: 10 });
+        // No totals: no impressions that day (or not final yet), so the other breakdowns are empty too.
+        // Common for the latest days (GSC lags 2-3 days) and for small sites; saves two calls per day.
+        if (totals.length === 0) {
+          refund('gsc', callsPerDay - 1);
+          return 0;
+        }
         written += await store.writeSearchFacts(
           site.id,
           'gsc',

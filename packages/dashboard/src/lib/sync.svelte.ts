@@ -86,13 +86,26 @@ export function when(iso: string | undefined, now = Date.now()): string {
   return sameDay ? `at ${dateTime(iso).split(', ')[1]}` : `on ${dateTime(iso)}`;
 }
 
+/** Bing refuses Cloudflare's shared egress IPs (ThrottleIP); nothing on the user's side causes or fixes it. */
+export function ipBlocked(reason: string | undefined): boolean {
+  return Boolean(reason && /ThrottleIP/i.test(reason));
+}
+
+/** Why a source is paused, in one sentence. */
+export function pauseText(source: string, reason: string | undefined, until: string | undefined): string {
+  const name = SOURCE_LABEL[source] ?? source;
+  if (ipBlocked(reason))
+    return `${name} is refusing requests from Cloudflare's network (ThrottleIP). This is on ${name}'s side, often lasts days and does not depend on how much Searchkeep asks. Searchkeep tries again ${when(until)}, and Sync now tries right away. The other sources keep syncing.`;
+  return `${name} rate-limited Searchkeep, so it is paused for every site and resumes ${when(until)}, with a longer pause each time it happens again. Sync now tries right away. The other sources keep syncing.`;
+}
+
 /** One short line for a dataset's state. */
 export function datasetLine(d: DatasetProgress): string {
   switch (d.state) {
     case 'error':
       return `Failed; retrying ${when(d.retryAt)}`;
     case 'paused':
-      return `Paused, resumes ${when(d.retryAt)}`;
+      return ipBlocked(d.message) ? `Blocked by Bing, retrying ${when(d.retryAt)}` : `Paused, resumes ${when(d.retryAt)}`;
     case 'waiting':
       return 'Waiting for the first sync';
     case 'done':

@@ -1,6 +1,6 @@
 <script lang="ts">
   import { int } from '../lib/format';
-  import { DATASET_LABEL, datasetLine, datasetTone, SOURCE_LABEL, syncWatch, when } from '../lib/sync.svelte';
+  import { DATASET_LABEL, datasetLine, datasetTone, pauseText, syncWatch } from '../lib/sync.svelte';
   import type { SyncDataset, SyncPhase } from '../lib/types';
   import Card from './Card.svelte';
   import Icon from './Icon.svelte';
@@ -69,7 +69,7 @@
         {#each p.paused as x (x.source)}
           <li class="warn">
             <Icon name="alert" size={13} />
-            <span><strong>{SOURCE_LABEL[x.source]} is paused for every site</strong> after it rate-limited Searchkeep; it resumes {when(x.until)} with a longer pause each time it happens again. The other sources keep syncing.</span>
+            <span>{pauseText(x.source, x.reason, x.until)}</span>
           </li>
         {/each}
         {#if p.summary.issues}

@@ -245,7 +245,11 @@ export async function syncProgress(ctx: ProgressContext): Promise<SyncProgressRe
   };
 }
 
-function phaseOf(datasets: DatasetProgress[]): SyncPhase {
+function phaseOf(all: DatasetProgress[]): SyncPhase {
+  // Paused and failing datasets are reported on their own (paused, issues); they do not hold
+  // the site back once the others are in. Bing can be paused for days (ThrottleIP).
+  const healthy = all.filter((d) => d.state !== 'paused' && d.state !== 'error');
+  const datasets = healthy.length > 0 ? healthy : all;
   if (datasets.every((d) => d.complete)) return 'done';
   if (datasets.every((d) => d.recent)) return 'history';
   if (datasets.some((d) => d.recent || d.percent > 0 || d.state === 'syncing')) return 'recent';

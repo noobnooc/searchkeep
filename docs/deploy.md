@@ -926,9 +926,15 @@ imported and skipped.
 - History writes up to `SYNC_DAILY_WRITE_BUDGET` rows per UTC day (80,000 by default, under D1
   Free's 100,000), so the full 16 months take days to weeks. That is expected. With many sites, or
   on Workers Paid, raising `SYNC_MAX_CALLS_PER_RUN` (step 14) speeds things up.
-- "Bing is paused until ... (rate limited)" means Bing throttled the API key. Nothing to do: Bing
-  resumes on its own, and the other sources keep syncing. If it keeps happening every day, the other
-  sites' data still arrives; Bing data for all sites just takes longer.
+- "Bing is paused until ... (rate limited)" means Bing refused a call. The other sources keep
+  syncing, and Bing is retried with a growing pause (30 minutes to 8 hours); **Sync now** retries it
+  right away.
+  - `ThrottleIP` (code 17) is the usual case for Workers: Bing throttles Cloudflare's shared egress
+    IP addresses, not your key or your site, so it happens however few calls Searchkeep makes and
+    often lasts days. A new API key does not help. Nothing on your side causes it; Bing data arrives
+    once a call gets through.
+  - `ThrottleUser` or `ThrottleHost` throttle your key or site; they lift after a while on their
+    own.
 - A sync run that reports "Skipped ... after 3 interrupted attempts" hit a limit repeatedly, usually
   the 10 ms CPU limit of Workers Free. Lower `GSC_ROWS_PER_DAY` (step 14), or move to Workers Paid.
 - "Nothing due." means the pass found no work; the next day's increments start after midnight UTC.
