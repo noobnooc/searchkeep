@@ -795,6 +795,11 @@ How the sync works:
 - A unit interrupted 3 times in a row (for example by the Workers Free CPU limit) is split into
   shorter ranges, and a single day is skipped, so the sync never gets stuck; a skipped day is
   reported as an error.
+- **D1 is not overloaded:** D1 limits the work one database does per 10 seconds, so a pass pauses
+  briefly after large writes, stops history once it wrote 20,000 rows, and classifies at most 4,000
+  queries as brand or non-brand. If D1 still answers "D1 DB is overloaded", the pass stops and the
+  next one continues; nothing fails. A run left as `running` (interrupted) is marked as such by the
+  next pass.
 
 **Verify:** the dashboard shows the sync progress (a banner on every page while a site's latest days
 are still coming in, and **Settings** → **Sync progress** with each site and dataset). From an MCP

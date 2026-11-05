@@ -139,6 +139,17 @@ Because users sync `main` at any time, the `Unreleased` section is always accura
   strictly: a site with an invalid `brandRegex` (or other invalid field) is now skipped and reported
   by `setup_status` instead of being loaded without the field.
 
+### Fixed
+
+- The faster first sync no longer overloads D1. Requests that cover many days write their rows in
+  bursts, and D1 answered "D1 DB is overloaded. Too many resources consumed within a 10 second
+  window"; the run then failed and stayed `running` in the sync history. Now a pass pauses briefly
+  after large writes, history stops for the pass at 20,000 rows, one request returns at most 10,000
+  rows (larger ranges are split), and brand classification does at most 4,000 queries per pass. A
+  busy database stops the pass without failing a task; the next pass continues. The final writes of
+  a pass retry while the database is busy, and a run left as `running` for 20 minutes is marked as
+  interrupted.
+
 ### Upgrade notes
 
 - Nothing is required. The new table is created automatically on the first request after syncing.
