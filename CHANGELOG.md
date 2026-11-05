@@ -55,6 +55,14 @@ Because users sync `main` at any time, the `Unreleased` section is always accura
 - Failed tasks are retried after 10 minutes, doubling up to 6 hours, instead of on every pass, so a
   misconfigured site no longer uses up the budget of the others. **Sync now** retries them right
   away.
+- Bing's `ThrottleIP` (code 17) is recognized. Bing throttles Cloudflare's shared egress IPs, so
+  Workers often get it from the first call, for days. The dashboard says so instead of reporting a
+  rate limit, and **Sync now** retries a paused source once, since a manual sync runs from a
+  different location than the cron. A paused or failing dataset no longer keeps a site in the
+  "latest days" phase while its other datasets are in.
+- A day without Search Console data (the 2–3 days GSC lags, and days without impressions on small
+  sites) costs 1 API call instead of 3, so the latest days and history of small sites sync about
+  three times faster.
 - New brand, "Horizon": the mark is a line that runs past a dashed 16-month horizon (what Search
   Console keeps) and ends in an orange dot (today). Lowercase `searchkeep` wordmark in Inter Tight,
   Inter Tight for website headings and IBM Plex Mono for labels, a cool Night/Fog palette with one

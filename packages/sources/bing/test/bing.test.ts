@@ -48,6 +48,9 @@ describe('bing', () => {
   it('recognizes throttling, which Bing answers with HTTP 400, without retrying', async () => {
     expect(bingThrottle('{"ErrorCode":4,"Message":"ERROR!!! ThrottleUser"}')).toBe('ThrottleUser');
     expect(bingThrottle('{"ErrorCode":5}')).toBe('ThrottleHost');
+    // What Workers get from Bing: Cloudflare's egress IPs are throttled.
+    expect(bingThrottle('{"ErrorCode":17,"Message":"ERROR!!! ThrottleIP"}')).toBe('ThrottleIP');
+    expect(bingThrottle('{"ErrorCode":99,"Message":"ERROR!!! ThrottleSomething"}')).toBe('ThrottleSomething');
     expect(bingThrottle('{"ErrorCode":3,"Message":"Invalid API key"}')).toBeNull();
     expect(bingThrottle('not json')).toBeNull();
     let calls = 0;

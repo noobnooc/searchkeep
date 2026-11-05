@@ -1,7 +1,7 @@
 <script lang="ts">
   import { href } from '../lib/router.svelte';
   import { ui } from '../lib/state.svelte';
-  import { DATASET_LABEL, datasetLine, datasetTone, SOURCE_LABEL, syncWatch, when } from '../lib/sync.svelte';
+  import { DATASET_LABEL, datasetLine, datasetTone, pauseText, syncWatch, when } from '../lib/sync.svelte';
   import Icon from './Icon.svelte';
   import ProgressBar from './ProgressBar.svelte';
 
@@ -28,7 +28,7 @@
   const site = $derived(p?.sites.find((s) => s.siteId === ui.siteId));
   const paused = $derived((p?.paused ?? []).filter((x) => site?.datasets.some((d) => d.source === x.source && !d.complete)));
   const failing = $derived(site?.datasets.filter((d) => d.state === 'error') ?? []);
-  const show = $derived(Boolean(site && site.datasets.length > 0 && (site.phase !== 'done' || failing.length > 0) && !(site.phase !== 'waiting' && site.phase !== 'recent' && dismissed.includes(site.siteId))));
+  const show = $derived(Boolean(site && site.datasets.length > 0 && (site.phase !== 'done' || failing.length > 0 || paused.length > 0) && !(site.phase !== 'waiting' && site.phase !== 'recent' && dismissed.includes(site.siteId))));
   const many = $derived((p?.summary.sites ?? 0) > 1);
 
   const title = $derived.by(() => {
@@ -36,7 +36,7 @@
     if (site.phase === 'waiting') return `Getting ${site.domain} ready`;
     if (site.phase === 'recent') return `Syncing the latest days for ${site.domain}`;
     if (site.phase === 'history') return `${site.domain}: latest days are in, older history is still syncing`;
-    return `${site.domain}: some data could not be synced`;
+    return failing.length ? `${site.domain}: some data could not be synced` : `${site.domain}: synced, except for a paused source`;
   });
   const text = $derived.by(() => {
     if (!site || !p) return '';
@@ -46,7 +46,7 @@
         : 'Sync runs every 15 minutes. This page updates as data arrives; you can also start a sync now.';
     if (site.phase === 'recent') return 'Some views are still empty or partial. They fill in as data arrives, no reload needed.';
     if (site.phase === 'history') return 'Long ranges and period comparisons stay incomplete until history is in.';
-    return 'The rest of the data is in. Check the errors below.';
+    return failing.length ? 'The rest of the data is in. Check the errors below.' : 'Everything else is in.';
   });
 </script>
 
@@ -82,7 +82,7 @@
     {#if paused.length || failing.length || (p.writeBudget.reached && site.phase === 'history')}
       <ul class="notes">
         {#each paused as x (x.source)}
-          <li class="warn"><Icon name="alert" size={13} /> {SOURCE_LABEL[x.source]} asked Searchkeep to slow down. It is paused for every site and resumes {when(x.until)}; the other sources keep syncing.</li>
+          <li class="warn"><Icon name="alert" size={13} /> {pauseText(x.source, x.reason, x.until)}</li>
         {/each}
         {#each failing as d (d.dataset)}
           <li class="err"><Icon name="alert" size={13} /> {DATASET_LABEL[d.dataset]}: {d.message}. Retrying {when(d.retryAt)}.</li>

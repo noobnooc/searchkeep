@@ -617,27 +617,50 @@ export function storeContract(name: string, makeStore: () => Promise<Store>): vo
         const backoff = JSON.parse((await store.getMeta(syncKeys.backoff))!) as BackoffMap;
         expect(backoff['source:bing']).toMatchObject({ failures: 1, until: '2026-10-20T04:30:00.000Z' });
 
-        // Still paused: no Bing calls, also not for "Sync now".
+        // Still paused: the cron makes no Bing calls.
         const later = new Date('2026-10-20T04:15:00Z');
-        const again = await sync(store, { config: cfg, clients: c, trigger: 'manual', now: later });
+        const again = await sync(store, { config: cfg, clients: c, trigger: 'cron', now: later });
         expect(bingCalls).toBe(1);
         expect(again.status).toBe('skipped');
         expect(again.message).toMatch(/Bing is paused/);
         const report = await syncProgress({ store, config: cfg, clients: c, now: () => later });
         expect(report.paused).toEqual([expect.objectContaining({ source: 'bing', until: '2026-10-20T04:30:00.000Z' })]);
         expect(report.sites[0]!.datasets.find((d) => d.dataset === 'bing')!.state).toBe('paused');
+        // A paused source does not hold the sites back: their other datasets are in.
+        expect(report.sites.map((s) => s.phase)).toEqual(['done', 'done']);
+        expect(report.summary.sitesWithRecentData).toBe(2);
 
-        // Throttled again after the pause: twice as long.
-        await sync(store, { config: cfg, clients: c, trigger: 'cron', now: new Date('2026-10-20T04:45:00Z') });
+        // "Sync now" tries the paused source once; throttled again, the pause doubles.
+        await sync(store, { config: cfg, clients: c, trigger: 'manual', now: new Date('2026-10-20T04:20:00Z') });
         expect(bingCalls).toBe(2);
         const longer = JSON.parse((await store.getMeta(syncKeys.backoff))!) as BackoffMap;
-        expect(longer['source:bing']).toMatchObject({ failures: 2, until: '2026-10-20T05:45:00.000Z' });
+        expect(longer['source:bing']).toMatchObject({ failures: 2, until: '2026-10-20T05:20:00.000Z' });
 
-        // Recovered: Bing syncs again, at most 8 calls per run, and the pause is cleared.
-        const recovered = await sync(store, { config: cfg, clients: clients(), trigger: 'cron', now: new Date('2026-10-20T06:00:00Z') });
+        // "Sync now" again once Bing answers: the pause is cleared and Bing syncs, at most 8 calls per run.
+        const recovered = await sync(store, { config: cfg, clients: clients(), trigger: 'manual', now: new Date('2026-10-20T05:00:00Z') });
         expect(recovered.details!.filter((d) => d.source === 'bing' && d.status === 'ok').length).toBe(8);
         expect(await store.getMeta(syncKeys.backoff)).toBeNull();
         expect(await store.latestDate('beta', 'bing')).toBe('2026-10-18');
+      });
+
+      it('spends one call on a day without Search Console data', async () => {
+        const c = clients();
+        const days: string[] = [];
+        const searchAnalytics = c.gsc!.searchAnalytics.bind(c.gsc);
+        c.gsc!.searchAnalytics = async (req) => {
+          days.push(req.startDate);
+          // Search Console lags: nothing final for the last two days.
+          return req.startDate >= '2026-10-18' ? [] : searchAnalytics(req);
+        };
+        // 4 recent days at 3 calls would need 12; the two empty days cost 1 each, so 9 calls are enough (sitemaps included).
+        const cfg = config({ SYNC_MAX_CALLS_PER_RUN: '9', GSC_BACKFILL_MONTHS: '0' }, [
+          { id: 'acme', domain: 'acme.com', gscProperty: 'sc-domain:acme.com' },
+        ]);
+        const run = await sync(store, { config: cfg, clients: c, trigger: 'cron', now: NOW });
+        expect(run.status).toBe('ok');
+        expect(days.filter((d) => d === '2026-10-19')).toHaveLength(1);
+        expect(days.filter((d) => d === '2026-10-17')).toHaveLength(3);
+        expect(await store.latestDate('acme', 'gsc')).toBe('2026-10-17');
       });
 
       it('retries a failing task later, or right away on Sync now', async () => {
