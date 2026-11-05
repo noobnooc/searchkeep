@@ -2,6 +2,8 @@
 export interface Env {
   DB: D1Database;
   ASSETS: Fetcher;
+  /** Cloudflare Browser Run: Bing's API refuses Workers' egress IPs but accepts Browser Run's. */
+  BROWSER?: Fetcher;
   ACCESS_TEAM_DOMAIN?: string;
   ACCESS_AUD?: string;
   CLOUDFLARE_ACCOUNT_ID?: string;

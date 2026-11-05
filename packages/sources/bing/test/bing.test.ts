@@ -67,4 +67,48 @@ describe('bing', () => {
     expect(String(err)).not.toContain('k3y');
     expect(calls).toBe(1);
   });
+
+  it('switches to the fallback transport when Bing refuses the IP (ThrottleIP), and stays on it', async () => {
+    const sites = JSON.stringify({ d: [{ Url: 'https://acme.com/', IsVerified: true }] });
+    let direct = 0;
+    let fallback = 0;
+    let switched = 0;
+    const client = createBingClient({
+      apiKey: 'k3y',
+      fetch: (async () => {
+        direct++;
+        return new Response('{"ErrorCode":17,"Message":"ERROR!!! ThrottleIP"}', { status: 400 });
+      }) as unknown as typeof fetch,
+      fallbackFetch: (async () => {
+        fallback++;
+        return new Response(sites);
+      }) as unknown as typeof fetch,
+      onFallback: () => switched++,
+    });
+    expect(await client.getUserSites()).toEqual([{ url: 'https://acme.com/', verified: true }]);
+    expect(await client.getUserSites()).toHaveLength(1);
+    expect({ direct, fallback, switched }).toEqual({ direct: 1, fallback: 2, switched: 1 });
+  });
+
+  it('keeps other errors, and ThrottleIP without a fallback, as they are', async () => {
+    let fallback = 0;
+    const fallbackFetch = (async () => {
+      fallback++;
+      return new Response('{"d":[]}');
+    }) as unknown as typeof fetch;
+    const throttledUser = createBingClient({
+      apiKey: 'k3y',
+      fetch: (async () => new Response('{"ErrorCode":4,"Message":"ERROR!!! ThrottleUser"}', { status: 400 })) as unknown as typeof fetch,
+      fallbackFetch,
+    });
+    const err = await throttledUser.getUserSites().catch((e: Error) => e);
+    expect(isRateLimited(err)).toBe(true);
+    expect(String(err)).toContain('ThrottleUser');
+    expect(fallback).toBe(0);
+    const noFallback = createBingClient({
+      apiKey: 'k3y',
+      fetch: (async () => new Response('{"ErrorCode":17,"Message":"ERROR!!! ThrottleIP"}', { status: 400 })) as unknown as typeof fetch,
+    });
+    expect(String(await noFallback.getUserSites().catch((e: Error) => e))).toContain('ThrottleIP');
+  });
 });

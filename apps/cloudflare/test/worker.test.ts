@@ -208,3 +208,14 @@ describe('sites managed in the dashboard', () => {
     expect((await call(env, '/api/site-configs', { headers })).status).toBe(403);
   });
 });
+
+describe('Browser Run transport', () => {
+  it('opens nothing until used, and only does GET', async () => {
+    const { createBrowserFetch } = await import('../src/browser-fetch.js');
+    const browser = createBrowserFetch({ fetch: async () => new Response('unused') } as never);
+    expect(browser.used).toBe(false);
+    await expect(browser.fetch('https://ssl.bing.com/', { method: 'POST', body: 'x' })).rejects.toThrow(/GET only/);
+    expect(browser.used).toBe(false);
+    await browser.close();
+  });
+});

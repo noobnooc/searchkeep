@@ -71,8 +71,8 @@ cloudflared access curl "https://searchkeep.example.com/api/import/ai-citations?
   <li>
     <strong>Rate limits pause one source.</strong> When an API rate-limits Searchkeep (Bing does this quickly), that
     source is paused for every site, from 30 minutes up to 8 hours, while the other sources keep syncing. Bing often
-    refuses Cloudflare’s shared egress IPs (<code>ThrottleIP</code>), sometimes for days; Bing data then arrives once a
-    call gets through. A task that
+    refuses the shared egress IPs of Workers (<code>ThrottleIP</code>), sometimes for days; Searchkeep then sends its
+    Bing calls through Cloudflare Browser Run, whose IPs Bing accepts. A task that
     fails is retried later with a growing delay instead of on every pass.
   </li>
   <li>

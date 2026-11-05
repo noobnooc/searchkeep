@@ -95,7 +95,7 @@ export function ipBlocked(reason: string | undefined): boolean {
 export function pauseText(source: string, reason: string | undefined, until: string | undefined): string {
   const name = SOURCE_LABEL[source] ?? source;
   if (ipBlocked(reason))
-    return `${name} is refusing requests from Cloudflare's network (ThrottleIP). This is on ${name}'s side, often lasts days and does not depend on how much Searchkeep asks. Searchkeep tries again ${when(until)}, and Sync now tries right away. The other sources keep syncing.`;
+    return `${name} refused Cloudflare's network (ThrottleIP), and the Browser Run fallback was refused too. This is on ${name}'s side and does not depend on how much Searchkeep asks. Searchkeep tries again ${when(until)}, and Sync now tries right away. The other sources keep syncing.`;
   return `${name} rate-limited Searchkeep, so it is paused for every site and resumes ${when(until)}, with a longer pause each time it happens again. Sync now tries right away. The other sources keep syncing.`;
 }
 
