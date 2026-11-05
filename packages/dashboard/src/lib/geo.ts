@@ -3,6 +3,8 @@ import { apiUrl, type Params } from './api';
 import type { GeoFunnelResponse, GeoPage } from './types';
 
 export type GeoStep = 'crawled' | 'cited' | 'aiVisits' | 'clicks';
+/** What the per-page rows can be sorted by: any step, or search impressions. */
+export type GeoSortKey = GeoStep | 'impressions';
 
 export const GEO_STEPS: Array<{ key: GeoStep; label: string; unit: string; color: string }> = [
   { key: 'crawled', label: 'Crawled', unit: 'AI crawler requests', color: 'var(--stage-1)' },
@@ -12,7 +14,7 @@ export const GEO_STEPS: Array<{ key: GeoStep; label: string; unit: string; color
 ];
 
 /** The funnel request shared by the Overview card and the GEO view (same URL, one cached response). */
-export function geoFunnelUrl(site: string, range: Params, opts: { sortBy?: GeoStep; pageContains?: string } = {}): string {
+export function geoFunnelUrl(site: string, range: Params, opts: { sortBy?: GeoSortKey; pageContains?: string } = {}): string {
   return apiUrl('/api/geo-funnel', { site, ...range, sortBy: opts.sortBy ?? 'crawled', pageContains: opts.pageContains, limit: 500 });
 }
 

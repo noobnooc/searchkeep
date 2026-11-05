@@ -17,6 +17,7 @@ import {
   findQuickWins,
   findSite,
   geoFunnel,
+  type GeoSortKey,
   inspectUrl,
   listSitemaps,
   listSites,
@@ -388,7 +389,7 @@ app.get(
     const x = q(c);
     return geoFunnel(
       opsContext(c),
-      x.strip({ ...x.common(), pageContains: x.get('pageContains'), sortBy: x.get('sortBy') as 'crawled' | undefined }),
+      x.strip({ ...x.common(), pageContains: x.get('pageContains'), sortBy: x.get('sortBy') as GeoSortKey | undefined }),
     );
   }),
 );

@@ -13,7 +13,7 @@
   import PathText from '../components/PathText.svelte';
   import { debounced } from '../lib/debounce.svelte';
   import { compact, int, rangeLabel } from '../lib/format';
-  import { buildFunnel, GEO_STEPS as STEPS, geoFunnelUrl, type GeoStep } from '../lib/geo';
+  import { buildFunnel, GEO_STEPS as STEPS, geoFunnelUrl, type GeoSortKey } from '../lib/geo';
   import { resource } from '../lib/resource.svelte';
   import { href } from '../lib/router.svelte';
   import { ui } from '../lib/state.svelte';
@@ -25,7 +25,7 @@
   let sort = $state<SortState>({ key: 'crawled', dir: 'desc' });
 
   const geo = resource<GeoFunnelResponse>(() =>
-    ui.siteId ? geoFunnelUrl(ui.siteId, ui.rangeParams(), { sortBy: sort.key as GeoStep, pageContains: pageContains.value }) : null,
+    ui.siteId ? geoFunnelUrl(ui.siteId, ui.rangeParams(), { sortBy: sort.key as GeoSortKey, pageContains: pageContains.value }) : null,
   );
   const d = $derived(geo.data);
   const funnel = $derived(d ? buildFunnel(d) : null);
@@ -39,6 +39,7 @@
     cited: Math.max(1, ...(d?.pages.map((p) => p.cited) ?? [])),
     aiVisits: Math.max(1, ...(d?.pages.map((p) => p.aiVisits) ?? [])),
     clicks: Math.max(1, ...(d?.pages.map((p) => p.clicks) ?? [])),
+    impressions: Math.max(1, ...(d?.pages.map((p) => p.impressions) ?? [])),
   });
   const allEmpty = $derived(Boolean(d && STEPS.every((s) => d.totals[s.key] === 0)));
   const citedMissing = $derived(Boolean(d && d.totals.cited === 0 && d.totals.crawled + d.totals.aiVisits + d.totals.clicks > 0));
@@ -56,7 +57,17 @@
         bar: (r) => ({ value: r[s.key], max: max[s.key], color: s.color }),
       }),
     ),
-    { key: 'impressions', label: 'Impressions', align: 'right', text: (r) => compact(r.impressions), hideOnMobile: true, width: '100px' },
+    {
+      key: 'impressions',
+      label: 'Impressions',
+      align: 'right',
+      sortable: true,
+      text: (r) => compact(r.impressions),
+      // A neutral bar like the steps', so every value in the row sits on the same line.
+      bar: (r) => ({ value: r.impressions, max: max.impressions }),
+      hideOnMobile: true,
+      width: '110px',
+    },
   ]);
 </script>
 

@@ -7,6 +7,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js';
 import { CfWorkerJsonSchemaValidator } from '@modelcontextprotocol/sdk/validation/cfworker';
 import {
+  GEO_SORT_KEYS,
   aiCrawlers,
   comparePeriods,
   findCannibalization,
@@ -247,7 +248,7 @@ export function createSearchkeepMcpServer(deps: McpDeps): McpServer {
         days: common.days,
         limit: common.limit,
         pageContains: z.string().optional(),
-        sortBy: z.enum(['crawled', 'cited', 'aiVisits', 'clicks']).optional().describe('Default crawled.'),
+        sortBy: z.enum(GEO_SORT_KEYS).optional().describe('Default crawled.'),
       },
       annotations: READ_ONLY,
     },

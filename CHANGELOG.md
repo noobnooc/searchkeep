@@ -45,9 +45,15 @@ Because users sync `main` at any time, the `Unreleased` section is always accura
   Search Console, Bing Webmaster Tools and Cloudflare with the configured credentials and fills in
   the identifiers it finds. New API: `GET`/`POST /api/site-configs`,
   `DELETE /api/site-configs/:id`, `GET /api/discover`.
+- The GEO funnel's page table can be sorted by impressions. `geo_funnel` and
+  `GET /api/geo-funnel` accept `sortBy: "impressions"`, and an unknown `sortBy` now returns a
+  `bad_request` error instead of an unsorted list.
 
 ### Changed
 
+- Dashboard tables: a sorted column's label no longer moves when its arrow appears, and every
+  header label sits on the same line. In the GEO funnel table, impressions get a neutral bar like
+  the steps, so each row's values line up.
 - A faster first sync for many sites. The latest days now go round-robin over all sites, so every
   site gets data early instead of waiting for the sites before it; history (16 months of Search
   Console, 30 days of AI crawler requests, 90 days of Web Analytics) then fills in for all sites at
