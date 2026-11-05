@@ -101,7 +101,7 @@
   {/if}
 {/snippet}
 
-<PageHeader title="Compare" meta={d ? `${rangeLabel(d.current.range)} · vs ${rangeLabel(d.previous.range)}` : undefined} source brand>
+<PageHeader title="Compare" meta={d ? `${rangeLabel(d.current.range)} · vs ${rangeLabel(d.previous.range)}` : cmp.error ? null : undefined} source brand>
   {#snippet controls()}
     <Segmented
       label="Compare against"

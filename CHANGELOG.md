@@ -54,6 +54,9 @@ Because users sync `main` at any time, the `Unreleased` section is always accura
 - Dashboard tables: a sorted column's label no longer moves when its arrow appears, and every
   header label sits on the same line. In the GEO funnel table, impressions get a neutral bar like
   the steps, so each row's values line up.
+- Dashboard pages no longer shift when their data arrives. Each page header keeps the line for its
+  date range and shows a skeleton there while loading, so the title and the filters stay put. Card
+  subtitles that come from the data do the same.
 - A faster first sync for many sites. The latest days now go round-robin over all sites, so every
   site gets data early instead of waiting for the sites before it; history (16 months of Search
   Console, 30 days of AI crawler requests, 90 days of Web Analytics) then fills in for all sites at

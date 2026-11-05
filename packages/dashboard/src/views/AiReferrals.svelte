@@ -62,7 +62,7 @@
   <PathText path={r.path} />
 {/snippet}
 
-<PageHeader title="AI referrals" meta={byHost.data ? rangeLabel(byHost.data.range) : undefined} />
+<PageHeader title="AI referrals" meta={byHost.data ? rangeLabel(byHost.data.range) : byHost.error ? null : undefined} />
 
 {#if notConfigured}
   <Card>

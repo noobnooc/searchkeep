@@ -145,7 +145,7 @@
   <PathText path={r.page} />
 {/snippet}
 
-<PageHeader title="Performance" meta={d ? rangeLabel(d.range) : undefined} source brand />
+<PageHeader title="Performance" meta={d ? rangeLabel(d.range) : perf.error ? null : undefined} source brand />
 
 <div class="stack">
   <div class="toolbar" role="group" aria-label="Breakdown and filters">

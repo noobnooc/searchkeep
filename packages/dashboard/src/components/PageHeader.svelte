@@ -8,8 +8,14 @@
   interface Props {
     title: string;
     description?: string;
-    /** Resolved range etc., shown under the title. */
-    meta?: string;
+    /**
+     * Resolved range etc., shown under the title. Its line is always kept so nothing moves when
+     * the data arrives: `undefined` (still loading) shows a skeleton, `null` (failed or none)
+     * leaves the line empty.
+     */
+    meta?: string | null;
+    /** False for views with no data line at all (Settings). */
+    hasMeta?: boolean;
     /** Which global filters this view uses. */
     source?: boolean | 'gsc-only';
     brand?: boolean;
@@ -17,7 +23,7 @@
     /** Extra controls before the global filters. */
     controls?: Snippet;
   }
-  let { title, description, meta, source = false, brand = false, range = true, controls }: Props = $props();
+  let { title, description, meta, hasMeta = true, source = false, brand = false, range = true, controls }: Props = $props();
 
   const SOURCES: Array<{ value: Source; label: string; title?: string; disabled?: boolean }> = [
     { value: 'gsc', label: 'Google' },
@@ -36,10 +42,10 @@
 <header class="page-head">
   <div class="titles">
     <h1>{title}</h1>
-    {#if description || meta}
+    {#if hasMeta || description || meta}
       <p>
         {#if description}<span>{description}</span>{/if}
-        {#if meta}<span class="meta num">{meta}</span>{/if}
+        {#if meta}<span class="meta num">{meta}</span>{:else if meta === undefined && hasMeta}<span class="skel meta-skel" aria-hidden="true"></span>{/if}
       </p>
     {/if}
   </div>
@@ -79,9 +85,17 @@
     margin-top: 3px;
     display: flex;
     flex-wrap: wrap;
+    align-items: center;
     gap: 2px 10px;
+    min-height: 19px;
+    line-height: 19px;
     color: var(--text-3);
     font-size: 13px;
+  }
+  .meta-skel {
+    width: 168px;
+    height: 11px;
+    border-radius: 4px;
   }
   .meta {
     color: var(--text-2);

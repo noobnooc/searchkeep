@@ -125,7 +125,7 @@
 
 <PageHeader
   title="Opportunities"
-  meta={range ? rangeLabel(range) : undefined}
+  meta={range ? rangeLabel(range) : active.error || active.data ? null : undefined}
   source={tab === 'cannibalization' ? 'gsc-only' : true}
   brand
   range={tab !== 'content-decay'}>

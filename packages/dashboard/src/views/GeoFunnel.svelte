@@ -78,7 +78,7 @@
   </span>
 {/snippet}
 
-<PageHeader title="GEO funnel" meta={d ? rangeLabel(d.range) : undefined} />
+<PageHeader title="GEO funnel" meta={d ? rangeLabel(d.range) : geo.error ? null : undefined} />
 
 {#if geo.error}
   <ErrorBanner error={geo.error} retry={geo.reload} />
@@ -130,7 +130,7 @@
     {/if}
 
     {#if !(allEmpty && !pageContains.value)}
-    <Card title="Pages" subtitle={d ? `${int(d.pages.length)}${d.pages.length >= 500 ? '+' : ''} pages with activity in at least one step` : undefined} flush busy={geo.loading && Boolean(d)}>
+    <Card title="Pages" subtitle={d ? `${int(d.pages.length)}${d.pages.length >= 500 ? '+' : ''} pages with activity in at least one step` : undefined} subtitlePending={!d && !geo.error} flush busy={geo.loading && Boolean(d)}>
       {#snippet actions()}
         <label class="filter">
           <Icon name="search" size={14} />
