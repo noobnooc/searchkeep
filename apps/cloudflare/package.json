@@ -14,6 +14,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@cloudflare/puppeteer": "^1.4.0",
     "@searchkeep/core": "workspace:*",
     "@searchkeep/mcp": "workspace:*",
     "@searchkeep/source-bing": "workspace:*",

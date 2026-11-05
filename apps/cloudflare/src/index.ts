@@ -49,6 +49,7 @@ import { createGscClient } from '@searchkeep/source-gsc';
 import { D1Store, ensureMigrated } from '@searchkeep/store-d1';
 import { Hono, type Context } from 'hono';
 import { authenticate, inspectAccess, readinessFor } from './auth/access.js';
+import { createBrowserFetch, type BrowserFetch } from './browser-fetch.js';
 import { seedDemo } from './dev-seed.js';
 import type { Env } from './env.js';
 import { setupPage } from './setup-page.js';
@@ -60,12 +61,19 @@ interface Vars {
   auth: AuthResult;
   store: D1Store;
   dev: boolean;
+  /** Browser Run transport for this request, opened only if a source needs it. */
+  browser: BrowserFetch | null;
 }
 
 type CrawlerGroup = CrawlerQuery['groupBy'][number];
 type C = Context<{ Bindings: Env; Variables: Vars }>;
 
-export function buildClients(config: SearchkeepConfig): SourceClients {
+/** Browser Run transport, when the BROWSER binding exists (it does on every deploy; tests run without). */
+function browserFor(env: Pick<Env, 'BROWSER'>): BrowserFetch | null {
+  return env.BROWSER ? createBrowserFetch(env.BROWSER as unknown as Parameters<typeof createBrowserFetch>[0]) : null;
+}
+
+export function buildClients(config: SearchkeepConfig, browser: BrowserFetch | null = null): SourceClients {
   const clients: SourceClients = {};
   if (config.gsc.clientEmail && config.gsc.privateKey) {
     clients.gsc = createGscClient({
@@ -74,7 +82,17 @@ export function buildClients(config: SearchkeepConfig): SourceClients {
       allowWrites: config.enableWrites,
     });
   }
-  if (config.bing.apiKey) clients.bing = createBingClient({ apiKey: config.bing.apiKey });
+  if (config.bing.apiKey)
+    clients.bing = createBingClient({
+      apiKey: config.bing.apiKey,
+      // Bing refuses Workers' egress IPs (ThrottleIP) but accepts Browser Run's.
+      ...(browser
+        ? {
+            fallbackFetch: browser.fetch,
+            onFallback: () => console.log('bing: ThrottleIP on direct calls, continuing through Browser Run'),
+          }
+        : {}),
+    });
   if (config.cloudflare.apiToken)
     clients.cloudflare = createCloudflareClient({ apiToken: config.cloudflare.apiToken, accountId: config.cloudflare.accountId });
   return clients;
@@ -120,7 +138,7 @@ async function readiness(c: C, refresh = false): Promise<ReadinessReport> {
 
 function opsContext(c: C): OpsContext {
   const config = c.get('config');
-  return { store: c.get('store'), config, clients: buildClients(config) };
+  return { store: c.get('store'), config, clients: buildClients(config, c.get('browser')) };
 }
 
 function errorResponse(c: C, err: unknown) {
@@ -198,7 +216,14 @@ app.use('*', async (c, next) => {
   c.header('referrer-policy', 'no-referrer');
   c.header('x-content-type-options', 'nosniff');
   c.header('x-frame-options', 'DENY');
-  await next();
+  const browser = browserFor(c.env);
+  c.set('browser', browser);
+  try {
+    await next();
+  } finally {
+    // Every API and MCP response is complete here (MCP answers with JSON, not a stream).
+    if (browser?.used) await browser.close();
+  }
 });
 
 /** Migrates on first use, attaches the store and adds dashboard-managed sites to the config. */
@@ -560,16 +585,21 @@ export async function scheduledSync(env: Env, now = new Date()): Promise<string>
     readyFlagCache.delete(env.DB);
     return `locked: ${report.state}`;
   }
-  const run = await runSync({
-    store,
-    config,
-    clients: buildClients(config),
-    trigger: 'cron',
-    now,
-    timeBudgetMs: 120_000,
-    log: (m) => console.log(m),
-  });
-  return `${run.status}: ${run.rowsWritten} rows${run.message ? ` (${run.message})` : ''}`;
+  const browser = browserFor(env);
+  try {
+    const run = await runSync({
+      store,
+      config,
+      clients: buildClients(config, browser),
+      trigger: 'cron',
+      now,
+      timeBudgetMs: 120_000,
+      log: (m) => console.log(m),
+    });
+    return `${run.status}: ${run.rowsWritten} rows${run.message ? ` (${run.message})` : ''}`;
+  } finally {
+    if (browser?.used) await browser.close();
+  }
 }
 
 export default {

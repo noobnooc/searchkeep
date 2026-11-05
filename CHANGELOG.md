@@ -26,6 +26,13 @@ Because users sync `main` at any time, the `Unreleased` section is always accura
 
 ### Added
 
+- Bing data through Cloudflare Browser Run. Bing's Webmaster API refuses the egress IPs of Workers
+  (`ThrottleIP`), often for days, so Bing never synced on many deployments. When a direct call gets
+  `ThrottleIP`, the Bing calls of that run now go through Browser Run, whose IPs Bing accepts. One
+  browser serves the whole run and is closed afterwards. Nothing to set up: the new `BROWSER`
+  binding in `wrangler.jsonc` is all it needs, and it stays unused while Bing answers directly.
+  New runtime dependency: `@cloudflare/puppeteer`, Cloudflare's client for Browser Run.
+
 - Sync progress you can see. While a site's latest days are still coming in, every dashboard page
   shows a banner with each source's progress (how far back the data goes, what is paused or
   failing, and when it is retried), the sidebar shows the overall progress, and the views refresh

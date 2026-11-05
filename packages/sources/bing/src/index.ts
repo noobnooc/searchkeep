@@ -20,6 +20,14 @@ const API = 'https://ssl.bing.com/webmaster/api.svc/json';
 export interface BingClientOptions {
   apiKey: string;
   fetch?: typeof fetch;
+  /**
+   * Used when Bing refuses the caller's IP address (`ThrottleIP`), and for the
+   * rest of this client's life once it was needed. The Worker passes one that
+   * goes through Cloudflare Browser Run, whose IPs Bing accepts.
+   */
+  fallbackFetch?: typeof fetch;
+  /** Called once when the client switches to `fallbackFetch`. */
+  onFallback?: () => void;
 }
 
 /** Parses `/Date(1316156400000-0700)/` into the calendar date in that offset. */
@@ -95,27 +103,49 @@ function pos(v: unknown): number | null {
   return Number.isFinite(n) && n > 0 ? n : null;
 }
 
+/** Bing refused the caller's IP address (`ThrottleIP`), not the key or the site. */
+function isIpThrottle(err: unknown): boolean {
+  return err instanceof SourceError && err.rateLimited && err.message.includes('(ThrottleIP)');
+}
+
+function describe(status: number, body: string): string {
+  const throttle = bingThrottle(body);
+  if (throttle) return `HTTP ${status}: rate limited by Bing (${throttle})`;
+  try {
+    const j = JSON.parse(body) as { Message?: string; ErrorCode?: number };
+    if (j.Message) return `HTTP ${status}: ${j.Message}${j.ErrorCode !== undefined ? ` (code ${j.ErrorCode})` : ''}`;
+  } catch {
+    // ignore
+  }
+  return status === 401 || status === 403 ? `HTTP ${status}: check BING_API_KEY` : `HTTP ${status}`;
+}
+
 export function createBingClient(opts: BingClientOptions): BingClient {
-  const f = opts.fetch ?? fetch;
+  const direct = opts.fetch ?? fetch;
+  let viaFallback = false;
+
+  const get = <T>(url: string, f: typeof fetch) =>
+    requestJson<{ d?: T[] | T }>(
+      'bing',
+      url,
+      { fetch: f, rateLimited: (status, body) => status === 429 || bingThrottle(body) !== null },
+      describe,
+    );
 
   async function call<T>(method: string, params: Record<string, string> = {}): Promise<T[]> {
     const qs = new URLSearchParams({ ...params, apikey: opts.apiKey });
-    const res = await requestJson<{ d?: T[] | T }>(
-      'bing',
-      `${API}/${method}?${qs.toString()}`,
-      { fetch: f, rateLimited: (status, body) => status === 429 || bingThrottle(body) !== null },
-      (status, body) => {
-        const throttle = bingThrottle(body);
-        if (throttle) return `HTTP ${status}: rate limited by Bing (${throttle})`;
-        try {
-          const j = JSON.parse(body) as { Message?: string; ErrorCode?: number };
-          if (j.Message) return `HTTP ${status}: ${j.Message}${j.ErrorCode !== undefined ? ` (code ${j.ErrorCode})` : ''}`;
-        } catch {
-          // ignore
-        }
-        return status === 401 || status === 403 ? `HTTP ${status}: check BING_API_KEY` : `HTTP ${status}`;
-      },
-    );
+    const url = `${API}/${method}?${qs.toString()}`;
+    let res: { d?: T[] | T } | undefined;
+    if (!viaFallback || !opts.fallbackFetch) {
+      try {
+        res = await get<T>(url, direct);
+      } catch (err) {
+        if (!opts.fallbackFetch || !isIpThrottle(err)) throw err;
+        viaFallback = true;
+        opts.onFallback?.();
+      }
+    }
+    if (viaFallback && opts.fallbackFetch) res = await get<T>(url, opts.fallbackFetch);
     const d = res?.d;
     if (d === undefined || d === null) return [];
     return Array.isArray(d) ? d : [d];

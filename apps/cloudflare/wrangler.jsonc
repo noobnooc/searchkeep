@@ -36,6 +36,11 @@
     "run_worker_first": true,
   },
 
+  // Cloudflare Browser Run. Bing's Webmaster API refuses the egress IPs of
+  // Workers (ThrottleIP) but accepts Browser Run's, so Bing calls fall back to
+  // it. Nothing to create: the binding is enough. Unused while Bing answers.
+  "browser": { "binding": "BROWSER" },
+
   // Sync runs in small batches every 15 minutes; each pass does only the work
   // that is due and exits immediately otherwise.
   "triggers": { "crons": ["*/15 * * * *"] },

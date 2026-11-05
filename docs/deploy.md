@@ -929,10 +929,13 @@ imported and skipped.
 - "Bing is paused until ... (rate limited)" means Bing refused a call. The other sources keep
   syncing, and Bing is retried with a growing pause (30 minutes to 8 hours); **Sync now** retries it
   right away.
-  - `ThrottleIP` (code 17) is the usual case for Workers: Bing throttles Cloudflare's shared egress
-    IP addresses, not your key or your site, so it happens however few calls Searchkeep makes and
-    often lasts days. A new API key does not help. Nothing on your side causes it; Bing data arrives
-    once a call gets through.
+  - `ThrottleIP` (code 17): Bing throttles the shared egress IP addresses of Workers, not your key
+    or your site, often for days. Searchkeep handles it: when a direct call gets `ThrottleIP`, it
+    sends the Bing calls of that run through Cloudflare Browser Run (the `BROWSER` binding in
+    `wrangler.jsonc`), whose IP addresses Bing accepts. Nothing to set up. Browser Run time shows
+    under **Workers & Pages** → **Browser Run**; Bing needs one short page load per site and report
+    a day, well inside the included time of both Workers plans. A pause with `ThrottleIP` means
+    Browser Run was refused too; Searchkeep keeps retrying.
   - `ThrottleUser` or `ThrottleHost` throttle your key or site; they lift after a while on their
     own.
 - A sync run that reports "Skipped ... after 3 interrupted attempts" hit a limit repeatedly, usually
