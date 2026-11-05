@@ -149,11 +149,22 @@
   th.right {
     text-align: right;
   }
+  /* Sortable and plain headers share one box, aligned on its middle rather than a baseline,
+     so a column's label stays put when the sort arrow appears and lines up with plain labels. */
+  .th-btn,
+  .th-label {
+    display: inline-flex;
+    align-items: center;
+    height: 16px;
+    vertical-align: middle;
+  }
   .th-btn {
     all: unset;
     cursor: pointer;
     display: inline-flex;
     align-items: center;
+    height: 16px;
+    vertical-align: middle;
     gap: 3px;
     border-radius: 4px;
   }

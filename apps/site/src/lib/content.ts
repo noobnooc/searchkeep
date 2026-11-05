@@ -236,7 +236,7 @@ export const TOOLS: Tool[] = [
       { name: 'pageContains', type: 'string', description: 'Case-insensitive substring filter on the page path.' },
       {
         name: 'sortBy',
-        type: '"crawled" | "cited" | "aiVisits" | "clicks"',
+        type: '"crawled" | "cited" | "aiVisits" | "clicks" | "impressions"',
         description: 'Sort key, descending. Defaults to `crawled`.',
       },
       limit(50),

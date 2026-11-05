@@ -3,9 +3,13 @@ import { AI_REFERRER_HOSTS } from '../crawlers.js';
 import type { CrawlerQuery, DateRange } from '../types.js';
 import { clampLimit, resolve, type AnalysisContext, type CommonParams } from './common.js';
 
+/** Keys the per-page funnel rows can be sorted by, descending. */
+export const GEO_SORT_KEYS = ['crawled', 'cited', 'aiVisits', 'clicks', 'impressions'] as const;
+export type GeoSortKey = (typeof GEO_SORT_KEYS)[number];
+
 export interface GeoFunnelParams extends CommonParams {
   pageContains?: string;
-  sortBy?: 'crawled' | 'cited' | 'aiVisits' | 'clicks';
+  sortBy?: GeoSortKey;
 }
 
 const AI_HOSTS = Object.keys(AI_REFERRER_HOSTS);
@@ -17,6 +21,8 @@ const CRAWLER_GROUPS: CrawlerQuery['groupBy'] = ['crawler', 'operator', 'purpose
  * are joined on the normalized page path.
  */
 export async function geoFunnel(ctx: AnalysisContext, p: GeoFunnelParams) {
+  const sortBy = p.sortBy ?? 'crawled';
+  if (!GEO_SORT_KEYS.includes(sortBy)) throw new SearchkeepError('bad_request', `sortBy must be one of ${GEO_SORT_KEYS.join(', ')}.`);
   const site = findSite(ctx.config, p.site);
   // Default the window to the newest date any funnel dataset has (Cloudflare data is fresher than GSC).
   const end = p.end ?? (p.start ? undefined : await latestOf(ctx, site.id, ['search', 'ai_crawlers', 'web_analytics', 'ai_citations']));
@@ -72,7 +78,6 @@ export async function geoFunnel(ctx: AnalysisContext, p: GeoFunnelParams) {
     row.clicks += g.clicks;
     row.impressions += g.impressions;
   }
-  const sortBy = p.sortBy ?? 'crawled';
   const all = [...rows.values()];
   const totals = all.reduce(
     (t, x) => ({

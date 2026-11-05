@@ -4,6 +4,7 @@ import {
   classifyCrawler,
   clearJwksCache,
   evaluateReadiness,
+  geoFunnel,
   isRateLimited,
   loadConfig,
   normalizeDomain,
@@ -13,10 +14,12 @@ import {
   parseRetryAfter,
   requestJson,
   safeMessage,
+  SearchkeepError,
   validateSite,
   weekStart,
   withStoredSites,
 } from '../src/index.js';
+import type { Store } from '../src/index.js';
 
 function b64url(bytes: ArrayBuffer | Uint8Array | string): string {
   const arr = typeof bytes === 'string' ? new TextEncoder().encode(bytes) : bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
@@ -232,5 +235,40 @@ describe('requestJson', () => {
     expect(calls).toBe(1);
     const plain = await requestJson('x', 'https://x.test/', { fetch: custom }).catch((e: unknown) => e);
     expect(isRateLimited(plain)).toBe(false);
+  });
+});
+
+describe('geoFunnel', () => {
+  // A store with three pages: /a is the most crawled, /b has the most impressions, /c the most clicks.
+  const store = {
+    queryCrawlers: async () => [
+      { path: '/a', requests: 30 },
+      { path: '/b', requests: 10 },
+      { path: '/c', requests: 20 },
+    ],
+    queryAiCitations: async () => [],
+    queryReferrals: async () => [],
+    queryPerformance: async (q: { source: string }) =>
+      q.source === 'gsc'
+        ? [
+            { page: '/a', clicks: 1, impressions: 50 },
+            { page: '/b', clicks: 2, impressions: 900 },
+            { page: '/c', clicks: 9, impressions: 300 },
+          ]
+        : [],
+  } as unknown as Store;
+  const ctx = { store, config: loadConfig({ SITES: JSON.stringify([{ domain: 'acme.com' }]) }) };
+  const range = { start: '2026-10-01', end: '2026-10-28' };
+
+  it('sorts pages by any step, and by impressions', async () => {
+    const order = async (sortBy?: 'crawled' | 'clicks' | 'impressions') =>
+      (await geoFunnel(ctx, { ...range, ...(sortBy ? { sortBy } : {}) })).pages.map((p) => p.page);
+    expect(await order()).toEqual(['/a', '/c', '/b']);
+    expect(await order('clicks')).toEqual(['/c', '/b', '/a']);
+    expect(await order('impressions')).toEqual(['/b', '/c', '/a']);
+  });
+
+  it('rejects an unknown sort key', async () => {
+    await expect(geoFunnel(ctx, { ...range, sortBy: 'position' as 'crawled' })).rejects.toBeInstanceOf(SearchkeepError);
   });
 });
