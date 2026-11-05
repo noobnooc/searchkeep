@@ -216,143 +216,152 @@ export async function runSync(ctx: SyncContext): Promise<SyncRunRecord> {
     };
     const retried = new Set<SourceId>();
     const units = await planUnits(ctx, today, budget);
-    for (const unit of units) {
-      const taskKey = `${unit.task}|${unit.siteId}`;
-      if (failedTasks.has(taskKey)) continue;
-      const cooling = activeBackoff(backoff[sourceBackoffKey(unit.source)], nowMs);
-      // "Sync now" tries a paused source once: the limit may have lifted, and Bing's
-      // ThrottleIP depends on the egress IP, which differs between locations.
-      if (cooling && !(ctx.trigger === 'manual' && !retried.has(unit.source))) {
-        paused.set(unit.source, cooling.until);
-        continue;
-      }
-      if (cooling) retried.add(unit.source);
-      // "Sync now" retries failed tasks right away; the cron waits out their backoff.
-      if (ctx.trigger === 'cron' && activeBackoff(backoff[taskBackoffKey(unit.task, unit.siteId)], nowMs)) {
-        waiting.add(taskKey);
-        continue;
-      }
-      if (Date.now() - started > timeBudget) {
-        stoppedFor = 'time budget reached';
-        break;
-      }
-      if (unit.calls > callsLeft) {
-        stoppedFor = 'API call budget reached';
-        break;
-      }
-      const cap = SOURCE_CALLS_PER_RUN[unit.source];
-      if (cap !== undefined && (sourceCalls.get(unit.source) ?? 0) + unit.calls > cap) {
-        capped.add(unit.source);
-        continue;
-      }
-      if (unit.backfill && writesToday >= config.sync.dailyWriteBudget) {
-        stoppedFor = 'daily write budget reached';
-        continue;
-      }
-      if (unit.backfill && rowsWritten >= maxRowsPerRun) {
-        stoppedFor = 'enough rows for one run';
-        continue;
-      }
-      if (inflight && inflight.key === unit.key && inflight.attempts >= MAX_INTERRUPTED_ATTEMPTS) {
-        const split = await unit.skip();
-        await store.deleteMeta(INFLIGHT_KEY);
-        inflight = null;
-        if (split) {
-          failedTasks.add(taskKey);
-          record(unit, 'skipped', 0, split);
-        } else {
-          record(
-            unit,
-            'error',
-            0,
-            `Skipped ${unit.key} after ${MAX_INTERRUPTED_ATTEMPTS} interrupted attempts (likely the Worker CPU limit; lower GSC_ROWS_PER_DAY).`,
-          );
-        }
-        continue;
-      }
-      const gap = pacing[unit.source] ?? 0;
-      const last = lastCallAt.get(unit.source);
-      if (gap > 0 && last !== undefined && last + gap > Date.now()) await sleep(last + gap - Date.now());
-
-      const attempts = inflight && inflight.key === unit.key ? inflight.attempts + 1 : 1;
-      await store.setMeta(INFLIGHT_KEY, JSON.stringify({ key: unit.key, attempts }));
-      inflight = { key: unit.key, attempts };
-      const callsBefore = callsLeft;
-      callsLeft -= unit.calls;
-      sourceCalls.set(unit.source, (sourceCalls.get(unit.source) ?? 0) + unit.calls);
-      try {
-        const rows = await unit.run();
-        rowsWritten += rows;
-        writesToday += rows;
-        record(unit, 'ok', rows);
-        // Spread large writes out: D1 limits the work one database does per 10 seconds.
-        if (rows > 1_000) await sleep(Math.min(3_000, rows * WRITE_PAUSE_MS_PER_ROW));
-        await store.deleteMeta(INFLIGHT_KEY);
-        inflight = null;
-        clearBackoff(taskBackoffKey(unit.task, unit.siteId));
-        clearBackoff(sourceBackoffKey(unit.source));
-        await saveBackoff();
-      } catch (err) {
-        await store.deleteMeta(INFLIGHT_KEY);
-        inflight = null;
-        if (err instanceof BudgetExceeded) {
-          stoppedFor = 'API call budget reached';
-          // A range that ran out after half a run's budget or more might never fit one: split it, so
-          // it can finish. One that ran out with little budget left gets more once earlier work is done.
-          if ((callsBefore - callsLeft) * 2 >= config.sync.maxCallsPerRun && unit.shrink && (await unit.shrink())) {
-            record(unit, 'skipped', 0, 'Needs more calls than one run allows; continues with shorter ranges.');
-          }
-          break;
-        }
-        if (store.isBusy?.(err)) {
-          // Not this task's fault: stop writing for this run, the next one continues.
-          stoppedFor = 'database busy';
-          record(unit, 'skipped', 0, 'The database was busy; continues next run.');
-          break;
-        }
-        if (err instanceof Replan) {
-          // Not an error: the next run asks for smaller ranges. The task's other planned ranges wait for it.
-          failedTasks.add(taskKey);
-          record(unit, 'skipped', 0, err.message);
+    // Any write of the loop (progress markers, cursors, backoff) may find the database busy too.
+    try {
+      for (const unit of units) {
+        const taskKey = `${unit.task}|${unit.siteId}`;
+        if (failedTasks.has(taskKey)) continue;
+        const cooling = activeBackoff(backoff[sourceBackoffKey(unit.source)], nowMs);
+        // "Sync now" tries a paused source once: the limit may have lifted, and Bing's
+        // ThrottleIP depends on the egress IP, which differs between locations.
+        if (cooling && !(ctx.trigger === 'manual' && !retried.has(unit.source))) {
+          paused.set(unit.source, cooling.until);
           continue;
         }
-        const message = safeMessage(err);
-        ctx.log?.(`sync ${unit.task} ${unit.siteId}: ${message}`);
-        if (isRateLimited(err)) {
-          // Pause the whole source: every other call to it would be refused too. A pause set
-          // during this run holds for the rest of it, also for "Sync now".
-          retried.add(unit.source);
-          const key = sourceBackoffKey(unit.source);
+        if (cooling) retried.add(unit.source);
+        // "Sync now" retries failed tasks right away; the cron waits out their backoff.
+        if (ctx.trigger === 'cron' && activeBackoff(backoff[taskBackoffKey(unit.task, unit.siteId)], nowMs)) {
+          waiting.add(taskKey);
+          continue;
+        }
+        if (Date.now() - started > timeBudget) {
+          stoppedFor = 'time budget reached';
+          break;
+        }
+        if (unit.calls > callsLeft) {
+          stoppedFor = 'API call budget reached';
+          break;
+        }
+        const cap = SOURCE_CALLS_PER_RUN[unit.source];
+        if (cap !== undefined && (sourceCalls.get(unit.source) ?? 0) + unit.calls > cap) {
+          capped.add(unit.source);
+          continue;
+        }
+        if (unit.backfill && writesToday >= config.sync.dailyWriteBudget) {
+          stoppedFor = 'daily write budget reached';
+          continue;
+        }
+        if (unit.backfill && rowsWritten >= maxRowsPerRun) {
+          stoppedFor = 'enough rows for one run';
+          continue;
+        }
+        if (inflight && inflight.key === unit.key && inflight.attempts >= MAX_INTERRUPTED_ATTEMPTS) {
+          const split = await unit.skip();
+          await store.deleteMeta(INFLIGHT_KEY);
+          inflight = null;
+          if (split) {
+            failedTasks.add(taskKey);
+            record(unit, 'skipped', 0, split);
+          } else {
+            record(
+              unit,
+              'error',
+              0,
+              `Skipped ${unit.key} after ${MAX_INTERRUPTED_ATTEMPTS} interrupted attempts (likely the Worker CPU limit; lower GSC_ROWS_PER_DAY).`,
+            );
+          }
+          continue;
+        }
+        const gap = pacing[unit.source] ?? 0;
+        const last = lastCallAt.get(unit.source);
+        if (gap > 0 && last !== undefined && last + gap > Date.now()) await sleep(last + gap - Date.now());
+
+        const attempts = inflight && inflight.key === unit.key ? inflight.attempts + 1 : 1;
+        await store.setMeta(INFLIGHT_KEY, JSON.stringify({ key: unit.key, attempts }));
+        inflight = { key: unit.key, attempts };
+        const callsBefore = callsLeft;
+        callsLeft -= unit.calls;
+        sourceCalls.set(unit.source, (sourceCalls.get(unit.source) ?? 0) + unit.calls);
+        try {
+          const rows = await unit.run();
+          rowsWritten += rows;
+          writesToday += rows;
+          record(unit, 'ok', rows);
+          // Spread large writes out: D1 limits the work one database does per 10 seconds.
+          if (rows > 1_000) await sleep(Math.min(3_000, rows * WRITE_PAUSE_MS_PER_ROW));
+          await store.deleteMeta(INFLIGHT_KEY);
+          inflight = null;
+          clearBackoff(taskBackoffKey(unit.task, unit.siteId));
+          clearBackoff(sourceBackoffKey(unit.source));
+          await saveBackoff();
+        } catch (err) {
+          if (store.isBusy?.(err)) {
+            // Not this task's fault: stop writing for this run, the next one continues. The busy
+            // database may refuse the cleanup too; a leftover marker only counts one interruption.
+            await store.deleteMeta(INFLIGHT_KEY).catch(() => undefined);
+            inflight = null;
+            stoppedFor = 'database busy';
+            record(unit, 'skipped', 0, 'The database was busy; continues next run.');
+            break;
+          }
+          await store.deleteMeta(INFLIGHT_KEY);
+          inflight = null;
+          if (err instanceof BudgetExceeded) {
+            stoppedFor = 'API call budget reached';
+            // A range that ran out after half a run's budget or more might never fit one: split it, so
+            // it can finish. One that ran out with little budget left gets more once earlier work is done.
+            if ((callsBefore - callsLeft) * 2 >= config.sync.maxCallsPerRun && unit.shrink && (await unit.shrink())) {
+              record(unit, 'skipped', 0, 'Needs more calls than one run allows; continues with shorter ranges.');
+            }
+            break;
+          }
+          if (err instanceof Replan) {
+            // Not an error: the next run asks for smaller ranges. The task's other planned ranges wait for it.
+            failedTasks.add(taskKey);
+            record(unit, 'skipped', 0, err.message);
+            continue;
+          }
+          const message = safeMessage(err);
+          ctx.log?.(`sync ${unit.task} ${unit.siteId}: ${message}`);
+          if (isRateLimited(err)) {
+            // Pause the whole source: every other call to it would be refused too. A pause set
+            // during this run holds for the rest of it, also for "Sync now".
+            retried.add(unit.source);
+            const key = sourceBackoffKey(unit.source);
+            const failures = (backoff[key]?.failures ?? 0) + 1;
+            const until = new Date(nowMs + rateLimitDelay(failures, err.retryAfterMs)).toISOString();
+            backoff[key] = { until, failures, reason: message };
+            backoffDirty = true;
+            await saveBackoff();
+            paused.set(unit.source, until);
+            const name = SOURCE_NAMES[unit.source];
+            record(
+              unit,
+              'skipped',
+              0,
+              `Rate limited by ${name}; ${name} is paused until ${formatUntil(until, today)}, then continues on its own.`,
+            );
+            continue;
+          }
+          failedTasks.add(taskKey);
+          // A range the API refuses (too wide for its plan, for one) is first retried as smaller ranges.
+          if (unit.shrink && (await unit.shrink())) {
+            record(unit, 'skipped', 0, `Asking for shorter ranges next run after: ${message}`);
+            continue;
+          }
+          record(unit, 'error', 0, message);
+          const key = taskBackoffKey(unit.task, unit.siteId);
           const failures = (backoff[key]?.failures ?? 0) + 1;
-          const until = new Date(nowMs + rateLimitDelay(failures, err.retryAfterMs)).toISOString();
-          backoff[key] = { until, failures, reason: message };
+          backoff[key] = { until: new Date(nowMs + errorDelay(failures)).toISOString(), failures, reason: message };
           backoffDirty = true;
           await saveBackoff();
-          paused.set(unit.source, until);
-          const name = SOURCE_NAMES[unit.source];
-          record(
-            unit,
-            'skipped',
-            0,
-            `Rate limited by ${name}; ${name} is paused until ${formatUntil(until, today)}, then continues on its own.`,
-          );
-          continue;
+        } finally {
+          lastCallAt.set(unit.source, Date.now());
         }
-        failedTasks.add(taskKey);
-        // A range the API refuses (too wide for its plan, for one) is first retried as smaller ranges.
-        if (unit.shrink && (await unit.shrink())) {
-          record(unit, 'skipped', 0, `Asking for shorter ranges next run after: ${message}`);
-          continue;
-        }
-        record(unit, 'error', 0, message);
-        const key = taskBackoffKey(unit.task, unit.siteId);
-        const failures = (backoff[key]?.failures ?? 0) + 1;
-        backoff[key] = { until: new Date(nowMs + errorDelay(failures)).toISOString(), failures, reason: message };
-        backoffDirty = true;
-        await saveBackoff();
-      } finally {
-        lastCallAt.set(unit.source, Date.now());
       }
+    } catch (err) {
+      if (!store.isBusy?.(err)) throw err;
+      stoppedFor = 'database busy';
     }
 
     // A few thousand brand flags per run: new queries are classified over the next runs.

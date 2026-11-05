@@ -845,6 +845,35 @@ export function storeContract(name: string, makeStore: () => Promise<Store>): vo
         expect(await store.latestDate('acme', 'gsc')).toBe('2026-10-19');
       });
 
+      it('stops gracefully when the busy database also refuses the writes that follow', async () => {
+        class Busy extends Error {}
+        // From the first search write on, every write fails for a while, as an overloaded D1 does.
+        let busyWrites = 0;
+        const failing = new Set(['writeSearchFacts', 'deleteMeta', 'setMeta']);
+        const busyStore = new Proxy(store, {
+          get(target, prop) {
+            if (prop === 'isBusy') return (e: unknown) => e instanceof Busy;
+            const v = Reflect.get(target, prop, target) as unknown;
+            if (typeof v !== 'function') return v;
+            const fn = (v as (...a: unknown[]) => Promise<unknown>).bind(target);
+            if (!failing.has(String(prop))) return fn;
+            return async (...args: unknown[]) => {
+              if (prop === 'writeSearchFacts' && busyWrites === 0) busyWrites = 1;
+              if (busyWrites > 0 && busyWrites <= 3) {
+                busyWrites++;
+                throw new Busy('busy');
+              }
+              return fn(...args);
+            };
+          },
+        }) as Store;
+        const cfg = config({ SYNC_MAX_CALLS_PER_RUN: '900', GSC_BACKFILL_MONTHS: '0' }, [searchOnly(SITE)]);
+        const run = await sync(busyStore, { config: cfg, clients: clients(), trigger: 'cron', now: NOW });
+        expect(run.status).toBe('partial');
+        expect(run.message).toMatch(/database busy/);
+        expect(run.details!.some((d) => d.status === 'error')).toBe(false);
+      });
+
       it('marks a run left as running as interrupted', async () => {
         const stale = await store.startSyncRun({
           startedAt: '2026-10-20T03:00:00.000Z',
