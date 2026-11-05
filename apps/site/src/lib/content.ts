@@ -395,8 +395,9 @@ export const SECRETS: Secret[] = [
   {
     name: 'SYNC_MAX_CALLS_PER_RUN',
     required: 'optional',
-    description: 'Maximum outbound API calls per sync pass (5–900). Defaults to `20`, well within the Workers Free subrequest limit.',
-    example: '20',
+    description:
+      'Maximum outbound API calls per sync pass (5–900). Defaults to `35`, within the Workers Free limit of 50 outbound requests per invocation. On Workers Paid, `100` or more makes the first sync of many sites faster.',
+    example: '100',
   },
 ];
 
@@ -528,7 +529,7 @@ export const FAQS: Faq[] = [
   },
   {
     q: 'How far back does the history go?',
-    a: 'After you deploy, Searchkeep backfills as much as Google provides, which is 16 months, one day at a time. On the free D1 write quota the full backfill takes days to weeks. It never deletes anything, so your history keeps growing past the point where Search Console forgets it. The earlier you deploy, the more you keep.',
+    a: 'After you deploy, Searchkeep backfills as much as Google provides, which is 16 months, up to 30 days per request. For a small site that takes a few hours; sites with a lot of data take days on the free D1 write quota. It never deletes anything, so your history keeps growing past the point where Search Console forgets it. The earlier you deploy, the more you keep.',
   },
   {
     q: 'Why no backlinks, competitor data or rank tracking?',

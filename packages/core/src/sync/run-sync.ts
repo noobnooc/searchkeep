@@ -4,15 +4,16 @@ import { AI_CRAWLERS, classifyCrawler } from '../crawlers.js';
 import { addDays, addMonths, toIsoDate } from '../dates.js';
 import { safeMessage } from '../errors.js';
 import { isRateLimited } from '../http.js';
-import type { SourceClients } from '../sources.js';
+import type { GscRow, SourceClients } from '../sources.js';
 import type { Store } from '../store.js';
-import type { CrawlerRequestInput, IsoDate, SearchFactInput, SourceId, SyncRunRecord, SyncTaskResult } from '../types.js';
+import type { CrawlerRequestInput, DateRange, IsoDate, SearchFactInput, SourceId, SyncRunRecord, SyncTaskResult } from '../types.js';
 import { normalizePage } from '../url.js';
 import {
   activeBackoff,
   BING_DATASETS,
   CF_CRAWLER_LOOKBACK_DAYS,
   CF_RUM_LOOKBACK_DAYS,
+  CHUNK_DAYS,
   errorDelay,
   formatUntil,
   GSC_MAX_GAP_DAYS,
@@ -21,6 +22,7 @@ import {
   parseJson,
   pruneBackoff,
   rateLimitDelay,
+  shrinkChunk,
   SOURCE_NAMES,
   sourceBackoffKey,
   syncKeys,
@@ -53,8 +55,8 @@ export interface SyncContext {
 export const DEFAULT_PACING: Partial<Record<SourceId, number>> = { bing: 1_000 };
 export const SOURCE_CALLS_PER_RUN: Partial<Record<SourceId, number>> = { bing: 8 };
 
-/** GSC history days planned per site and run (more than one run can take; the rest is planned next run). */
-const GSC_HISTORY_DAYS_PER_RUN = 60;
+/** GSC history requests planned per site and run (more than one run can take; the rest is planned next run). */
+const GSC_HISTORY_UNITS_PER_RUN = 60;
 
 interface Unit {
   task: string;
@@ -62,16 +64,32 @@ interface Unit {
   source: SourceId;
   /** History work (GSC backfill, Cloudflare lookback): runs after every increment and stops at the daily write budget. */
   backfill: boolean;
-  /** The day a history unit pulls; history runs newest first across all sites. */
+  /** The newest day a history unit pulls; history runs newest first across all sites. */
   date?: IsoDate;
-  /** Upper bound of API calls this unit makes. */
+  /** API calls reserved before the unit runs; extra pages take more from the budget as they go. */
   calls: number;
   /** Stable id used to detect invocations killed mid-unit (e.g. CPU limit). */
   key: string;
   run: () => Promise<number>;
-  /** Advances past this unit without running it. */
-  skip: () => Promise<void>;
+  /**
+   * Gives up on this unit after repeated interruptions: a range is split for the next run
+   * (returning what was done), a single day is passed over.
+   */
+  skip: () => Promise<string | void>;
+  /** Splits a multi-day range after an error; false for a single day. */
+  shrink?: () => Promise<boolean>;
 }
+
+/** The call budget shared by every unit of a run. */
+interface Budget {
+  /** Takes one more call, or stops the unit (BudgetExceeded) when none is left. */
+  spend(source: SourceId): void;
+  /** Hands back reserved calls a unit did not need. */
+  refund(source: SourceId, calls: number): void;
+}
+
+/** The range had too many rows for one request: it was split, and the next run continues with smaller ranges. */
+class Replan extends Error {}
 
 /** Units interrupted this many times in a row are skipped so sync never gets stuck. */
 const MAX_INTERRUPTED_ATTEMPTS = 3;
@@ -150,13 +168,20 @@ export async function runSync(ctx: SyncContext): Promise<SyncRunRecord> {
   let inflight = parseJson<{ key: string; attempts: number }>(await store.getMeta(INFLIGHT_KEY));
   try {
     await saveBackoff();
-    // A unit that turns out to need fewer calls than planned hands the rest back.
-    const refund = (source: SourceId, calls: number) => {
-      callsLeft += calls;
-      sourceCalls.set(source, Math.max(0, (sourceCalls.get(source) ?? 0) - calls));
+    const budget: Budget = {
+      spend(source) {
+        if (callsLeft < 1) throw new BudgetExceeded();
+        callsLeft -= 1;
+        sourceCalls.set(source, (sourceCalls.get(source) ?? 0) + 1);
+      },
+      // A unit that turns out to need fewer calls than reserved hands the rest back.
+      refund(source, calls) {
+        callsLeft += calls;
+        sourceCalls.set(source, Math.max(0, (sourceCalls.get(source) ?? 0) - calls));
+      },
     };
     const retried = new Set<SourceId>();
-    const units = await planUnits(ctx, today, refund);
+    const units = await planUnits(ctx, today, budget);
     for (const unit of units) {
       const taskKey = `${unit.task}|${unit.siteId}`;
       if (failedTasks.has(taskKey)) continue;
@@ -191,15 +216,20 @@ export async function runSync(ctx: SyncContext): Promise<SyncRunRecord> {
         continue;
       }
       if (inflight && inflight.key === unit.key && inflight.attempts >= MAX_INTERRUPTED_ATTEMPTS) {
-        await unit.skip();
+        const split = await unit.skip();
         await store.deleteMeta(INFLIGHT_KEY);
         inflight = null;
-        record(
-          unit,
-          'error',
-          0,
-          `Skipped ${unit.key} after ${MAX_INTERRUPTED_ATTEMPTS} interrupted attempts (likely the Worker CPU limit; lower GSC_ROWS_PER_DAY).`,
-        );
+        if (split) {
+          failedTasks.add(taskKey);
+          record(unit, 'skipped', 0, split);
+        } else {
+          record(
+            unit,
+            'error',
+            0,
+            `Skipped ${unit.key} after ${MAX_INTERRUPTED_ATTEMPTS} interrupted attempts (likely the Worker CPU limit; lower GSC_ROWS_PER_DAY).`,
+          );
+        }
         continue;
       }
       const gap = pacing[unit.source] ?? 0;
@@ -228,6 +258,12 @@ export async function runSync(ctx: SyncContext): Promise<SyncRunRecord> {
           stoppedFor = 'API call budget reached';
           break;
         }
+        if (err instanceof Replan) {
+          // Not an error: the next run asks for smaller ranges. The task's other planned ranges wait for it.
+          failedTasks.add(taskKey);
+          record(unit, 'skipped', 0, err.message);
+          continue;
+        }
         const message = safeMessage(err);
         ctx.log?.(`sync ${unit.task} ${unit.siteId}: ${message}`);
         if (isRateLimited(err)) {
@@ -251,6 +287,11 @@ export async function runSync(ctx: SyncContext): Promise<SyncRunRecord> {
           continue;
         }
         failedTasks.add(taskKey);
+        // A range the API refuses (too wide for its plan, for one) is first retried as smaller ranges.
+        if (unit.shrink && (await unit.shrink())) {
+          record(unit, 'skipped', 0, `Asking for shorter ranges next run after: ${message}`);
+          continue;
+        }
         record(unit, 'error', 0, message);
         const key = taskBackoffKey(unit.task, unit.siteId);
         const failures = (backoff[key]?.failures ?? 0) + 1;
@@ -316,7 +357,15 @@ function interleave<T>(lists: T[][]): T[] {
   return out;
 }
 
-async function planUnits(ctx: SyncContext, today: IsoDate, refund: (source: SourceId, calls: number) => void): Promise<Unit[]> {
+/** Days from `start` to `end`, both included. */
+function spanDays(range: DateRange): number {
+  return Math.round((Date.parse(`${range.end}T00:00:00Z`) - Date.parse(`${range.start}T00:00:00Z`)) / 86_400_000) + 1;
+}
+
+const minDate = (a: IsoDate, b: IsoDate) => (a < b ? a : b);
+const maxDate = (a: IsoDate, b: IsoDate) => (a > b ? a : b);
+
+async function planUnits(ctx: SyncContext, today: IsoDate, budget: Budget): Promise<Unit[]> {
   const { config, clients, store } = ctx;
   const meta = await loadSyncMeta(store);
   const get = (key: string): string | null => meta[key] ?? null;
@@ -333,52 +382,79 @@ async function planUnits(ctx: SyncContext, today: IsoDate, refund: (source: Sour
       const gsc = clients.gsc;
       const property = site.gscProperty;
       const rowsPerDay = config.gsc.rowsPerDay;
+      const chunkKey = syncKeys.gscChunk(site.id);
+      const chunk = Math.max(1, Math.min(CHUNK_DAYS.gsc, Number(get(chunkKey)) || CHUNK_DAYS.gsc));
+      const splitRange = async (days: number): Promise<boolean> => {
+        if (days <= 1) return false;
+        await store.setMeta(chunkKey, String(shrinkChunk(Math.min(days, chunk))));
+        return true;
+      };
+      /** Rows one request may return: as before for one day, and never more than a tenth of the daily write budget. */
+      const pageRows = Math.min(25_000, rowsPerDay);
+      const rangeCap = (days: number) => Math.max(rowsPerDay, Math.min(rowsPerDay * days, Math.floor(config.sync.dailyWriteBudget / 10)));
+      // Totals, the first country × device page and the first query × page page.
+      const reserved = 3;
 
-      const pullDay = async (date: IsoDate): Promise<number> => {
-        let written = 0;
-        const totals = await gsc.searchAnalytics({ property, startDate: date, endDate: date, dimensions: ['date'], rowLimit: 10 });
-        // No totals: no impressions that day (or not final yet), so the other breakdowns are empty too.
-        // Common for the latest days (GSC lags 2-3 days) and for small sites; saves two calls per day.
-        if (totals.length === 0) {
-          refund('gsc', callsPerDay - 1);
-          return 0;
-        }
-        written += await store.writeSearchFacts(
-          site.id,
-          'gsc',
-          totals.map((r) => ({ date: r.keys[0]!, kind: 'total', clicks: r.clicks, impressions: r.impressions, position: r.position })),
-        );
-        const breakdowns = await gsc.searchAnalytics({
-          property,
-          startDate: date,
-          endDate: date,
-          dimensions: ['date', 'country', 'device'],
-          rowLimit: 25_000,
-        });
-        written += await store.writeBreakdowns(
-          site.id,
-          'gsc',
-          breakdowns.map((r) => ({
-            date: r.keys[0]!,
-            country: r.keys[1]!,
-            device: r.keys[2]!,
-            clicks: r.clicks,
-            impressions: r.impressions,
-            position: r.position,
-          })),
-        );
-        const facts: SearchFactInput[] = [];
-        for (let startRow = 0; startRow < rowsPerDay; startRow += 25_000) {
-          const rowLimit = Math.min(25_000, rowsPerDay - startRow);
-          const rows = await gsc.searchAnalytics({
+      /** All pages of one request, up to `cap` rows; `complete` is false when more rows were left. */
+      const pages = async (
+        range: DateRange,
+        dimensions: Array<'date' | 'query' | 'page' | 'country' | 'device'>,
+        size: number,
+        cap: number,
+      ) => {
+        const rows: GscRow[] = [];
+        for (let startRow = 0; ; startRow += size) {
+          if (startRow > 0) budget.spend('gsc');
+          const page = await gsc.searchAnalytics({
             property,
-            startDate: date,
-            endDate: date,
-            dimensions: ['date', 'query', 'page'],
-            rowLimit,
+            startDate: range.start,
+            endDate: range.end,
+            dimensions,
+            rowLimit: size,
             startRow,
           });
-          for (const r of rows) {
+          rows.push(...page);
+          if (page.length < size) return { rows, complete: true };
+          if (rows.length >= cap) return { rows, complete: false };
+        }
+      };
+
+      /**
+       * One request set for the days of `range`: totals per day, country × device and query × page,
+       * each with one row per day. Returns null when the range has more rows than one request may
+       * return; nothing is written then and the caller splits the range.
+       */
+      const pullRange = async (range: DateRange): Promise<number | null> => {
+        const totals = await gsc.searchAnalytics({
+          property,
+          startDate: range.start,
+          endDate: range.end,
+          dimensions: ['date'],
+          rowLimit: 25_000,
+        });
+        // No impressions in the whole range (or not final yet): the other breakdowns are empty too.
+        // Common for the latest days (GSC lags 2-3 days) and for the older history of small sites.
+        if (totals.length === 0) {
+          budget.refund('gsc', reserved - 1);
+          return 0;
+        }
+        const days = new Set(totals.map((r) => r.keys[0]!)).size;
+        const breakdowns = await pages(range, ['date', 'country', 'device'], 25_000, 250_000);
+        const queryPages = await pages(range, ['date', 'query', 'page'], pageRows, rangeCap(days));
+        // One day keeps the top rows like it always has; a longer range is split instead.
+        if (spanDays(range) > 1 && (!queryPages.complete || !breakdowns.complete)) return null;
+
+        // At most GSC_ROWS_PER_DAY query × page rows per day, the most clicked first.
+        const byDay = new Map<string, GscRow[]>();
+        for (const r of queryPages.rows) {
+          const list = byDay.get(r.keys[0]!) ?? [];
+          list.push(r);
+          byDay.set(r.keys[0]!, list);
+        }
+        const facts: SearchFactInput[] = [];
+        for (const list of byDay.values()) {
+          list.sort((a, b) => b.clicks - a.clicks || b.impressions - a.impressions);
+          for (const r of list.slice(0, rowsPerDay)) {
             facts.push({
               date: r.keys[0]!,
               kind: 'query_page',
@@ -389,12 +465,62 @@ async function planUnits(ctx: SyncContext, today: IsoDate, refund: (source: Sour
               position: r.position,
             });
           }
-          if (rows.length < rowLimit) break;
         }
+        let written = await store.writeSearchFacts(
+          site.id,
+          'gsc',
+          totals.map((r) => ({ date: r.keys[0]!, kind: 'total', clicks: r.clicks, impressions: r.impressions, position: r.position })),
+        );
+        written += await store.writeBreakdowns(
+          site.id,
+          'gsc',
+          breakdowns.rows.map((r) => ({
+            date: r.keys[0]!,
+            country: r.keys[1]!,
+            device: r.keys[2]!,
+            clicks: r.clicks,
+            impressions: r.impressions,
+            position: r.position,
+          })),
+        );
         written += await store.writeSearchFacts(site.id, 'gsc', facts);
         return written;
       };
-      const callsPerDay = 2 + Math.ceil(rowsPerDay / 25_000);
+
+      /** A unit for one range: `done` records it; a range with too many rows is split for the next run. */
+      const rangeUnit = (opts: {
+        task: string;
+        range: DateRange;
+        history: boolean;
+        done: () => Promise<void>;
+        passOver: () => Promise<void>;
+      }): Unit => {
+        const days = spanDays(opts.range);
+        const label = `${opts.range.start}..${opts.range.end}`;
+        return {
+          task: opts.task,
+          siteId: site.id,
+          source: 'gsc',
+          backfill: opts.history,
+          ...(opts.history ? { date: opts.range.end } : {}),
+          calls: reserved,
+          key: `${opts.task}:${site.id}:${label}`,
+          run: async () => {
+            const n = await pullRange(opts.range);
+            if (n === null) {
+              await splitRange(days);
+              throw new Replan(`More Search Console rows for ${label} than one request may return; continues with shorter ranges.`);
+            }
+            await opts.done();
+            return n;
+          },
+          skip: async () => {
+            if (await splitRange(days)) return `Interrupted 3 times on ${label}; continues with shorter ranges.`;
+            await opts.passOver();
+          },
+          shrink: () => splitRange(days),
+        };
+      };
 
       // Daily increment: re-pull the most recent days plus any recent gap.
       const progressKey = syncKeys.gscDaily(site.id);
@@ -422,26 +548,16 @@ async function planUnits(ctx: SyncContext, today: IsoDate, refund: (source: Sour
           meta[backfillKey] = start;
         }
       }
-      for (const date of [...pending]) {
+      // The pending days are consecutive, newest first: one request per `chunk` days.
+      for (let i = 0; i < pending.length; i += chunk) {
+        const group = pending.slice(i, i + chunk);
+        const range = { start: group[group.length - 1]!, end: group[0]! };
         const done = async () => {
-          pending = pending.filter((d) => d !== date);
+          pending = pending.filter((d) => !group.includes(d));
           if (pending.length === 0) ready = true;
           await store.setMeta(progressKey, JSON.stringify({ day: today, pending, ready } satisfies GscDailyProgress));
         };
-        daily.push({
-          task: 'gsc.search_analytics',
-          siteId: site.id,
-          source: 'gsc',
-          backfill: false,
-          calls: callsPerDay,
-          key: `gsc.daily:${site.id}:${date}`,
-          run: async () => {
-            const n = await pullDay(date);
-            await done();
-            return n;
-          },
-          skip: () => done(),
-        });
+        daily.push(rangeUnit({ task: 'gsc.search_analytics', range, history: false, done, passOver: done }));
       }
 
       // Sitemaps snapshot once a day.
@@ -463,29 +579,16 @@ async function planUnits(ctx: SyncContext, today: IsoDate, refund: (source: Sour
         });
       }
 
-      // History backfill, newest to oldest, one day per unit.
+      // History backfill, newest to oldest, `chunk` days per request.
       const target = addMonths(today, -config.sync.backfillMonths);
       const cursor = get(backfillKey);
       if (cursor && cursor > target) {
-        let c = cursor;
-        for (let i = 0; i < GSC_HISTORY_DAYS_PER_RUN && addDays(c, -1) >= target; i++) {
-          const date = addDays(c, -1);
-          history.push({
-            task: 'gsc.backfill',
-            siteId: site.id,
-            source: 'gsc',
-            backfill: true,
-            date,
-            calls: callsPerDay,
-            key: `gsc.backfill:${site.id}:${date}`,
-            run: async () => {
-              const n = await pullDay(date);
-              await store.setMeta(backfillKey, date);
-              return n;
-            },
-            skip: () => store.setMeta(backfillKey, date),
-          });
-          c = date;
+        let end = addDays(cursor, -1);
+        for (let i = 0; i < GSC_HISTORY_UNITS_PER_RUN && end >= target; i++) {
+          const range = { start: maxDate(target, addDays(end, -(chunk - 1))), end };
+          const advance = () => store.setMeta(backfillKey, range.start);
+          history.push(rangeUnit({ task: 'gsc.backfill', range, history: true, done: advance, passOver: advance }));
+          end = addDays(range.start, -1);
         }
       }
     }
@@ -565,51 +668,76 @@ async function planUnits(ctx: SyncContext, today: IsoDate, refund: (source: Sour
     // ---------------- Cloudflare ----------------
     // Each dataset keeps two cursors: the newest day synced moves forward with
     // the daily increments, the oldest day synced moves back with the lookback
-    // (history). A new site gets yesterday first, then the lookback.
+    // (history). A new site gets yesterday first, then the lookback. One request
+    // covers up to `chunk` days; a range with too many rows, or one the API
+    // refuses, is split for the next run.
     const cloudflareDays = (opts: {
       task: string;
       lookbackDays: number;
+      defaultChunk: number;
       calls: number;
       lastKey: string;
       fromKey: string;
-      pull: (date: IsoDate) => Promise<number>;
+      chunkKey: string;
+      /** Rows written, or null when the range has more rows than one request returns. */
+      pull: (range: DateRange) => Promise<number | null>;
     }) => {
       const floor = addDays(today, -opts.lookbackDays);
       const last = get(opts.lastKey);
       const from = get(opts.fromKey);
       const fresh = !last;
-      const unit = (date: IsoDate, isHistory: boolean, advance: () => Promise<void>): Unit => ({
-        task: opts.task,
-        siteId: site.id,
-        source: 'cloudflare',
-        backfill: isHistory,
-        ...(isHistory ? { date } : {}),
-        calls: opts.calls,
-        key: `${opts.task}:${site.id}:${date}`,
-        skip: advance,
-        run: async () => {
-          const n = await opts.pull(date);
-          await advance();
-          return n;
-        },
-      });
+      const chunk = Math.max(1, Math.min(opts.defaultChunk, Number(get(opts.chunkKey)) || opts.defaultChunk));
+      const splitRange = async (days: number): Promise<boolean> => {
+        if (days <= 1) return false;
+        await store.setMeta(opts.chunkKey, String(shrinkChunk(Math.min(days, chunk))));
+        return true;
+      };
+      const unit = (range: DateRange, isHistory: boolean, advance: () => Promise<void>): Unit => {
+        const days = spanDays(range);
+        const label = `${range.start}..${range.end}`;
+        return {
+          task: opts.task,
+          siteId: site.id,
+          source: 'cloudflare',
+          backfill: isHistory,
+          ...(isHistory ? { date: range.end } : {}),
+          calls: opts.calls,
+          key: `${opts.task}:${site.id}:${label}`,
+          run: async () => {
+            const n = await opts.pull(range);
+            if (n === null && (await splitRange(days)))
+              throw new Replan(`More Cloudflare rows for ${label} than one request returns; continues with shorter ranges.`);
+            await advance();
+            return n ?? 0;
+          },
+          skip: async () => {
+            if (await splitRange(days)) return `Interrupted 3 times on ${label}; continues with shorter ranges.`;
+            await advance();
+          },
+          shrink: () => splitRange(days),
+        };
+      };
+      // Forward, oldest first: the cursor only moves ahead.
       let d = last ? addDays(last, 1) : yesterday;
       if (d < floor) d = floor;
-      for (; d <= yesterday; d = addDays(d, 1)) {
-        const date = d;
+      while (d <= yesterday) {
+        const range = { start: d, end: minDate(addDays(d, chunk - 1), yesterday) };
         daily.push(
-          unit(date, false, async () => {
-            await store.setMeta(opts.lastKey, date);
-            if (fresh && !(await store.getMeta(opts.fromKey))) await store.setMeta(opts.fromKey, date);
+          unit(range, false, async () => {
+            await store.setMeta(opts.lastKey, range.end);
+            if (fresh && !(await store.getMeta(opts.fromKey))) await store.setMeta(opts.fromKey, range.start);
           }),
         );
+        d = addDays(range.end, 1);
       }
-      // Deployments from before the lookback cursor existed synced the window forward, so they have no lookback left.
+      // Lookback, newest first. Deployments from before the lookback cursor existed synced
+      // the window forward, so they have no lookback left.
       const lookbackFrom = from ?? (fresh ? yesterday : null);
       if (lookbackFrom) {
-        for (let x = addDays(lookbackFrom, -1); x >= floor; x = addDays(x, -1)) {
-          const date = x;
-          history.push(unit(date, true, () => store.setMeta(opts.fromKey, date)));
+        for (let end = addDays(lookbackFrom, -1); end >= floor;) {
+          const range = { start: maxDate(floor, addDays(end, -(chunk - 1))), end };
+          history.push(unit(range, true, () => store.setMeta(opts.fromKey, range.start)));
+          end = addDays(range.start, -1);
         }
       }
     };
@@ -622,22 +750,25 @@ async function planUnits(ctx: SyncContext, today: IsoDate, refund: (source: Sour
         cloudflareDays({
           task: 'cloudflare.ai_crawlers',
           lookbackDays: CF_CRAWLER_LOOKBACK_DAYS,
+          defaultChunk: CHUNK_DAYS.cfCrawlers,
           calls: 1,
           lastKey: syncKeys.cfCrawlers(site.id),
           fromKey: syncKeys.cfCrawlersFrom(site.id),
-          pull: async (date) => {
-            const rows = await cf.aiCrawlerRequests(zoneId, date, patterns);
+          chunkKey: syncKeys.cfCrawlersChunk(site.id),
+          pull: async (range) => {
+            const res = await cf.aiCrawlerRequests(zoneId, range, patterns);
+            if (!res.complete && spanDays(range) > 1) return null;
             const merged = new Map<string, CrawlerRequestInput>();
-            for (const r of rows) {
+            for (const r of res.rows) {
               const sig = classifyCrawler(r.userAgent);
               if (!sig) continue;
               const path = normalizePage(r.path, site.domain, r.host);
-              const k = `${sig.name}|${path}|${r.status}`;
+              const k = `${r.date}|${sig.name}|${path}|${r.status}`;
               const prev = merged.get(k);
               if (prev) prev.requests += r.requests;
               else
                 merged.set(k, {
-                  date,
+                  date: r.date,
                   crawler: sig.name,
                   operator: sig.operator,
                   purpose: sig.purpose,
@@ -656,26 +787,34 @@ async function planUnits(ctx: SyncContext, today: IsoDate, refund: (source: Sour
         cloudflareDays({
           task: 'cloudflare.web_analytics',
           lookbackDays: CF_RUM_LOOKBACK_DAYS,
+          defaultChunk: CHUNK_DAYS.cfRum,
           calls: 2,
           lastKey: syncKeys.cfRum(site.id),
           fromKey: syncKeys.cfRumFrom(site.id),
-          pull: async (date) => {
-            const rum = await cf.webAnalytics(accountId, tag, date);
+          chunkKey: syncKeys.cfRumChunk(site.id),
+          pull: async (range) => {
+            const multiDay = spanDays(range) > 1;
+            const rum = await cf.webAnalytics(accountId, tag, range);
+            if (!rum.complete && multiDay) {
+              budget.refund('cloudflare', 1);
+              return null;
+            }
+            const vitals = await cf.webVitals(accountId, tag, range);
+            if (!vitals.complete && multiDay) return null;
             let n = await store.writeWebAnalytics(
               site.id,
-              rum.map((r) => ({
-                date,
+              rum.rows.map((r) => ({
+                date: r.date,
                 path: normalizePage(r.path, site.domain, r.host),
                 refererHost: r.refererHost.toLowerCase(),
                 visits: r.visits,
                 pageViews: r.pageViews,
               })),
             );
-            const vitals = await cf.webVitals(accountId, tag, date);
             n += await store.writeWebVitals(
               site.id,
-              vitals.map((v) => ({
-                date,
+              vitals.rows.map((v) => ({
+                date: v.date,
                 path: normalizePage(v.path, site.domain, v.host),
                 lcpP75: v.lcpP75,
                 inpP75: v.inpP75,

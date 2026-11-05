@@ -85,22 +85,22 @@ are never shown, which is expected.
 
 ### Configuration reference
 
-| Secret                    | Required | Set in step | What                                                                                                             |
-| ------------------------- | -------- | ----------- | ---------------------------------------------------------------------------------------------------------------- |
-| `ACCESS_TEAM_DOMAIN`      | yes      | 9           | Your Access team domain, for example `myteam.cloudflareaccess.com`                                               |
-| `ACCESS_AUD`              | yes      | 9           | Application Audience (AUD) tag of the Access application                                                         |
-| `CLOUDFLARE_ACCOUNT_ID`   | yes      | 10          | Your Cloudflare account ID                                                                                       |
-| `CLOUDFLARE_API_TOKEN`    | yes      | 10          | Read-only API token (Account Analytics, Zone Analytics, Access: Apps and Policies); needed for the Access check  |
-| `SITES`                   | no       | 11          | JSON array describing your sites; optional, sites can be added in the dashboard instead                          |
-| `GSC_CLIENT_EMAIL`        | for GSC  | 12          | `client_email` from the service account key JSON                                                                 |
-| `GSC_PRIVATE_KEY`         | for GSC  | 12          | `private_key` from the service account key JSON (real line breaks or literal `\n`)                               |
-| `BING_API_KEY`            | for Bing | 13          | Bing Webmaster Tools API key (treat it as a password)                                                            |
-| `BRAND_REGEX`             | optional | 14          | Default brand regex, matched case-insensitively, for example `acme\|acme\s?corp`                                 |
-| `ENABLE_WRITES`           | optional | 14          | `true` to enable `submit_sitemap` (requires GSC **Full** permission)                                             |
-| `GSC_ROWS_PER_DAY`        | optional | 14          | Max query × page rows stored per day from GSC, 100–100000. Default `2500`                                        |
-| `GSC_BACKFILL_MONTHS`     | optional | 14          | Months of GSC history to backfill, 0–16. Default `16`                                                            |
-| `SYNC_DAILY_WRITE_BUDGET` | optional | 14          | Max rows history (GSC backfill, Cloudflare lookback) writes per UTC day. Default `80000` (D1 Free allows 100000) |
-| `SYNC_MAX_CALLS_PER_RUN`  | optional | 14          | Max outbound API calls per sync pass, 5–900. Default `20`                                                        |
+| Secret                    | Required | Set in step | What                                                                                                                  |
+| ------------------------- | -------- | ----------- | --------------------------------------------------------------------------------------------------------------------- |
+| `ACCESS_TEAM_DOMAIN`      | yes      | 9           | Your Access team domain, for example `myteam.cloudflareaccess.com`                                                    |
+| `ACCESS_AUD`              | yes      | 9           | Application Audience (AUD) tag of the Access application                                                              |
+| `CLOUDFLARE_ACCOUNT_ID`   | yes      | 10          | Your Cloudflare account ID                                                                                            |
+| `CLOUDFLARE_API_TOKEN`    | yes      | 10          | Read-only API token (Account Analytics, Zone Analytics, Access: Apps and Policies); needed for the Access check       |
+| `SITES`                   | no       | 11          | JSON array describing your sites; optional, sites can be added in the dashboard instead                               |
+| `GSC_CLIENT_EMAIL`        | for GSC  | 12          | `client_email` from the service account key JSON                                                                      |
+| `GSC_PRIVATE_KEY`         | for GSC  | 12          | `private_key` from the service account key JSON (real line breaks or literal `\n`)                                    |
+| `BING_API_KEY`            | for Bing | 13          | Bing Webmaster Tools API key (treat it as a password)                                                                 |
+| `BRAND_REGEX`             | optional | 14          | Default brand regex, matched case-insensitively, for example `acme\|acme\s?corp`                                      |
+| `ENABLE_WRITES`           | optional | 14          | `true` to enable `submit_sitemap` (requires GSC **Full** permission)                                                  |
+| `GSC_ROWS_PER_DAY`        | optional | 14          | Max query × page rows stored per day from GSC, 100–100000. Default `2500`                                             |
+| `GSC_BACKFILL_MONTHS`     | optional | 14          | Months of GSC history to backfill, 0–16. Default `16`                                                                 |
+| `SYNC_DAILY_WRITE_BUDGET` | optional | 14          | Max rows history (GSC backfill, Cloudflare lookback) writes per UTC day. Default `80000` (D1 Free allows 100000)      |
+| `SYNC_MAX_CALLS_PER_RUN`  | optional | 14          | Max outbound API calls per sync pass, 5–900. Default `35` (Workers Free allows 50); on Workers Paid use `100` or more |
 
 `CLOUDFLARE_ACCOUNT_ID` and `CLOUDFLARE_API_TOKEN` are required even if you use no Cloudflare data:
 they are how Searchkeep checks your Access setup. Values that do not parse (invalid JSON in `SITES`,
@@ -672,9 +672,11 @@ The output lists your sites, including each `bingSiteUrl` from `SITES`.
   account's permission in Search Console to **Full** for the properties where you want to submit
   sitemaps. Leave it unset to stay read-only.
 - **Sync budgets**: `GSC_ROWS_PER_DAY` (default `2500`), `GSC_BACKFILL_MONTHS` (default `16`),
-  `SYNC_DAILY_WRITE_BUDGET` (default `80000`) and `SYNC_MAX_CALLS_PER_RUN` (default `20`). The
-  defaults fit the free plans: D1 Free allows 100,000 rows written per day, and Workers Free allows
-  10 ms of CPU per invocation. Change them only if you have a reason, for example a lower
+  `SYNC_DAILY_WRITE_BUDGET` (default `80000`) and `SYNC_MAX_CALLS_PER_RUN` (default `35`). The
+  defaults fit the free plans: D1 Free allows 100,000 rows written per day, Workers Free allows 50
+  outbound requests and 10 ms of CPU per invocation. On Workers Paid, `SYNC_MAX_CALLS_PER_RUN=100`
+  and `SYNC_DAILY_WRITE_BUDGET=1000000` make the first sync of many sites much faster (D1 on Workers
+  Paid includes 50 million rows written a month). Change them only if you have a reason, for example a lower
   `GSC_ROWS_PER_DAY` when sync units keep being skipped (see
   [Troubleshooting](#sync-is-slow-or-units-are-skipped)).
 
@@ -767,6 +769,12 @@ How the sync works:
 - Each pass does only what fits its budgets (`SYNC_MAX_CALLS_PER_RUN` API calls, a time budget, and
   `SYNC_DAILY_WRITE_BUDGET` rows per UTC day for history), keeps its progress in D1 and resumes on
   the next pass. A run with status `partial` and "continues next run" is normal.
+- **Many days per request:** Search Console and Cloudflare answer for a date range with one row per
+  day, so one request covers up to 30 days of Search Console, 30 days of AI crawler requests or 90
+  days of Web Analytics. A day without Search Console data costs nothing extra; a range with more
+  rows than one request returns (or than a tenth of `SYNC_DAILY_WRITE_BUDGET`), or one the API
+  refuses, is split into shorter ranges for the next pass, down to single days. The per-day limit
+  `GSC_ROWS_PER_DAY` applies as before.
 - **The latest days first, for every site:** GSC re-pulls the last 4 days (its data lags 2–3 days)
   and fills gaps of up to 30 days; the GSC sitemap snapshot and Bing (traffic, queries, pages, crawl
   issues) are refreshed in full once a day; Cloudflare adds each missing day of AI crawler requests
@@ -775,7 +783,8 @@ How the sync works:
   the sites before it.
 - **Then history, for all sites at once, newest day first:** GSC history back 16 months
   (`GSC_BACKFILL_MONTHS`), Cloudflare AI crawler requests back 30 days and Web Analytics back 90
-  days. Every site moves back in time together. On the free D1 write quota this takes days to weeks.
+  days. Every site moves back in time together. A small site's full history takes a few dozen
+  requests; on the free D1 write quota, sites with a lot of data take days.
 - **Rate limits pause a source, not the sync:** when an API rate-limits Searchkeep (Bing answers
   `ThrottleUser`), that source is paused for every site for 30 minutes, doubling on each repeat up
   to 8 hours, and the other sources keep syncing. Bing calls are also spaced out and capped at 8 per
@@ -783,14 +792,15 @@ How the sync works:
 - **Failed tasks back off:** a task that fails (for example a missing permission) is retried after
   10 minutes, doubling up to 6 hours, so it does not use up every pass's budget. **Sync now** retries
   failed tasks right away.
-- A unit interrupted 3 times in a row (for example by the Workers Free CPU limit) is skipped, so the
-  sync never gets stuck; the run reports it as an error.
+- A unit interrupted 3 times in a row (for example by the Workers Free CPU limit) is split into
+  shorter ranges, and a single day is skipped, so the sync never gets stuck; a skipped day is
+  reported as an error.
 
 **Verify:** the dashboard shows the sync progress (a banner on every page while a site's latest days
 are still coming in, and **Settings** → **Sync progress** with each site and dataset). From an MCP
 client, `setup_status` reports the same under `syncProgress` and in the `sync.progress` check, and
-`list_sites` shows a date range for each connected dataset. Over the following days to weeks,
-history reaches back 16 months.
+`list_sites` shows a date range for each connected dataset. Within hours for small sites (days for
+sites with a lot of data on the free D1 write quota), history reaches back 16 months.
 
 You are done. Keep your fork in sync to get updates ([Upgrading](#upgrading)).
 
@@ -924,8 +934,9 @@ imported and skipped.
   shows for each site and dataset how far back the data goes, and which sources are paused or
   failing, with the error and the time of the next retry.
 - History writes up to `SYNC_DAILY_WRITE_BUDGET` rows per UTC day (80,000 by default, under D1
-  Free's 100,000), so the full 16 months take days to weeks. That is expected. With many sites, or
-  on Workers Paid, raising `SYNC_MAX_CALLS_PER_RUN` (step 14) speeds things up.
+  Free's 100,000), so sites with a lot of data take days. That is expected. With many sites, or on
+  Workers Paid, raising `SYNC_MAX_CALLS_PER_RUN` and `SYNC_DAILY_WRITE_BUDGET` (step 14) speeds
+  things up.
 - "Bing is paused until ... (rate limited)" means Bing refused a call. The other sources keep
   syncing, and Bing is retried with a growing pause (30 minutes to 8 hours); **Sync now** retries it
   right away.

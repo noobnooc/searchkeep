@@ -11,7 +11,8 @@ import {
   type CloudflareCrawlerRow,
   type CloudflareRumRow,
   type CloudflareVitalsRow,
-  type IsoDate,
+  type DateRange,
+  type RangeResult,
 } from '@searchkeep/core';
 
 const API = 'https://api.cloudflare.com/client/v4';
@@ -40,8 +41,17 @@ function describe(status: number, body: string): string {
   return `HTTP ${status}`;
 }
 
-function dayBounds(date: IsoDate) {
-  return { start: `${date}T00:00:00Z`, end: `${addDays(date, 1)}T00:00:00Z` };
+/** The days of `range`, both ends included, as the [start, end) instants GraphQL expects. */
+function rangeBounds(range: DateRange) {
+  return { start: `${range.start}T00:00:00Z`, end: `${addDays(range.end, 1)}T00:00:00Z` };
+}
+
+/** Rows per GraphQL query (the datasets' maxPageSize). A full page means the range has more. */
+const PAGE = 10_000;
+
+/** GraphQL reports its rate limit as an error (code `budget`): 300 queries per 5 minutes per user. */
+function isBudgetError(e: { message?: string; extensions?: { code?: string } }): boolean {
+  return e.extensions?.code === 'budget' || /rate limit|budget depleted/i.test(e.message ?? '');
 }
 
 /** Web Vitals quantiles arrive in microseconds; -1 means "no sample". */
@@ -60,13 +70,14 @@ export function createCloudflareClient(opts: CloudflareClientOptions): Cloudflar
   const auth = { authorization: `Bearer ${opts.apiToken}` };
 
   async function graphql<T>(query: string, variables: Record<string, unknown>): Promise<T> {
-    const res = await requestJson<{ data?: T; errors?: Array<{ message: string }> | null }>(
+    const res = await requestJson<{ data?: T; errors?: Array<{ message: string; extensions?: { code?: string } }> | null }>(
       'cloudflare',
       `${API}/graphql`,
       { method: 'POST', headers: auth, body: { query, variables }, fetch: f },
       describe,
     );
     if (res.errors && res.errors.length > 0) {
+      const limited = res.errors.some(isBudgetError);
       throw new SourceError(
         'cloudflare',
         200,
@@ -74,6 +85,7 @@ export function createCloudflareClient(opts: CloudflareClientOptions): Cloudflar
           .map((e) => e.message)
           .join('; ')
           .slice(0, 300)}`,
+        limited ? { rateLimited: true, retryAfterMs: 5 * 60_000 } : {},
       );
     }
     if (!res.data) throw new SourceError('cloudflare', 200, 'GraphQL: empty response');
@@ -104,20 +116,26 @@ export function createCloudflareClient(opts: CloudflareClientOptions): Cloudflar
   }
 
   return {
-    async aiCrawlerRequests(zoneId, date, patterns): Promise<CloudflareCrawlerRow[]> {
-      const { start, end } = dayBounds(date);
+    async aiCrawlerRequests(zoneId, range, patterns): Promise<RangeResult<CloudflareCrawlerRow>> {
+      const { start, end } = rangeBounds(range);
       const query = `query($zone: String!, $start: Time!, $end: Time!, $or: [ZoneHttpRequestsAdaptiveGroupsFilter_InputObject!]) {
         viewer { zones(filter: { zoneTag: $zone }) {
-          httpRequestsAdaptiveGroups(limit: 10000, orderBy: [count_DESC],
+          httpRequestsAdaptiveGroups(limit: ${PAGE}, orderBy: [count_DESC],
             filter: { datetime_geq: $start, datetime_lt: $end, requestSource: "eyeball", OR: $or }) {
             count
-            dimensions { userAgent clientRequestHTTPHost clientRequestPath edgeResponseStatus }
+            dimensions { date userAgent clientRequestHTTPHost clientRequestPath edgeResponseStatus }
           }
         } }
       }`;
       type Row = {
         count: number;
-        dimensions: { userAgent: string; clientRequestHTTPHost: string; clientRequestPath: string; edgeResponseStatus: number };
+        dimensions: {
+          date: string;
+          userAgent: string;
+          clientRequestHTTPHost: string;
+          clientRequestPath: string;
+          edgeResponseStatus: number;
+        };
       };
       const data = await graphql<{ viewer: { zones: Array<{ httpRequestsAdaptiveGroups: Row[] }> } }>(query, {
         zone: zoneId,
@@ -126,29 +144,36 @@ export function createCloudflareClient(opts: CloudflareClientOptions): Cloudflar
         or: patterns.map((p) => ({ userAgent_like: `%${p}%` })),
       });
       const rows = data.viewer.zones[0]?.httpRequestsAdaptiveGroups ?? [];
-      return rows.map((r) => ({
-        date,
-        userAgent: r.dimensions.userAgent,
-        host: r.dimensions.clientRequestHTTPHost,
-        path: r.dimensions.clientRequestPath,
-        status: r.dimensions.edgeResponseStatus,
-        requests: r.count,
-      }));
+      return {
+        complete: rows.length < PAGE,
+        rows: rows.map((r) => ({
+          date: r.dimensions.date,
+          userAgent: r.dimensions.userAgent,
+          host: r.dimensions.clientRequestHTTPHost,
+          path: r.dimensions.clientRequestPath,
+          status: r.dimensions.edgeResponseStatus,
+          requests: r.count,
+        })),
+      };
     },
 
-    async webAnalytics(accountId, siteTag, date): Promise<CloudflareRumRow[]> {
-      const { start, end } = dayBounds(date);
+    async webAnalytics(accountId, siteTag, range): Promise<RangeResult<CloudflareRumRow>> {
+      const { start, end } = rangeBounds(range);
       const query = `query($acct: String!, $tag: String!, $start: Time!, $end: Time!) {
         viewer { accounts(filter: { accountTag: $acct }) {
-          rumPageloadEventsAdaptiveGroups(limit: 10000, orderBy: [sum_visits_DESC],
+          rumPageloadEventsAdaptiveGroups(limit: ${PAGE}, orderBy: [sum_visits_DESC],
             filter: { siteTag: $tag, datetime_geq: $start, datetime_lt: $end, bot: 0 }) {
             count
             sum { visits }
-            dimensions { requestHost requestPath refererHost }
+            dimensions { date requestHost requestPath refererHost }
           }
         } }
       }`;
-      type Row = { count: number; sum: { visits: number }; dimensions: { requestHost: string; requestPath: string; refererHost: string } };
+      type Row = {
+        count: number;
+        sum: { visits: number };
+        dimensions: { date: string; requestHost: string; requestPath: string; refererHost: string };
+      };
       const data = await graphql<{ viewer: { accounts: Array<{ rumPageloadEventsAdaptiveGroups: Row[] }> } }>(query, {
         acct: accountId,
         tag: siteTag,
@@ -156,32 +181,35 @@ export function createCloudflareClient(opts: CloudflareClientOptions): Cloudflar
         end,
       });
       const rows = data.viewer.accounts[0]?.rumPageloadEventsAdaptiveGroups ?? [];
-      return rows.map((r) => ({
-        date,
-        host: r.dimensions.requestHost,
-        path: r.dimensions.requestPath,
-        refererHost: r.dimensions.refererHost ?? '',
-        visits: r.sum.visits,
-        pageViews: r.count,
-      }));
+      return {
+        complete: rows.length < PAGE,
+        rows: rows.map((r) => ({
+          date: r.dimensions.date,
+          host: r.dimensions.requestHost,
+          path: r.dimensions.requestPath,
+          refererHost: r.dimensions.refererHost ?? '',
+          visits: r.sum.visits,
+          pageViews: r.count,
+        })),
+      };
     },
 
-    async webVitals(accountId, siteTag, date): Promise<CloudflareVitalsRow[]> {
-      const { start, end } = dayBounds(date);
+    async webVitals(accountId, siteTag, range): Promise<RangeResult<CloudflareVitalsRow>> {
+      const { start, end } = rangeBounds(range);
       const query = `query($acct: String!, $tag: String!, $start: Time!, $end: Time!) {
         viewer { accounts(filter: { accountTag: $acct }) {
-          rumWebVitalsEventsAdaptiveGroups(limit: 5000, orderBy: [count_DESC],
+          rumWebVitalsEventsAdaptiveGroups(limit: ${PAGE}, orderBy: [count_DESC],
             filter: { siteTag: $tag, datetime_geq: $start, datetime_lt: $end }) {
             count
             quantiles { largestContentfulPaintP75 interactionToNextPaintP75 cumulativeLayoutShiftP75 }
-            dimensions { requestHost requestPath }
+            dimensions { date requestHost requestPath }
           }
         } }
       }`;
       type Row = {
         count: number;
         quantiles: { largestContentfulPaintP75: number; interactionToNextPaintP75: number; cumulativeLayoutShiftP75: number };
-        dimensions: { requestHost: string; requestPath: string };
+        dimensions: { date: string; requestHost: string; requestPath: string };
       };
       const data = await graphql<{ viewer: { accounts: Array<{ rumWebVitalsEventsAdaptiveGroups: Row[] }> } }>(query, {
         acct: accountId,
@@ -190,15 +218,18 @@ export function createCloudflareClient(opts: CloudflareClientOptions): Cloudflar
         end,
       });
       const rows = data.viewer.accounts[0]?.rumWebVitalsEventsAdaptiveGroups ?? [];
-      return rows.map((r) => ({
-        date,
-        host: r.dimensions.requestHost,
-        path: r.dimensions.requestPath,
-        lcpP75: micros(r.quantiles.largestContentfulPaintP75),
-        inpP75: micros(r.quantiles.interactionToNextPaintP75),
-        clsP75: cls(r.quantiles.cumulativeLayoutShiftP75),
-        samples: r.count,
-      }));
+      return {
+        complete: rows.length < PAGE,
+        rows: rows.map((r) => ({
+          date: r.dimensions.date,
+          host: r.dimensions.requestHost,
+          path: r.dimensions.requestPath,
+          lcpP75: micros(r.quantiles.largestContentfulPaintP75),
+          inpP75: micros(r.quantiles.interactionToNextPaintP75),
+          clsP75: cls(r.quantiles.cumulativeLayoutShiftP75),
+          samples: r.count,
+        })),
+      };
     },
 
     async verifyToken() {

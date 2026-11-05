@@ -66,7 +66,13 @@ cloudflared access curl "https://searchkeep.example.com/api/import/ai-citations?
     <strong>Then history, for all sites at once.</strong> Search Console back 16 months
     (<code>GSC_BACKFILL_MONTHS</code>), AI crawler requests back 30 days and Web Analytics back 90 days, newest day first
     across all sites. History stops for the day when it has written <code>SYNC_DAILY_WRITE_BUDGET</code> rows (80,000 by
-    default, under D1 Free’s 100,000 rows written per day), so on the free plan it takes days to weeks.
+    default, under D1 Free’s 100,000 rows written per day), so on the free plan sites with a lot of data take days.
+  </li>
+  <li>
+    <strong>Many days per request.</strong> Search Console and Cloudflare answer for a date range with one row per day,
+    so one request covers up to 30 days of Search Console, 30 days of AI crawler requests or 90 days of Web Analytics.
+    A range with more rows than one request returns, or one the API refuses, is split into shorter ranges, down to single
+    days; <code>GSC_ROWS_PER_DAY</code> still applies per day.
   </li>
   <li>
     <strong>Rate limits pause one source.</strong> When an API rate-limits Searchkeep (Bing does this quickly), that

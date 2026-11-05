@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { PUBLIC_EMAIL_DOMAINS } from '@searchkeep/core';
+import { isRateLimited, PUBLIC_EMAIL_DOMAINS } from '@searchkeep/core';
 import { broadPolicyReasons, createCloudflareClient, managedOAuthEnabled } from '../src/index.js';
 
 describe('cloudflare', () => {
@@ -43,7 +43,7 @@ describe('cloudflare', () => {
                           interactionToNextPaintP75: 80_000,
                           cumulativeLayoutShiftP75: -1,
                         },
-                        dimensions: { requestHost: 'acme.com', requestPath: '/' },
+                        dimensions: { date: '2026-10-02', requestHost: 'acme.com', requestPath: '/' },
                       },
                     ],
                   },
@@ -53,9 +53,11 @@ describe('cloudflare', () => {
           }),
         )) as unknown as typeof fetch,
     });
-    expect(await cf.webVitals('acct', 'tag', '2026-10-01')).toEqual([
-      { date: '2026-10-01', host: 'acme.com', path: '/', lcpP75: 2500, inpP75: 80, clsP75: null, samples: 4 },
-    ]);
+    // A range query: each row carries its own day.
+    expect(await cf.webVitals('acct', 'tag', { start: '2026-10-01', end: '2026-10-31' })).toEqual({
+      complete: true,
+      rows: [{ date: '2026-10-02', host: 'acme.com', path: '/', lcpP75: 2500, inpP75: 80, clsP75: null, samples: 4 }],
+    });
   });
 
   it('lists zones and Web Analytics sites across pages', async () => {
@@ -90,6 +92,46 @@ describe('cloudflare', () => {
       fetch: (async () =>
         new Response(JSON.stringify({ data: null, errors: [{ message: 'zone not authorized' }] }))) as unknown as typeof fetch,
     });
-    await expect(cf.aiCrawlerRequests('z', '2026-10-01', ['GPTBot'])).rejects.toThrow(/zone not authorized/);
+    await expect(cf.aiCrawlerRequests('z', { start: '2026-10-01', end: '2026-10-01' }, ['GPTBot'])).rejects.toThrow(/zone not authorized/);
+  });
+
+  it('asks for whole days and flags a range that hit the page limit', async () => {
+    let variables: Record<string, string> = {};
+    const full = Array.from({ length: 10_000 }, (_, i) => ({
+      count: 1,
+      dimensions: {
+        date: '2026-10-01',
+        userAgent: 'GPTBot',
+        clientRequestHTTPHost: 'acme.com',
+        clientRequestPath: `/${i}`,
+        edgeResponseStatus: 200,
+      },
+    }));
+    const cf = createCloudflareClient({
+      apiToken: 't',
+      fetch: (async (_url: string, init: RequestInit) => {
+        variables = (JSON.parse(String(init.body)) as { variables: Record<string, string> }).variables;
+        return new Response(JSON.stringify({ data: { viewer: { zones: [{ httpRequestsAdaptiveGroups: full }] } } }));
+      }) as unknown as typeof fetch,
+    });
+    const res = await cf.aiCrawlerRequests('z', { start: '2026-10-01', end: '2026-10-30' }, ['GPTBot']);
+    expect(variables).toMatchObject({ start: '2026-10-01T00:00:00Z', end: '2026-10-31T00:00:00Z' });
+    expect(res.complete).toBe(false);
+  });
+
+  it('flags the GraphQL rate limit as a rate limit', async () => {
+    const cf = createCloudflareClient({
+      apiToken: 't',
+      fetch: (async () =>
+        new Response(
+          JSON.stringify({
+            data: null,
+            errors: [{ message: 'Rate limiter budget depleted. Please try again after 5 minutes.', extensions: { code: 'budget' } }],
+          }),
+        )) as unknown as typeof fetch,
+    });
+    const err = await cf.webAnalytics('acct', 'tag', { start: '2026-10-01', end: '2026-10-01' }).catch((e: unknown) => e);
+    expect(isRateLimited(err)).toBe(true);
+    expect((err as { retryAfterMs: number }).retryAfterMs).toBe(300_000);
   });
 });

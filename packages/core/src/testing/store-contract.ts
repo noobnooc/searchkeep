@@ -431,21 +431,30 @@ export function storeContract(name: string, makeStore: () => Promise<Store>): vo
 
     describe('sync', () => {
       const NOW = new Date('2026-10-20T04:00:00Z');
+      /** Every day of a request, both ends included: the mocks answer a range with one row per day, like the real APIs. */
+      const daysOf = (start: string, end: string) => {
+        const out: string[] = [];
+        for (let d = start; d <= end; d = addDays(d, 1)) out.push(d);
+        return out;
+      };
       const clients = (): SourceClients => ({
         gsc: {
           async searchAnalytics(req) {
-            if (req.dimensions.length === 1) return [{ keys: [req.startDate], clicks: 10, impressions: 100, ctr: 0.1, position: 5 }];
-            if (req.dimensions.includes('country'))
-              return [{ keys: [req.startDate, 'usa', 'MOBILE'], clicks: 10, impressions: 100, ctr: 0.1, position: 5 }];
-            return [
-              {
-                keys: [req.startDate, 'acme widgets', 'https://acme.com/widgets?ref=x'],
-                clicks: 9,
-                impressions: 80,
-                ctr: 0.11,
-                position: 3,
-              },
-            ];
+            const days = daysOf(req.startDate, req.endDate);
+            const rows =
+              req.dimensions.length === 1
+                ? days.map((d) => ({ keys: [d], clicks: 10, impressions: 100, ctr: 0.1, position: 5 }))
+                : req.dimensions.includes('country')
+                  ? days.map((d) => ({ keys: [d, 'usa', 'MOBILE'], clicks: 10, impressions: 100, ctr: 0.1, position: 5 }))
+                  : days.map((d) => ({
+                      keys: [d, 'acme widgets', 'https://acme.com/widgets?ref=x'],
+                      clicks: 9,
+                      impressions: 80,
+                      ctr: 0.11,
+                      position: 3,
+                    }));
+            const from = req.startRow ?? 0;
+            return rows.slice(from, from + req.rowLimit);
           },
           async listSitemaps() {
             return [{ path: 'https://acme.com/sitemap.xml', errors: 0, warnings: 0 }];
@@ -476,23 +485,45 @@ export function storeContract(name: string, makeStore: () => Promise<Store>): vo
           },
         },
         cloudflare: {
-          async aiCrawlerRequests(_zone, date) {
-            return [
-              {
+          async aiCrawlerRequests(_zone, range) {
+            return {
+              complete: true,
+              rows: daysOf(range.start, range.end).map((date) => ({
                 date,
                 userAgent: 'Mozilla/5.0 (compatible; GPTBot/1.2; +https://openai.com/gptbot)',
                 host: 'acme.com',
                 path: '/widgets',
                 status: 200,
                 requests: 4,
-              },
-            ];
+              })),
+            };
           },
-          async webAnalytics(_a, _t, date) {
-            return [{ date, host: 'www.acme.com', path: '/widgets', refererHost: 'chatgpt.com', visits: 2, pageViews: 3 }];
+          async webAnalytics(_a, _t, range) {
+            return {
+              complete: true,
+              rows: daysOf(range.start, range.end).map((date) => ({
+                date,
+                host: 'www.acme.com',
+                path: '/widgets',
+                refererHost: 'chatgpt.com',
+                visits: 2,
+                pageViews: 3,
+              })),
+            };
           },
-          async webVitals(_a, _t, date) {
-            return [{ date, host: 'acme.com', path: '/widgets', lcpP75: 1800, inpP75: 100, clsP75: 0.01, samples: 5 }];
+          async webVitals(_a, _t, range) {
+            return {
+              complete: true,
+              rows: daysOf(range.start, range.end).map((date) => ({
+                date,
+                host: 'acme.com',
+                path: '/widgets',
+                lcpP75: 1800,
+                inpP75: 100,
+                clsP75: 0.01,
+                samples: 5,
+              })),
+            };
           },
           async verifyToken() {
             return { active: true };
@@ -543,7 +574,8 @@ export function storeContract(name: string, makeStore: () => Promise<Store>): vo
       });
 
       it('stops at the call budget and resumes later', async () => {
-        const cfg = config({ SYNC_MAX_CALLS_PER_RUN: '25', GSC_BACKFILL_MONTHS: '0' });
+        // The whole first sync of this site takes 14 calls (whole ranges per request); 5 is the smallest budget.
+        const cfg = config({ SYNC_MAX_CALLS_PER_RUN: '5', GSC_BACKFILL_MONTHS: '0' });
         const first = await sync(store, { config: cfg, clients: clients(), trigger: 'cron', now: NOW });
         expect(first.status).toBe('partial');
         for (let i = 0; i < 40; i++) {
@@ -657,24 +689,127 @@ export function storeContract(name: string, makeStore: () => Promise<Store>): vo
         expect(backoff['source:bing']).toMatchObject({ failures: 1, until: '2026-10-20T04:30:00.000Z' });
       });
 
-      it('spends one call on a day without Search Console data', async () => {
+      it('spends one call on a range without Search Console data, and three on a range with data', async () => {
         const c = clients();
-        const days: string[] = [];
+        const calls: string[] = [];
         const searchAnalytics = c.gsc!.searchAnalytics.bind(c.gsc);
         c.gsc!.searchAnalytics = async (req) => {
-          days.push(req.startDate);
-          // Search Console lags: nothing final for the last two days.
-          return req.startDate >= '2026-10-18' ? [] : searchAnalytics(req);
+          calls.push(`${req.startDate}..${req.endDate}`);
+          // A new site: Search Console has nothing before Sep 16.
+          return (await searchAnalytics(req)).filter((r) => r.keys[0]! >= '2026-09-16');
         };
-        // 4 recent days at 3 calls would need 12; the two empty days cost 1 each, so 9 calls are enough (sitemaps included).
-        const cfg = config({ SYNC_MAX_CALLS_PER_RUN: '9', GSC_BACKFILL_MONTHS: '0' }, [
+        const cfg = config({ SYNC_MAX_CALLS_PER_RUN: '900', GSC_BACKFILL_MONTHS: '2' }, [
           { id: 'acme', domain: 'acme.com', gscProperty: 'sc-domain:acme.com' },
         ]);
         const run = await sync(store, { config: cfg, clients: c, trigger: 'cron', now: NOW });
         expect(run.status).toBe('ok');
-        expect(days.filter((d) => d === '2026-10-19')).toHaveLength(1);
-        expect(days.filter((d) => d === '2026-10-17')).toHaveLength(3);
-        expect(await store.latestDate('acme', 'gsc')).toBe('2026-10-17');
+        // The latest 4 days, then two months back in 30-day requests; the empty one stops after the totals.
+        expect(calls).toEqual([
+          ...Array(3).fill('2026-10-16..2026-10-19'),
+          ...Array(3).fill('2026-09-16..2026-10-15'),
+          '2026-08-20..2026-09-15',
+        ]);
+        expect((await store.coverage('acme')).find((x) => x.source === 'gsc')).toMatchObject({ firstDate: '2026-09-16', days: 34 });
+        expect(await store.getMeta('gsc:backfill:acme')).toBe('2026-08-20');
+      });
+
+      it('splits a Search Console range with more rows than fit, keeping GSC_ROWS_PER_DAY per day', async () => {
+        const c = clients();
+        const searchAnalytics = c.gsc!.searchAnalytics.bind(c.gsc);
+        c.gsc!.searchAnalytics = async (req) => {
+          if (!req.dimensions.includes('query')) return searchAnalytics(req);
+          // 150 query × page rows a day, more clicks first.
+          const rows = daysOf(req.startDate, req.endDate).flatMap((d) =>
+            Array.from({ length: 150 }, (_, i) => ({
+              keys: [d, `q${i}`, `https://acme.com/p${i}`],
+              clicks: 150 - i,
+              impressions: 300,
+              ctr: 0.5,
+              position: 2,
+            })),
+          );
+          const from = req.startRow ?? 0;
+          return rows.slice(from, from + req.rowLimit);
+        };
+        const cfg = config({ SYNC_MAX_CALLS_PER_RUN: '900', GSC_BACKFILL_MONTHS: '0', GSC_ROWS_PER_DAY: '100' }, [
+          { id: 'acme', domain: 'acme.com', gscProperty: 'sc-domain:acme.com' },
+        ]);
+        const first = await sync(store, { config: cfg, clients: c, trigger: 'cron', now: NOW });
+        // 4 days × 150 rows is more than 4 × 100: nothing written, split for the next run.
+        expect(first.details!.find((d) => d.task === 'gsc.search_analytics')).toMatchObject({ status: 'skipped', rowsWritten: 0 });
+        expect(await store.getMeta('gsc:chunk:acme')).toBe('1');
+        expect(await store.latestDate('acme', 'gsc')).toBeNull();
+        await sync(store, { config: cfg, clients: c, trigger: 'cron', now: NOW });
+        const perDay = await store.queryPerformance({
+          siteId: 'acme',
+          source: 'gsc',
+          range: { start: '2026-10-16', end: '2026-10-19' },
+          dimensions: ['date', 'query'],
+          limit: 1000,
+        });
+        expect(perDay).toHaveLength(400);
+        // The 100 most clicked of each day.
+        expect(Math.min(...perDay.map((r) => r.clicks))).toBe(51);
+      });
+
+      it('retries a Cloudflare range the API refuses as shorter ranges', async () => {
+        const c = clients();
+        const crawl = c.cloudflare!.aiCrawlerRequests.bind(c.cloudflare);
+        c.cloudflare!.aiCrawlerRequests = async (zone, range, patterns) => {
+          if (daysOf(range.start, range.end).length > 7)
+            throw new SourceError('cloudflare', 200, 'GraphQL: cannot request a time range wider than 1w');
+          return crawl(zone, range, patterns);
+        };
+        const cfg = config({ SYNC_MAX_CALLS_PER_RUN: '900', GSC_BACKFILL_MONTHS: '0' }, [
+          { id: 'acme', domain: 'acme.com', cloudflareZoneId: 'zone1' },
+        ]);
+        const first = await sync(store, { config: cfg, clients: c, trigger: 'cron', now: NOW });
+        expect(first.details!.some((d) => d.status === 'error')).toBe(false);
+        expect(await store.getMeta('cf:crawlers:chunk:acme')).toBe('9');
+        await sync(store, { config: cfg, clients: c, trigger: 'cron', now: NOW });
+        expect(await store.getMeta('cf:crawlers:chunk:acme')).toBe('3');
+        await sync(store, { config: cfg, clients: c, trigger: 'cron', now: NOW });
+        expect(await store.getMeta('cf:crawlers:from:acme')).toBe('2026-09-20');
+        expect((await store.coverage('acme')).find((x) => x.dataset === 'ai_crawlers')).toMatchObject({
+          firstDate: '2026-09-20',
+          lastDate: '2026-10-19',
+        });
+        expect(await store.getMeta(syncKeys.backoff)).toBeNull();
+      });
+
+      it('writes nothing for a range that runs out of calls mid-way, and finishes it next run', async () => {
+        const c = clients();
+        const searchAnalytics = c.gsc!.searchAnalytics.bind(c.gsc);
+        c.gsc!.searchAnalytics = async (req) => {
+          if (!req.dimensions.includes('query')) return searchAnalytics(req);
+          // 90 rows a day: 360 rows for the 4 latest days, 4 pages of 100.
+          const rows = daysOf(req.startDate, req.endDate).flatMap((d) =>
+            Array.from({ length: 90 }, (_, i) => ({
+              keys: [d, `q${i}`, `https://acme.com/p${i}`],
+              clicks: 1,
+              impressions: 10,
+              ctr: 0.1,
+              position: 4,
+            })),
+          );
+          const from = req.startRow ?? 0;
+          return rows.slice(from, from + req.rowLimit);
+        };
+        const site = [{ id: 'acme', domain: 'acme.com', gscProperty: 'sc-domain:acme.com' }];
+        const small = config({ SYNC_MAX_CALLS_PER_RUN: '5', GSC_BACKFILL_MONTHS: '0', GSC_ROWS_PER_DAY: '100' }, site);
+        const first = await sync(store, { config: small, clients: c, trigger: 'cron', now: NOW });
+        expect(first.message).toMatch(/API call budget reached/);
+        expect(await store.latestDate('acme', 'gsc')).toBeNull();
+        const enough = config({ SYNC_MAX_CALLS_PER_RUN: '10', GSC_BACKFILL_MONTHS: '0', GSC_ROWS_PER_DAY: '100' }, site);
+        await sync(store, { config: enough, clients: c, trigger: 'cron', now: NOW });
+        const rows = await store.queryPerformance({
+          siteId: 'acme',
+          source: 'gsc',
+          range: { start: '2026-10-16', end: '2026-10-19' },
+          dimensions: ['date', 'query'],
+          limit: 1000,
+        });
+        expect(rows).toHaveLength(360);
       });
 
       it('retries a failing task later, or right away on Sync now', async () => {
@@ -708,7 +843,7 @@ export function storeContract(name: string, makeStore: () => Promise<Store>): vo
       });
 
       it('reports sync progress from waiting to done', async () => {
-        const cfg = config({ SYNC_MAX_CALLS_PER_RUN: '25', GSC_BACKFILL_MONTHS: '1' }, [SITE, SITE_2]);
+        const cfg = config({ SYNC_MAX_CALLS_PER_RUN: '10', GSC_BACKFILL_MONTHS: '1' }, [SITE, SITE_2]);
         const at = () => NOW;
         const before = await syncProgress({ store, config: cfg, clients: clients(), now: at });
         expect(before.phase).toBe('waiting');
@@ -726,7 +861,7 @@ export function storeContract(name: string, makeStore: () => Promise<Store>): vo
         expect(during.lastRun).toMatchObject({ status: 'partial' });
 
         // A larger run brings in the rest of the latest days and starts on history.
-        const bigger = config({ SYNC_MAX_CALLS_PER_RUN: '60', GSC_BACKFILL_MONTHS: '1' }, [SITE, SITE_2]);
+        const bigger = config({ SYNC_MAX_CALLS_PER_RUN: '20', GSC_BACKFILL_MONTHS: '1' }, [SITE, SITE_2]);
         await sync(store, { config: bigger, clients: clients(), trigger: 'cron', now: NOW });
         const history = await syncProgress({ store, config: cfg, clients: clients(), now: at });
         expect(history.phase).toBe('history');
@@ -749,9 +884,9 @@ export function storeContract(name: string, makeStore: () => Promise<Store>): vo
         const days: string[] = [];
         const c = clients();
         const crawl = c.cloudflare!.aiCrawlerRequests.bind(c.cloudflare);
-        c.cloudflare!.aiCrawlerRequests = async (zone, date, patterns) => {
-          days.push(date);
-          return crawl(zone, date, patterns);
+        c.cloudflare!.aiCrawlerRequests = async (zone, range, patterns) => {
+          days.push(`${range.start}..${range.end}`);
+          return crawl(zone, range, patterns);
         };
         const before = await syncProgress({ store, config: cfg, clients: c, now: () => NOW });
         expect(before.sites[0]!.datasets.find((d) => d.dataset === 'ai_crawlers')).toMatchObject({
@@ -760,7 +895,7 @@ export function storeContract(name: string, makeStore: () => Promise<Store>): vo
           percent: 100,
         });
         await sync(store, { config: cfg, clients: c, trigger: 'cron', now: NOW });
-        expect(days).toEqual(['2026-10-19']);
+        expect(days).toEqual(['2026-10-19..2026-10-19']);
         expect(await store.getMeta('cf:crawlers:from:acme')).toBeNull();
       });
 
