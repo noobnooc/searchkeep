@@ -777,12 +777,12 @@ export function storeContract(name: string, makeStore: () => Promise<Store>): vo
         expect(await store.getMeta(syncKeys.backoff)).toBeNull();
       });
 
-      it('writes nothing for a range that runs out of calls mid-way, and finishes it next run', async () => {
+      it('splits a range that needs more calls than one run allows, so it can finish', async () => {
         const c = clients();
         const searchAnalytics = c.gsc!.searchAnalytics.bind(c.gsc);
         c.gsc!.searchAnalytics = async (req) => {
           if (!req.dimensions.includes('query')) return searchAnalytics(req);
-          // 90 rows a day: 360 rows for the 4 latest days, 4 pages of 100.
+          // 90 rows a day: 360 rows for the 4 latest days, 4 pages of 100, so 6 calls in all.
           const rows = daysOf(req.startDate, req.endDate).flatMap((d) =>
             Array.from({ length: 90 }, (_, i) => ({
               keys: [d, `q${i}`, `https://acme.com/p${i}`],
@@ -795,13 +795,16 @@ export function storeContract(name: string, makeStore: () => Promise<Store>): vo
           const from = req.startRow ?? 0;
           return rows.slice(from, from + req.rowLimit);
         };
-        const site = [{ id: 'acme', domain: 'acme.com', gscProperty: 'sc-domain:acme.com' }];
-        const small = config({ SYNC_MAX_CALLS_PER_RUN: '5', GSC_BACKFILL_MONTHS: '0', GSC_ROWS_PER_DAY: '100' }, site);
-        const first = await sync(store, { config: small, clients: c, trigger: 'cron', now: NOW });
+        // 5 calls per run (the smallest budget) never fit the 6 the 4-day range needs.
+        const cfg = config({ SYNC_MAX_CALLS_PER_RUN: '5', GSC_BACKFILL_MONTHS: '0', GSC_ROWS_PER_DAY: '100' }, [
+          { id: 'acme', domain: 'acme.com', gscProperty: 'sc-domain:acme.com' },
+        ]);
+        const first = await sync(store, { config: cfg, clients: c, trigger: 'cron', now: NOW });
         expect(first.message).toMatch(/API call budget reached/);
         expect(await store.latestDate('acme', 'gsc')).toBeNull();
-        const enough = config({ SYNC_MAX_CALLS_PER_RUN: '10', GSC_BACKFILL_MONTHS: '0', GSC_ROWS_PER_DAY: '100' }, site);
-        await sync(store, { config: enough, clients: c, trigger: 'cron', now: NOW });
+        expect(await store.getMeta('gsc:chunk:acme')).toBe('1');
+        // One day (3 calls) per run from here on.
+        for (let i = 0; i < 6; i++) await sync(store, { config: cfg, clients: c, trigger: 'cron', now: NOW });
         const rows = await store.queryPerformance({
           siteId: 'acme',
           source: 'gsc',

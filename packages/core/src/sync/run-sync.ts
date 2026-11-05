@@ -239,6 +239,7 @@ export async function runSync(ctx: SyncContext): Promise<SyncRunRecord> {
       const attempts = inflight && inflight.key === unit.key ? inflight.attempts + 1 : 1;
       await store.setMeta(INFLIGHT_KEY, JSON.stringify({ key: unit.key, attempts }));
       inflight = { key: unit.key, attempts };
+      const callsBefore = callsLeft;
       callsLeft -= unit.calls;
       sourceCalls.set(unit.source, (sourceCalls.get(unit.source) ?? 0) + unit.calls);
       try {
@@ -256,6 +257,11 @@ export async function runSync(ctx: SyncContext): Promise<SyncRunRecord> {
         inflight = null;
         if (err instanceof BudgetExceeded) {
           stoppedFor = 'API call budget reached';
+          // A range that ran out after half a run's budget or more might never fit one: split it, so
+          // it can finish. One that ran out with little budget left gets more once earlier work is done.
+          if ((callsBefore - callsLeft) * 2 >= config.sync.maxCallsPerRun && unit.shrink && (await unit.shrink())) {
+            record(unit, 'skipped', 0, 'Needs more calls than one run allows; continues with shorter ranges.');
+          }
           break;
         }
         if (err instanceof Replan) {
