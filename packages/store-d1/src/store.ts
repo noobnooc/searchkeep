@@ -118,6 +118,21 @@ export class D1Store implements Store {
     return `COALESCE((SELECT id FROM pages WHERE site_id = ${site} AND path = ${field}), 0)`;
   }
 
+  /**
+   * D1 answers "D1 DB is overloaded" when one database does too much work in a short window
+   * ("Too many resources consumed within a 10 second window", "Too many requests queued").
+   * Drizzle wraps it in its own "Failed query" error, so the cause chain is checked too.
+   */
+  isBusy(err: unknown): boolean {
+    let e: unknown = err;
+    for (let i = 0; e && i < 5; i++) {
+      const message = e instanceof Error ? e.message : String(e);
+      if (/D1 DB is overloaded/i.test(message)) return true;
+      e = (e as { cause?: unknown }).cause;
+    }
+    return false;
+  }
+
   // ------------------------------------------------------------------ meta
 
   async getMeta(key: string): Promise<string | null> {

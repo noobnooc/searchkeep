@@ -12,6 +12,7 @@ import type { SearchFactInput } from '../types.js';
 import { SourceError } from '../http.js';
 import { runSync, type SyncContext } from '../sync/run-sync.js';
 import { syncProgress } from '../sync/progress.js';
+import { classifyBrandQueries } from '../brand.js';
 import { syncKeys, type BackoffMap } from '../sync/state.js';
 import {
   comparePeriods,
@@ -813,6 +814,79 @@ export function storeContract(name: string, makeStore: () => Promise<Store>): vo
           limit: 1000,
         });
         expect(rows).toHaveLength(360);
+      });
+
+      it('stops for this run when the database is busy, without failing a task, and continues next run', async () => {
+        class Busy extends Error {}
+        let fail = true;
+        // The store as it is, except that the first search write finds the database busy.
+        const busyStore = new Proxy(store, {
+          get(target, prop) {
+            if (prop === 'isBusy') return (e: unknown) => e instanceof Busy;
+            if (prop === 'writeSearchFacts')
+              return async (...args: Parameters<Store['writeSearchFacts']>) => {
+                if (fail) {
+                  fail = false;
+                  throw new Busy('busy');
+                }
+                return target.writeSearchFacts(...args);
+              };
+            const v = Reflect.get(target, prop, target) as unknown;
+            return typeof v === 'function' ? (v as (...a: unknown[]) => unknown).bind(target) : v;
+          },
+        }) as Store;
+        const cfg = config({ SYNC_MAX_CALLS_PER_RUN: '900', GSC_BACKFILL_MONTHS: '0' }, [searchOnly(SITE)]);
+        const first = await sync(busyStore, { config: cfg, clients: clients(), trigger: 'cron', now: NOW });
+        expect(first.status).toBe('partial');
+        expect(first.message).toMatch(/database busy/);
+        expect(first.details!.some((d) => d.status === 'error')).toBe(false);
+        expect(await store.getMeta(syncKeys.backoff)).toBeNull();
+        await sync(busyStore, { config: cfg, clients: clients(), trigger: 'cron', now: NOW });
+        expect(await store.latestDate('acme', 'gsc')).toBe('2026-10-19');
+      });
+
+      it('marks a run left as running as interrupted', async () => {
+        const stale = await store.startSyncRun({
+          startedAt: '2026-10-20T03:00:00.000Z',
+          trigger: 'cron',
+          status: 'running',
+          rowsWritten: 0,
+        });
+        const cfg = config({ SYNC_MAX_CALLS_PER_RUN: '900', GSC_BACKFILL_MONTHS: '0' }, [searchOnly(SITE)]);
+        await sync(store, { config: cfg, clients: clients(), trigger: 'cron', now: NOW });
+        const run = (await store.listSyncRuns(10)).find((r) => r.id === stale)!;
+        expect(run.status).toBe('error');
+        expect(run.message).toMatch(/Did not finish/);
+      });
+
+      it('stops history for the run once it wrote enough rows', async () => {
+        const cfg = config({ SYNC_MAX_CALLS_PER_RUN: '900', GSC_BACKFILL_MONTHS: '1' }, [searchOnly(SITE)]);
+        const first = await sync(store, { config: cfg, clients: clients(), trigger: 'cron', now: NOW, maxRowsPerRun: 1 });
+        expect(first.message).toMatch(/enough rows for one run/);
+        // The latest days are in; history waits for the next run.
+        expect(await store.latestDate('acme', 'gsc')).toBe('2026-10-19');
+        expect(await store.getMeta('gsc:backfill:acme')).toBe('2026-10-16');
+        await sync(store, { config: cfg, clients: clients(), trigger: 'cron', now: NOW });
+        expect(await store.getMeta('gsc:backfill:acme')).toBe('2026-09-20');
+      });
+
+      it('classifies brand queries a few at a time when asked to', async () => {
+        const cfg = config();
+        await store.writeSearchFacts(
+          'acme',
+          'gsc',
+          ['acme', 'acme login', 'widgets'].map((query) => ({
+            date: '2026-10-01',
+            kind: 'query_page' as const,
+            query,
+            page: '/',
+            clicks: 1,
+            impressions: 1,
+          })),
+        );
+        expect(await classifyBrandQueries(store, cfg, SITE, 2)).toBe(2);
+        expect(await classifyBrandQueries(store, cfg, SITE, 2)).toBe(1);
+        expect(await classifyBrandQueries(store, cfg, SITE, 2)).toBe(0);
       });
 
       it('retries a failing task later, or right away on Sync now', async () => {

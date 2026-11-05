@@ -45,6 +45,8 @@ export interface SyncContext {
   timeBudgetMs?: number;
   /** Minimum gap between two calls to the same source, in ms. Defaults to `DEFAULT_PACING`. */
   pacing?: Partial<Record<SourceId, number>>;
+  /** History stops for this run once it wrote this many rows (D1 limits work per 10 seconds). Default 20,000. */
+  maxRowsPerRun?: number;
   log?: (msg: string) => void;
 }
 
@@ -99,6 +101,28 @@ class BudgetExceeded extends Error {}
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+/** Rows one GSC request set may return; a range with more is split (D1 limits work per 10 seconds). */
+const MAX_ROWS_PER_REQUEST = 10_000;
+const MAX_ROWS_PER_RUN = 20_000;
+/** Queries whose brand flag a run (re)computes; the rest wait for the next runs. */
+const BRAND_QUERIES_PER_RUN = 4_000;
+/** A run still marked `running` after this long was interrupted. */
+const STALE_RUN_MS = 20 * 60_000;
+/** After a unit that wrote many rows, wait this long per row (at most 3 s) before the next one. */
+const WRITE_PAUSE_MS_PER_ROW = 0.2;
+
+/** Retries a final write while the database is busy (1 s, then 3 s), then gives up with the error. */
+async function whileBusy<T>(store: Store, fn: () => Promise<T>): Promise<T> {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await fn();
+    } catch (err) {
+      if (attempt >= 2 || !store.isBusy?.(err)) throw err;
+      await sleep(attempt === 0 ? 1_000 : 3_000);
+    }
+  }
+}
+
 /**
  * One sync pass. Safe to call often (the Worker runs it every 15 minutes):
  * it does whatever work is due, within call, time and write budgets, and keeps
@@ -121,7 +145,17 @@ export async function runSync(ctx: SyncContext): Promise<SyncRunRecord> {
   const { store, config } = ctx;
 
   await store.syncSites(config.sites);
+  // A run still marked as running long after it started was interrupted (CPU limit, busy database).
+  for (const r of await store.listSyncRuns(10)) {
+    if (r.status === 'running' && r.id !== undefined && Date.parse(r.startedAt) < nowMs - STALE_RUN_MS) {
+      await store.finishSyncRun(r.id, {
+        status: 'error',
+        message: 'Did not finish: the run was interrupted or the database was busy. Its work up to then is kept.',
+      });
+    }
+  }
   const runId = await store.startSyncRun({ startedAt: now.toISOString(), trigger: ctx.trigger, status: 'running', rowsWritten: 0 });
+  const maxRowsPerRun = ctx.maxRowsPerRun ?? MAX_ROWS_PER_RUN;
 
   const writesKey = syncKeys.writes(today);
   let writesToday = Number((await store.getMeta(writesKey)) ?? '0') || 0;
@@ -215,6 +249,10 @@ export async function runSync(ctx: SyncContext): Promise<SyncRunRecord> {
         stoppedFor = 'daily write budget reached';
         continue;
       }
+      if (unit.backfill && rowsWritten >= maxRowsPerRun) {
+        stoppedFor = 'enough rows for one run';
+        continue;
+      }
       if (inflight && inflight.key === unit.key && inflight.attempts >= MAX_INTERRUPTED_ATTEMPTS) {
         const split = await unit.skip();
         await store.deleteMeta(INFLIGHT_KEY);
@@ -247,6 +285,8 @@ export async function runSync(ctx: SyncContext): Promise<SyncRunRecord> {
         rowsWritten += rows;
         writesToday += rows;
         record(unit, 'ok', rows);
+        // Spread large writes out: D1 limits the work one database does per 10 seconds.
+        if (rows > 1_000) await sleep(Math.min(3_000, rows * WRITE_PAUSE_MS_PER_ROW));
         await store.deleteMeta(INFLIGHT_KEY);
         inflight = null;
         clearBackoff(taskBackoffKey(unit.task, unit.siteId));
@@ -262,6 +302,12 @@ export async function runSync(ctx: SyncContext): Promise<SyncRunRecord> {
           if ((callsBefore - callsLeft) * 2 >= config.sync.maxCallsPerRun && unit.shrink && (await unit.shrink())) {
             record(unit, 'skipped', 0, 'Needs more calls than one run allows; continues with shorter ranges.');
           }
+          break;
+        }
+        if (store.isBusy?.(err)) {
+          // Not this task's fault: stop writing for this run, the next one continues.
+          stoppedFor = 'database busy';
+          record(unit, 'skipped', 0, 'The database was busy; continues next run.');
           break;
         }
         if (err instanceof Replan) {
@@ -309,11 +355,19 @@ export async function runSync(ctx: SyncContext): Promise<SyncRunRecord> {
       }
     }
 
+    // A few thousand brand flags per run: new queries are classified over the next runs.
+    let brandLeft = BRAND_QUERIES_PER_RUN;
     for (const site of config.sites) {
-      await classifyBrandQueries(store, config, site);
+      if (brandLeft <= 0) break;
+      try {
+        brandLeft -= await classifyBrandQueries(store, config, site, brandLeft);
+      } catch (err) {
+        if (!store.isBusy?.(err)) throw err;
+        break;
+      }
     }
 
-    await store.setMeta(writesKey, String(writesToday));
+    await whileBusy(store, () => store.setMeta(writesKey, String(writesToday)));
     const details = [...results.values()];
     const anyError = details.some((d) => d.status === 'error');
     const anyOk = details.some((d) => d.status === 'ok');
@@ -338,19 +392,21 @@ export async function runSync(ctx: SyncContext): Promise<SyncRunRecord> {
             : 'ok';
     const message = notes.length ? notes.join(' ') : details.length === 0 ? 'Nothing due.' : null;
     const patch: Partial<SyncRunRecord> = { finishedAt: new Date().toISOString(), status, rowsWritten, message, details };
-    await store.finishSyncRun(runId, patch);
+    await whileBusy(store, () => store.finishSyncRun(runId, patch));
     const lastRun: LastRunMeta = { at: patch.finishedAt!, status, rowsWritten, message };
-    await store.setMeta(syncKeys.lastRun, JSON.stringify(lastRun));
+    await whileBusy(store, () => store.setMeta(syncKeys.lastRun, JSON.stringify(lastRun)));
     return { id: runId, startedAt: now.toISOString(), trigger: ctx.trigger, ...patch, status, rowsWritten } as SyncRunRecord;
   } catch (err) {
     const message = safeMessage(err);
-    await store.finishSyncRun(runId, {
-      finishedAt: new Date().toISOString(),
-      status: 'error',
-      rowsWritten,
-      message,
-      details: [...results.values()],
-    });
+    await whileBusy(store, () =>
+      store.finishSyncRun(runId, {
+        finishedAt: new Date().toISOString(),
+        status: 'error',
+        rowsWritten,
+        message,
+        details: [...results.values()],
+      }),
+    ).catch(() => undefined); // The next run marks it as interrupted.
     throw err;
   }
 }
@@ -395,9 +451,10 @@ async function planUnits(ctx: SyncContext, today: IsoDate, budget: Budget): Prom
         await store.setMeta(chunkKey, String(shrinkChunk(Math.min(days, chunk))));
         return true;
       };
-      /** Rows one request may return: as before for one day, and never more than a tenth of the daily write budget. */
+      /** Rows one request may return: as before for one day; for a range at most 10,000 and a tenth of the daily write budget. */
       const pageRows = Math.min(25_000, rowsPerDay);
-      const rangeCap = (days: number) => Math.max(rowsPerDay, Math.min(rowsPerDay * days, Math.floor(config.sync.dailyWriteBudget / 10)));
+      const rangeCap = (days: number) =>
+        Math.max(rowsPerDay, Math.min(rowsPerDay * days, Math.floor(config.sync.dailyWriteBudget / 10), MAX_ROWS_PER_REQUEST));
       // Totals, the first country × device page and the first query × page page.
       const reserved = 3;
 
@@ -445,7 +502,7 @@ async function planUnits(ctx: SyncContext, today: IsoDate, budget: Budget): Prom
           return 0;
         }
         const days = new Set(totals.map((r) => r.keys[0]!)).size;
-        const breakdowns = await pages(range, ['date', 'country', 'device'], 25_000, 250_000);
+        const breakdowns = await pages(range, ['date', 'country', 'device'], MAX_ROWS_PER_REQUEST, MAX_ROWS_PER_REQUEST);
         const queryPages = await pages(range, ['date', 'query', 'page'], pageRows, rangeCap(days));
         // One day keeps the top rows like it always has; a longer range is split instead.
         if (spanDays(range) > 1 && (!queryPages.complete || !breakdowns.complete)) return null;

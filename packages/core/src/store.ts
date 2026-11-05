@@ -32,6 +32,12 @@ import type {
  * D1's daily write quota intact).
  */
 export interface Store {
+  /**
+   * True for errors that mean the database is busy right now (retry later), not that the
+   * request is wrong. The sync then stops for this run instead of failing a task.
+   */
+  isBusy?(err: unknown): boolean;
+
   // ---- key/value metadata -------------------------------------------------
   getMeta(key: string): Promise<string | null>;
   setMeta(key: string, value: string): Promise<void>;
