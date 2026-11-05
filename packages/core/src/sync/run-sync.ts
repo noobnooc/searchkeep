@@ -231,7 +231,9 @@ export async function runSync(ctx: SyncContext): Promise<SyncRunRecord> {
         const message = safeMessage(err);
         ctx.log?.(`sync ${unit.task} ${unit.siteId}: ${message}`);
         if (isRateLimited(err)) {
-          // Pause the whole source: every other call to it would be refused too.
+          // Pause the whole source: every other call to it would be refused too. A pause set
+          // during this run holds for the rest of it, also for "Sync now".
+          retried.add(unit.source);
           const key = sourceBackoffKey(unit.source);
           const failures = (backoff[key]?.failures ?? 0) + 1;
           const until = new Date(nowMs + rateLimitDelay(failures, err.retryAfterMs)).toISOString();

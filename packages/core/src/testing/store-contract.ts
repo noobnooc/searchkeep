@@ -643,6 +643,20 @@ export function storeContract(name: string, makeStore: () => Promise<Store>): vo
         expect(await store.latestDate('beta', 'bing')).toBe('2026-10-18');
       });
 
+      it('makes one call to a throttling source on Sync now, then honors the pause it set', async () => {
+        const c = clients();
+        let bingCalls = 0;
+        c.bing!.getRankAndTrafficStats = async (): Promise<never> => {
+          bingCalls++;
+          throw new SourceError('bing', 400, 'HTTP 400: rate limited by Bing (ThrottleIP)', { rateLimited: true });
+        };
+        const cfg = config({ SYNC_MAX_CALLS_PER_RUN: '900', GSC_BACKFILL_MONTHS: '0' }, [searchOnly(SITE), searchOnly(SITE_2)]);
+        await sync(store, { config: cfg, clients: c, trigger: 'manual', now: NOW });
+        expect(bingCalls).toBe(1);
+        const backoff = JSON.parse((await store.getMeta(syncKeys.backoff))!) as BackoffMap;
+        expect(backoff['source:bing']).toMatchObject({ failures: 1, until: '2026-10-20T04:30:00.000Z' });
+      });
+
       it('spends one call on a day without Search Console data', async () => {
         const c = clients();
         const days: string[] = [];
