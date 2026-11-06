@@ -12,7 +12,7 @@ listed under "Later" needs a maintainer decision (and usually an ADR) before wor
 | Runtime        | Cloudflare Workers: one Worker (`apps/cloudflare`) serving dashboard, API, MCP and cron                                                               |
 | Database       | Cloudflare D1 via Drizzle (`packages/store-d1`), behind the Store interface                                                                           |
 | Data sources   | Google Search Console, Bing Webmaster Tools, Cloudflare (AI crawler requests, Web Analytics, Web Vitals); Bing AI Performance citations by CSV import |
-| Entrances      | MCP (Streamable HTTP, stateless, 12 read-only tools plus opt-in `submit_sitemap`) and the dashboard (Svelte + Vite SPA)                               |
+| Entrances      | MCP (Streamable HTTP, stateless, 14 read-only tools plus opt-in `submit_sitemap`) and the dashboard (Svelte + Vite SPA)                               |
 | Authentication | Cloudflare Access self-hosted application with Managed OAuth; JWT re-verified in the Worker                                                           |
 | Deployment     | Fork plus Workers Builds; upgrade with "Sync fork"                                                                                                    |
 | Sync           | Cron every 15 minutes in small, budgeted batches; daily increments (GSC re-pulls the last 4 days, Bing in full) before a 16-month GSC backfill        |
