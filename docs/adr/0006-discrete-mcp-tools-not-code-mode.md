@@ -20,10 +20,11 @@ context when an API has thousands of endpoints. We had to choose the shape of ou
 
 ## Decision
 
-Option 2: discrete, task-shaped tools. v0.1 ships 13: `list_sites`, `query_performance`,
+Option 2: discrete, task-shaped tools. v0.1 ships 15: `list_sites`, `query_performance`,
 `compare_periods`, `find_quick_wins`, `find_cannibalization`, `find_ctr_anomalies`,
-`find_content_decay`, `geo_funnel`, `ai_crawlers`, `inspect_url`, `list_sitemaps`,
-`submit_sitemap` (off by default) and `setup_status`. Tools call only the core.
+`find_content_decay`, `geo_funnel`, `ai_crawlers`, `search_crawlers`, `index_coverage`,
+`inspect_url`, `list_sitemaps`, `submit_sitemap` (off by default) and `setup_status`. Tools call
+only the core. (The decision listed 13; `search_crawlers` and `index_coverage` were added in #26.)
 
 Why not Code Mode:
 
