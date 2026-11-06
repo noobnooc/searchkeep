@@ -48,7 +48,9 @@ export const queries = sqliteTable(
 /**
  * Unified search fact table (GSC daily, Bing weekly). `page_id` / `query_id`
  * are 0 when the row has no such dimension. Positions are impression-weighted
- * sums: avg = position_sum / impressions.
+ * sums: avg = position_sum / impressions. `source` is `gsc` (web search),
+ * `bing`, or `gsc:<type>` for the other Search Console search types
+ * (`gsc:image`, `gsc:video`, `gsc:news`, `gsc:discover`, `gsc:googleNews`).
  */
 export const searchFacts = sqliteTable(
   'search_facts',
@@ -100,6 +102,98 @@ export const aiCrawlerRequests = sqliteTable(
     requests: integer('requests').notNull(),
   },
   (t) => [primaryKey({ columns: [t.siteId, t.date, t.crawler, t.pageId, t.status] }), index('ai_crawler_page').on(t.siteId, t.pageId)],
+);
+
+/** Raw Cloudflare search engine crawler requests (Googlebot, Bingbot, ...), shaped like `ai_crawler_requests`. */
+export const searchCrawlerRequests = sqliteTable(
+  'search_crawler_requests',
+  {
+    siteId: text('site_id').notNull(),
+    date: text('date').notNull(),
+    crawler: text('crawler').notNull(),
+    operator: text('operator').notNull(),
+    purpose: text('purpose').notNull(),
+    pageId: integer('page_id').notNull(),
+    status: integer('status').notNull(),
+    requests: integer('requests').notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.siteId, t.date, t.crawler, t.pageId, t.status] }), index('search_crawler_page').on(t.siteId, t.pageId)],
+);
+
+/**
+ * GSC search appearance per day (rich results, videos, AMP, ...). Search Console
+ * reports it on its own, never together with query, page, country or device.
+ * `source` follows `search_facts` (`gsc` = web search).
+ */
+export const searchAppearances = sqliteTable(
+  'search_appearances',
+  {
+    siteId: text('site_id').notNull(),
+    source: text('source').notNull(),
+    date: text('date').notNull(),
+    appearance: text('appearance').notNull(),
+    clicks: integer('clicks').notNull(),
+    impressions: integer('impressions').notNull(),
+    positionSum: real('position_sum'),
+  },
+  (t) => [primaryKey({ columns: [t.siteId, t.source, t.date, t.appearance] })],
+);
+
+/**
+ * Opt-in (GSC_SEGMENT_SITES) GSC rows of one query or one page split by country
+ * and device. `kind` is `query` (item_id = queries.id) or `page` (item_id = pages.id).
+ */
+export const searchSegments = sqliteTable(
+  'search_segments',
+  {
+    siteId: text('site_id').notNull(),
+    source: text('source').notNull(),
+    kind: text('kind').notNull(),
+    date: text('date').notNull(),
+    itemId: integer('item_id').notNull(),
+    country: text('country').notNull(),
+    device: text('device').notNull(),
+    clicks: integer('clicks').notNull(),
+    impressions: integer('impressions').notNull(),
+    positionSum: real('position_sum'),
+  },
+  (t) => [
+    primaryKey({ columns: [t.siteId, t.source, t.kind, t.date, t.itemId, t.country, t.device] }),
+    index('search_segments_item').on(t.siteId, t.source, t.kind, t.itemId),
+  ],
+);
+
+/**
+ * Index coverage snapshot: the latest URL Inspection result per URL listed in the
+ * site's sitemaps. URLs are inspected in batches over days; `previous_coverage_state`
+ * and `changed_at` keep the last change. URLs no sitemap listed for over a week are dropped. `rich_results` is JSON:
+ * `[{"t": type, "i": [{"s": severity, "m": message}]}]`.
+ */
+export const indexStatus = sqliteTable(
+  'index_status',
+  {
+    siteId: text('site_id').notNull(),
+    url: text('url').notNull(),
+    firstSeen: text('first_seen').notNull(),
+    /** Last day a sitemap listed the URL; refreshed at most weekly, so a present URL is never more than 7 days old. */
+    lastSeen: text('last_seen').notNull(),
+    inspectedAt: text('inspected_at'),
+    verdict: text('verdict'),
+    coverageState: text('coverage_state'),
+    indexingState: text('indexing_state'),
+    pageFetchState: text('page_fetch_state'),
+    robotsTxtState: text('robots_txt_state'),
+    lastCrawlTime: text('last_crawl_time'),
+    googleCanonical: text('google_canonical'),
+    userCanonical: text('user_canonical'),
+    crawledAs: text('crawled_as'),
+    richResultsVerdict: text('rich_results_verdict'),
+    richResults: text('rich_results'),
+    error: text('error'),
+    previousCoverageState: text('previous_coverage_state'),
+    changedAt: text('changed_at'),
+  },
+  (t) => [primaryKey({ columns: [t.siteId, t.url] }), index('index_status_inspected').on(t.siteId, t.inspectedAt)],
 );
 
 /** Raw Cloudflare Web Analytics page loads per day, page and referrer host. */

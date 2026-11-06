@@ -1,4 +1,4 @@
-import type { SiteConfig } from './types.js';
+import { GSC_SEARCH_TYPES, type GscSearchType, type SiteConfig } from './types.js';
 
 /** Raw environment: Worker Secrets, process.env, etc. */
 export type RawEnv = Record<string, unknown>;
@@ -18,6 +18,14 @@ export interface SearchkeepConfig {
     privateKey: string | null;
     /** Max query × page rows pulled per day. */
     rowsPerDay: number;
+    /** Search types synced besides web search (GSC_SEARCH_TYPES). */
+    searchTypes: GscSearchType[];
+    /** Sync search appearance (rich results, videos, ...) for web search (GSC_SEARCH_APPEARANCE). */
+    searchAppearance: boolean;
+    /** Sites whose query and page rows are also synced per country and device (GSC_SEGMENT_SITES). */
+    segmentSites: 'all' | string[];
+    /** URL inspections per site and day for the index coverage snapshot; 0 turns it off (GSC_INSPECTIONS_PER_DAY). */
+    inspectionsPerDay: number;
   };
   bing: {
     apiKey: string | null;
@@ -37,6 +45,38 @@ export interface SearchkeepConfig {
 }
 
 const SITE_ID_RE = /^[a-z0-9][a-z0-9-]{0,62}$/;
+
+/** Search types synced besides web search when GSC_SEARCH_TYPES is not set. */
+export const DEFAULT_EXTRA_SEARCH_TYPES: GscSearchType[] = ['image', 'video', 'news', 'discover', 'googleNews'];
+
+/** `image,video` → those types; `none` (or empty) → none; unknown names are reported. */
+function searchTypes(raw: string | null, errors: string[]): GscSearchType[] {
+  if (raw === null) return [...DEFAULT_EXTRA_SEARCH_TYPES];
+  const out: GscSearchType[] = [];
+  for (const part of raw.split(/[\s,]+/).filter(Boolean)) {
+    if (part.toLowerCase() === 'none') continue;
+    const t = GSC_SEARCH_TYPES.find((x) => x.toLowerCase() === part.toLowerCase());
+    if (!t)
+      errors.push(
+        `GSC_SEARCH_TYPES: unknown search type "${part.slice(0, 40)}" (use ${GSC_SEARCH_TYPES.filter((x) => x !== 'web').join(', ')} or none).`,
+      );
+    else if (t !== 'web' && !out.includes(t)) out.push(t);
+  }
+  return out;
+}
+
+/** `all`, or site ids separated by commas. */
+function segmentSites(raw: string | null): 'all' | string[] {
+  if (!raw) return [];
+  if (raw.trim().toLowerCase() === 'all') return 'all';
+  return raw.split(/[\s,]+/).filter(Boolean);
+}
+
+/** Whether a site's query and page rows are also synced per country and device. */
+export function segmentsEnabled(config: SearchkeepConfig, siteId: string): boolean {
+  const s = config.gsc.segmentSites;
+  return s === 'all' || s.includes(siteId);
+}
 
 function str(env: RawEnv, key: string): string | null {
   const v = env[key];
@@ -195,6 +235,11 @@ export function loadConfig(env: RawEnv): SearchkeepConfig {
       clientEmail: str(env, 'GSC_CLIENT_EMAIL'),
       privateKey: normalizePem(str(env, 'GSC_PRIVATE_KEY')),
       rowsPerDay: int(env, 'GSC_ROWS_PER_DAY', 2500, 100, 100_000),
+      searchTypes: searchTypes(str(env, 'GSC_SEARCH_TYPES') ?? (typeof env.GSC_SEARCH_TYPES === 'string' ? '' : null), errors),
+      searchAppearance: str(env, 'GSC_SEARCH_APPEARANCE')?.toLowerCase() !== 'false',
+      segmentSites: segmentSites(str(env, 'GSC_SEGMENT_SITES')),
+      // The URL Inspection API allows 2,000 calls per property and day; inspect_url uses the same quota.
+      inspectionsPerDay: int(env, 'GSC_INSPECTIONS_PER_DAY', 200, 0, 2_000),
     },
     bing: { apiKey: str(env, 'BING_API_KEY') },
     brandRegex: brandRegex && compileBrandRegex(brandRegex) ? brandRegex : null,

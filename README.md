@@ -9,8 +9,8 @@
 
 Searchkeep is a self-hosted analytics tool for site owners. It runs as a single Cloudflare Worker
 with a D1 database in _your_ account, analyzes only _your_ sites, and uses only first-party data you
-already have access to: Google Search Console, Bing Webmaster Tools, and Cloudflare (AI crawler
-traffic and Web Analytics).
+already have access to: Google Search Console, Bing Webmaster Tools, and Cloudflare (AI and search
+engine crawler traffic and Web Analytics).
 
 You use it in two ways over one data layer:
 
@@ -47,6 +47,14 @@ _Screenshots use the built-in demo data (`pnpm dev`, then `POST /api/dev/seed`).
   more history you keep.
 - **Task-shaped analysis**: quick wins, cannibalization, CTR anomalies, content decay, period
   comparisons, brand vs. non-brand splits.
+- **Beyond web search**: Search Console's image, video, News, Discover and Google News traffic and
+  search appearance (rich results, videos, ...), and optionally queries and pages per country and
+  device.
+- **Index coverage**: the URLs in your sitemaps are inspected in daily batches, so you can see how
+  many are indexed, why the others are not, which have rich result (structured data) problems, and
+  what changed.
+- **Crawl stats**: Googlebot, Bingbot and other search engine crawlers from Cloudflare, by crawler,
+  page, response status and day.
 - **Your data stays in your account**: no telemetry, no vendor server, no third party in the path.
   It runs on the Cloudflare free tier.
 - **Read-only by default**: the only write to an external system (`submit_sitemap`) is off until
@@ -188,14 +196,18 @@ AGENTS.md              Instructions for AI agents working on this repository
 | `find_content_decay`   | Pages whose clicks keep declining.                                                              |
 | `geo_funnel`           | Per page: AI crawler requests, imported Bing AI citations, AI referral visits and clicks.       |
 | `ai_crawlers`          | AI crawler requests by crawler, operator, purpose, path, status or date.                        |
+| `search_crawlers`      | Search engine crawler requests (Googlebot, Bingbot, ...): Search Console's Crawl stats, kept.   |
+| `index_coverage`       | Indexed and not-indexed sitemap URLs by coverage state, rich result issues and recent changes.  |
 | `inspect_url`          | Live Google Search Console URL inspection.                                                      |
 | `list_sitemaps`        | Lists the sitemaps Search Console knows and their status.                                       |
 | `submit_sitemap`       | Submits a sitemap to GSC. **Only registered with `ENABLE_WRITES=true`**; needs GSC Full access. |
 | `setup_status`         | Reports configuration, readiness and the last sync, so you (or an agent) can verify a deploy.   |
 
 All tools are read-only except `submit_sitemap`. Common parameters: `site`, `start` and `end`
-(`YYYY-MM-DD`), `days` (default 28), `source` (`gsc` or `bing`, default `gsc`), `brand` (`all`,
-`brand` or `non_brand`) and `limit` (at most 500). Results are aggregated on the server and capped,
+(`YYYY-MM-DD`), `days` (default 28), `source` (`gsc` or `bing`, default `gsc`), `searchType` (`web`,
+`image`, `video`, `news`, `discover` or `googleNews`, default `web`), `brand` (`all`, `brand` or
+`non_brand`) and `limit` (at most 500). `query_performance` also groups by search `appearance`, and
+by country or device together with query or page for sites in `GSC_SEGMENT_SITES`. Results are aggregated on the server and capped,
 so they stay small in your context window. The full parameter reference is at
 <https://searchkeep.dev/docs/mcp>.
 

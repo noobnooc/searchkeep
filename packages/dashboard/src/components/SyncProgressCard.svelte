@@ -9,7 +9,7 @@
   import Skeleton from './Skeleton.svelte';
 
   const p = $derived(syncWatch.progress);
-  const DATASETS: SyncDataset[] = ['gsc', 'bing', 'ai_crawlers', 'web_analytics'];
+  const DATASETS: SyncDataset[] = ['gsc', 'bing', 'ai_crawlers', 'search_crawlers', 'web_analytics'];
   const PHASE: Record<SyncPhase, { label: string; tone: 'ok' | 'warn' | 'neutral' | 'accent' }> = {
     waiting: { label: 'Waiting', tone: 'neutral' },
     recent: { label: 'Latest days', tone: 'accent' },

@@ -11,6 +11,16 @@ export type IsoDate = string;
 export type SearchSource = 'gsc' | 'bing';
 export type SourceId = SearchSource | 'cloudflare';
 
+/**
+ * Search Console search types. `web` is the default everywhere; the others are
+ * synced as separate datasets (GSC_SEARCH_TYPES). Discover and Google News
+ * have no queries and no positions.
+ */
+export type GscSearchType = 'web' | 'image' | 'video' | 'news' | 'discover' | 'googleNews';
+export const GSC_SEARCH_TYPES: readonly GscSearchType[] = ['web', 'image', 'video', 'news', 'discover', 'googleNews'];
+/** Search types that report pages only: no query dimension and no average position. */
+export const PAGE_ONLY_SEARCH_TYPES: readonly GscSearchType[] = ['discover', 'googleNews'];
+
 export interface SiteConfig {
   /** Short stable identifier, e.g. `acme`. Lowercase letters, digits, dashes. */
   id: string;
@@ -65,6 +75,31 @@ export interface BreakdownInput {
   position?: number | null;
 }
 
+/** GSC search appearance totals for one day (`appearance` is e.g. `VIDEO`, `REVIEW_SNIPPET`). */
+export interface AppearanceInput {
+  date: IsoDate;
+  appearance: string;
+  clicks: number;
+  impressions: number;
+  position?: number | null;
+}
+
+/** One query (`kind: 'query'`) or one page (`kind: 'page'`) on one day, split by country and device. */
+export interface SegmentInput {
+  date: IsoDate;
+  kind: 'query' | 'page';
+  /** The query text, or the page (full URL or path, normalized by the store). */
+  key: string;
+  country: string;
+  device: string;
+  clicks: number;
+  impressions: number;
+  position?: number | null;
+}
+
+/** Crawler families recorded from Cloudflare: AI crawlers and assistants, or search engine crawlers. */
+export type CrawlerKind = 'ai' | 'search';
+
 export interface CrawlerRequestInput {
   date: IsoDate;
   /** Normalized crawler name, e.g. `GPTBot`. */
@@ -78,7 +113,12 @@ export interface CrawlerRequestInput {
   requests: number;
 }
 
-export type CrawlerPurpose = 'training' | 'search' | 'user' | 'other';
+/**
+ * AI crawlers: `training`, `search` (AI search indexes), `user` (fetches for a user's question), `other`.
+ * Search engine crawlers: `search` (web search index), `media` (image and video indexes), `ads`
+ * (ad landing page checks), `other` (previews, verification and tool fetches).
+ */
+export type CrawlerPurpose = 'training' | 'search' | 'user' | 'media' | 'ads' | 'other';
 
 export interface WebAnalyticsInput {
   date: IsoDate;
@@ -114,6 +154,79 @@ export interface CrawlIssueInput {
   detectedAt?: IsoDate | null;
 }
 
+export interface RichResultIssue {
+  /** Rich result type, e.g. `Breadcrumbs`, `FAQ`, `Product snippets`. */
+  type: string;
+  severity: string;
+  message: string;
+}
+
+/** One URL Inspection result as stored in the index coverage snapshot. */
+export interface UrlInspectionInput {
+  /** Absolute URL as listed in the sitemap. */
+  url: string;
+  /** ISO timestamp of the inspection. */
+  inspectedAt: string;
+  verdict: string | null;
+  coverageState: string | null;
+  indexingState: string | null;
+  pageFetchState: string | null;
+  robotsTxtState: string | null;
+  lastCrawlTime: string | null;
+  googleCanonical: string | null;
+  userCanonical: string | null;
+  crawledAs: string | null;
+  richResultsVerdict: string | null;
+  /** Rich result types detected on the page (with or without issues). */
+  richResultTypes: string[];
+  richResultIssues: RichResultIssue[];
+  /** Why the URL could not be inspected (e.g. not part of the property); the other fields are null then. */
+  error?: string | null;
+}
+
+export interface IndexStatusRow extends Omit<UrlInspectionInput, 'inspectedAt'> {
+  inspectedAt: string | null;
+  firstSeen: IsoDate;
+  /** Last day a sitemap listed the URL (refreshed about weekly). */
+  lastSeen: IsoDate;
+  previousCoverageState: string | null;
+  changedAt: string | null;
+}
+
+export interface IndexCoverageQuery {
+  siteId: string;
+  /** Only URLs with this coverage state (case-insensitive substring, e.g. "crawled"). */
+  coverageState?: string;
+  /** Only URLs with this verdict (PASS, NEUTRAL, FAIL); `PENDING` = not inspected yet. */
+  verdict?: string;
+  /** Only URLs with rich result issues. */
+  richResultIssues?: boolean;
+  /** Coverage changes at or after this ISO timestamp are listed under `changes`. */
+  changedSince: string;
+  limit: number;
+}
+
+export interface IndexCoverageResult {
+  totals: {
+    urls: number;
+    inspected: number;
+    /** URLs whose inspection failed (see `error`). */
+    errors: number;
+    oldestInspectedAt: string | null;
+    newestInspectedAt: string | null;
+  };
+  /** URL counts per verdict and coverage state; verdict `PENDING` = not inspected yet, `ERROR` = inspection failed. */
+  states: Array<{ verdict: string; coverageState: string | null; urls: number }>;
+  richResults: {
+    verdicts: Array<{ verdict: string; urls: number }>;
+    types: Array<{ type: string; urls: number; urlsWithIssues: number }>;
+    issues: Array<RichResultIssue & { urls: number }>;
+  };
+  /** URLs matching the filters; without filters, URLs that are not indexed (or not inspected) first. */
+  urls: IndexStatusRow[];
+  changes: Array<{ url: string; from: string | null; to: string | null; changedAt: string }>;
+}
+
 export interface SitemapRecord {
   path: string;
   lastSubmitted?: string | null;
@@ -122,6 +235,7 @@ export interface SitemapRecord {
   errors?: number;
   warnings?: number;
   submitted?: number | null;
+  /** Google no longer fills this ("Deprecated; do not use"), so it is null; see index coverage instead. */
   indexed?: number | null;
 }
 
@@ -135,7 +249,7 @@ export interface Metrics {
 }
 
 export type BrandFilter = 'all' | 'brand' | 'non_brand';
-export type PerformanceDimension = 'date' | 'week' | 'month' | 'query' | 'page' | 'country' | 'device';
+export type PerformanceDimension = 'date' | 'week' | 'month' | 'query' | 'page' | 'country' | 'device' | 'appearance';
 
 export interface PerformanceFilters {
   /** Case-insensitive substring match on the query text. */
@@ -144,12 +258,23 @@ export interface PerformanceFilters {
   pageContains?: string;
   country?: string;
   device?: string;
+  /** Exact search appearance, e.g. `VIDEO` (GSC only; not with query, page, country or device). */
+  appearance?: string;
   brand?: BrandFilter;
 }
 
+/**
+ * Which stored rows answer a query:
+ * - query/page dimensions and filters: `search_facts` (query × page, or Bing's query and page rows);
+ * - country/device alone: the country × device breakdown;
+ * - country/device with query or page (not both): the opt-in segments (GSC_SEGMENT_SITES);
+ * - appearance: the search appearance series (alone or with a time dimension).
+ */
 export interface PerformanceQuery {
   siteId: string;
   source: SearchSource;
+  /** GSC only. Default `web`. */
+  searchType?: GscSearchType;
   range: DateRange;
   dimensions: PerformanceDimension[];
   filters?: PerformanceFilters;
@@ -172,10 +297,13 @@ export interface PerformanceRow extends Metrics {
   page?: string;
   country?: string;
   device?: string;
+  appearance?: string;
 }
 
 export interface CrawlerQuery {
   siteId: string;
+  /** Default `ai`. */
+  kind?: CrawlerKind;
   range: DateRange;
   groupBy: Array<'crawler' | 'operator' | 'purpose' | 'path' | 'status' | 'date'>;
   crawler?: string;

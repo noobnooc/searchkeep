@@ -1,12 +1,17 @@
 import type {
   AiCitationInput,
+  AppearanceInput,
   BreakdownInput,
+  CrawlerKind,
   CrawlIssueInput,
   CrawlerQuery,
   CrawlerRequestInput,
   CrawlerRow,
   DataCoverage,
   DateRange,
+  GscSearchType,
+  IndexCoverageQuery,
+  IndexCoverageResult,
   PageCount,
   PerformanceQuery,
   PerformanceRow,
@@ -14,9 +19,11 @@ import type {
   ReferralRow,
   SearchFactInput,
   SearchSource,
+  SegmentInput,
   SiteConfig,
   SitemapRecord,
   SyncRunRecord,
+  UrlInspectionInput,
   WebAnalyticsInput,
   WebVitalsInput,
   IsoDate,
@@ -56,9 +63,15 @@ export interface Store {
   deleteSiteConfig(id: string): Promise<boolean>;
 
   // ---- writes -------------------------------------------------------------
-  writeSearchFacts(siteId: string, source: SearchSource, rows: SearchFactInput[]): Promise<number>;
+  /** `searchType` (GSC only, default `web`) keeps the other search types apart from web search. */
+  writeSearchFacts(siteId: string, source: SearchSource, rows: SearchFactInput[], searchType?: GscSearchType): Promise<number>;
   writeBreakdowns(siteId: string, source: SearchSource, rows: BreakdownInput[]): Promise<number>;
-  writeCrawlerRequests(siteId: string, rows: CrawlerRequestInput[]): Promise<number>;
+  /** GSC search appearance per day. */
+  writeSearchAppearances(siteId: string, searchType: GscSearchType, rows: AppearanceInput[]): Promise<number>;
+  /** GSC web search rows of one query or page per country and device (opt-in). */
+  writeSearchSegments(siteId: string, rows: SegmentInput[]): Promise<number>;
+  /** `kind` (default `ai`) keeps search engine crawlers apart from AI crawlers. */
+  writeCrawlerRequests(siteId: string, rows: CrawlerRequestInput[], kind?: CrawlerKind): Promise<number>;
   writeWebAnalytics(siteId: string, rows: WebAnalyticsInput[]): Promise<number>;
   writeWebVitals(siteId: string, rows: WebVitalsInput[]): Promise<number>;
   writeAiCitations(siteId: string, rows: AiCitationInput[]): Promise<number>;
@@ -66,6 +79,21 @@ export interface Store {
   replaceCrawlIssues(siteId: string, source: SearchSource, rows: CrawlIssueInput[]): Promise<number>;
   /** Replaces the sitemap snapshot for a site and source. */
   replaceSitemaps(siteId: string, source: SearchSource, rows: SitemapRecord[]): Promise<number>;
+
+  // ---- index coverage -----------------------------------------------------
+  /**
+   * Records `urls` as listed in a sitemap on `day`: tracked URLs whose last sighting is a week old or
+   * more get `day` (so a URL costs about one write a week), new URLs are tracked while the site has
+   * fewer than `maxUrls`. Returns rows changed.
+   */
+  addIndexUrls(siteId: string, urls: string[], day: IsoDate, maxUrls: number): Promise<number>;
+  /** Stops tracking URLs last seen in a sitemap before `seenBefore`; returns how many. */
+  pruneIndexUrls(siteId: string, seenBefore: IsoDate): Promise<number>;
+  /** Tracked URLs due for inspection: never inspected first, then inspected before `inspectedBefore` (oldest first). */
+  listUrlsToInspect(siteId: string, inspectedBefore: string, limit: number): Promise<string[]>;
+  /** Stores inspection results of tracked URLs; a changed coverage state is remembered with its time. */
+  writeUrlInspections(siteId: string, rows: UrlInspectionInput[]): Promise<number>;
+  indexCoverage(q: IndexCoverageQuery): Promise<IndexCoverageResult>;
 
   // ---- brand classification ----------------------------------------------
   /** Queries whose brand flag was computed with a different regex version (or never). */

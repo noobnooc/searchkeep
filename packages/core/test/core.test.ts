@@ -1,7 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import {
   addMonths,
+  capCrawlerRows,
   classifyCrawler,
+  classifySearchCrawler,
+  inPropertyScope,
+  OTHER_PAGES,
+  segmentsEnabled,
   clearJwksCache,
   evaluateReadiness,
   geoFunnel,
@@ -134,6 +139,35 @@ describe('config', () => {
   });
 });
 
+describe('search console options', () => {
+  it('parses search types, appearance, segments and inspections with defaults', () => {
+    const defaults = loadConfig({});
+    expect(defaults.gsc).toMatchObject({
+      searchTypes: ['image', 'video', 'news', 'discover', 'googleNews'],
+      searchAppearance: true,
+      segmentSites: [],
+      inspectionsPerDay: 200,
+    });
+    expect(segmentsEnabled(defaults, 'acme')).toBe(false);
+    const set = loadConfig({
+      GSC_SEARCH_TYPES: 'Image, discover,web,bogus',
+      GSC_SEARCH_APPEARANCE: 'false',
+      GSC_SEGMENT_SITES: 'acme, beta',
+      GSC_INSPECTIONS_PER_DAY: '5000',
+    });
+    expect(set.gsc).toMatchObject({
+      searchTypes: ['image', 'discover'],
+      searchAppearance: false,
+      segmentSites: ['acme', 'beta'],
+      inspectionsPerDay: 2000,
+    });
+    expect(set.errors).toEqual([expect.stringContaining('GSC_SEARCH_TYPES: unknown search type "bogus"')]);
+    expect(segmentsEnabled(set, 'beta')).toBe(true);
+    expect(loadConfig({ GSC_SEARCH_TYPES: 'none' }).gsc.searchTypes).toEqual([]);
+    expect(segmentsEnabled(loadConfig({ GSC_SEGMENT_SITES: 'ALL' }), 'any')).toBe(true);
+  });
+});
+
 describe('sites', () => {
   it('validates and normalizes a site from the dashboard', () => {
     const res = validateSite({
@@ -183,6 +217,51 @@ describe('helpers', () => {
     expect(classifyCrawler('Mozilla/5.0 (compatible; ChatGPT-User/1.0)')?.purpose).toBe('user');
     expect(classifyCrawler('Mozilla/5.0 (Macintosh)')).toBeNull();
   });
+  it('classifies search engine crawlers, most specific first, and leaves AI crawlers alone', () => {
+    expect(classifySearchCrawler('Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)')).toMatchObject({
+      name: 'Googlebot',
+      operator: 'Google',
+      purpose: 'search',
+    });
+    expect(classifySearchCrawler('Googlebot-Image/1.0')).toMatchObject({ name: 'Googlebot-Image', purpose: 'media' });
+    expect(classifySearchCrawler('AdsBot-Google (+http://www.google.com/adsbot.html)')).toMatchObject({ purpose: 'ads' });
+    expect(classifySearchCrawler('Mozilla/5.0 (compatible; bingbot/2.0; +http://www.bing.com/bingbot.htm)')).toMatchObject({
+      name: 'Bingbot',
+      operator: 'Microsoft',
+    });
+    expect(classifySearchCrawler('Mozilla/5.0 (compatible; GPTBot/1.2; +https://openai.com/gptbot)')).toBeNull();
+    expect(classifySearchCrawler('Mozilla/5.0 (Macintosh) Safari/605.1.15')).toBeNull();
+  });
+
+  it('caps search crawler rows per day, folding the rest into one row per crawler and status', () => {
+    const rows = [1, 2, 3, 4, 5].map((n) => ({
+      date: '2026-10-01',
+      crawler: 'Googlebot',
+      operator: 'Google',
+      purpose: 'search' as const,
+      path: `/p${n}`,
+      status: n === 5 ? 404 : 200,
+      requests: 10 - n,
+    }));
+    const capped = capCrawlerRows([...rows, { ...rows[0]!, date: '2026-10-02' }], 3);
+    expect(capped.map((r) => [r.date, r.path, r.status, r.requests])).toEqual([
+      ['2026-10-01', '/p1', 200, 9],
+      ['2026-10-01', '/p2', 200, 8],
+      [`2026-10-01`, OTHER_PAGES, 200, 13],
+      ['2026-10-01', OTHER_PAGES, 404, 5],
+      ['2026-10-02', '/p1', 200, 9],
+    ]);
+  });
+
+  it('keeps inspection URLs inside the Search Console property', () => {
+    expect(inPropertyScope('https://blog.acme.com/x', 'sc-domain:acme.com')).toBe(true);
+    expect(inPropertyScope('http://acme.com/', 'sc-domain:acme.com')).toBe(true);
+    expect(inPropertyScope('https://notacme.com/', 'sc-domain:acme.com')).toBe(false);
+    expect(inPropertyScope('https://acme.com/docs/a', 'https://acme.com/docs/')).toBe(true);
+    expect(inPropertyScope('https://acme.com/blog/a', 'https://acme.com/docs/')).toBe(false);
+    expect(inPropertyScope('ftp://acme.com/a', 'sc-domain:acme.com')).toBe(false);
+  });
+
   it('redacts secrets from messages', () => {
     expect(safeMessage(new Error('GET https://x/?apikey=abc123 failed, Bearer eyJhbGciOi.x.y'))).toBe(
       'GET https://x/?apikey=[redacted] failed, Bearer [redacted]',

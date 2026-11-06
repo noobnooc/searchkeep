@@ -1,7 +1,53 @@
-import { SearchkeepError } from '../config.js';
+import { SearchkeepError, segmentsEnabled } from '../config.js';
 import { addDays, previousPeriod, rangeLength, weekStart } from '../dates.js';
-import type { DateRange, PerformanceDimension, PerformanceFilters, PerformanceRow, SearchSource } from '../types.js';
-import { ANONYMIZED_NOTE, clampLimit, metrics, pct, resolve, round, type AnalysisContext, type CommonParams } from './common.js';
+import {
+  PAGE_ONLY_SEARCH_TYPES,
+  type DateRange,
+  type GscSearchType,
+  type PerformanceDimension,
+  type PerformanceFilters,
+  type PerformanceRow,
+  type SearchSource,
+} from '../types.js';
+import {
+  ANONYMIZED_NOTE,
+  clampLimit,
+  metrics,
+  pct,
+  resolve,
+  round,
+  type AnalysisContext,
+  type CommonParams,
+  type Resolved,
+} from './common.js';
+
+const SEARCH_TYPE_NAMES: Record<GscSearchType, string> = {
+  web: 'Web search',
+  image: 'Image search',
+  video: 'Video search',
+  news: "Search's News tab",
+  discover: 'Discover',
+  googleNews: 'Google News',
+};
+
+/** Discover and Google News have no queries (and no positions): tools that need queries refuse them. */
+function requireQueries(r: Resolved, what: string): void {
+  if (PAGE_ONLY_SEARCH_TYPES.includes(r.searchType)) {
+    throw new SearchkeepError(
+      'bad_request',
+      `${SEARCH_TYPE_NAMES[r.searchType]} reports pages only (no queries or positions), so ${what} cannot use it.`,
+    );
+  }
+}
+
+/** Notes about the search type of a result. */
+function searchTypeNotes(r: Resolved): string[] {
+  if (r.searchType === 'web') return [];
+  const notes = [`Search type: ${SEARCH_TYPE_NAMES[r.searchType]} (searchType "${r.searchType}"), not web search.`];
+  if (PAGE_ONLY_SEARCH_TYPES.includes(r.searchType))
+    notes.push(`${SEARCH_TYPE_NAMES[r.searchType]} reports pages only, without queries or positions.`);
+  return notes;
+}
 
 // ---------------------------------------------------------------------------
 // query_performance
@@ -13,11 +59,16 @@ export interface QueryPerformanceParams extends CommonParams {
   pageContains?: string;
   country?: string;
   device?: string;
+  /** Only this search appearance (e.g. VIDEO); with no or only time dimensions. */
+  appearance?: string;
   orderBy?: 'clicks' | 'impressions' | 'ctr' | 'position' | 'date';
   order?: 'asc' | 'desc';
 }
 
-const DIMENSIONS: PerformanceDimension[] = ['date', 'week', 'month', 'query', 'page', 'country', 'device'];
+const DIMENSIONS: PerformanceDimension[] = ['date', 'week', 'month', 'query', 'page', 'country', 'device', 'appearance'];
+
+const SEGMENT_NOTE =
+  'Country/device rows of queries and pages are the opt-in segments (GSC_SEGMENT_SITES): the top 1,000 rows per day each, for the last 3 months.';
 
 export async function queryPerformance(ctx: AnalysisContext, p: QueryPerformanceParams) {
   const r = await resolve(ctx, p, { limit: 50 });
@@ -30,26 +81,44 @@ export async function queryPerformance(ctx: AnalysisContext, p: QueryPerformance
   }
   if (p.order !== undefined && p.order !== 'asc' && p.order !== 'desc')
     throw new SearchkeepError('bad_request', 'order must be asc or desc.');
-  const hasBreakdown = dimensions.some((d) => d === 'country' || d === 'device') || p.country || p.device;
-  const hasQP = dimensions.some((d) => d === 'query' || d === 'page') || p.queryContains || p.pageContains || r.brand !== 'all';
-  if (hasBreakdown && hasQP) {
-    throw new SearchkeepError(
-      'bad_request',
-      'country/device cannot be combined with query/page dimensions or filters (Search Console stores them separately).',
-    );
+  const hasBreakdown = Boolean(dimensions.some((d) => d === 'country' || d === 'device') || p.country || p.device);
+  const hasQuery = Boolean(dimensions.includes('query') || p.queryContains || r.brand !== 'all');
+  const hasPage = Boolean(dimensions.includes('page') || p.pageContains);
+  const hasAppearance = Boolean(dimensions.includes('appearance') || p.appearance);
+  const bad = (message: string) => new SearchkeepError('bad_request', message);
+  if (hasAppearance) {
+    if (r.source === 'bing') throw bad('Bing does not report search appearance.');
+    if (hasBreakdown || hasQuery || hasPage)
+      throw bad(
+        'Search appearance is reported on its own: combine it only with date, week or month. Search Console does not group it with query, page, country or device.',
+      );
+    if (r.searchType !== 'web') throw bad('Search appearance is synced for web search only.');
   }
-  if (hasBreakdown && r.source === 'bing') throw new SearchkeepError('bad_request', 'Bing does not provide country/device breakdowns.');
+  if (hasBreakdown && r.source === 'bing') throw bad('Bing does not provide country/device breakdowns.');
+  if (hasBreakdown && r.searchType !== 'web') throw bad('Country and device are synced for web search only.');
+  if (hasBreakdown && (hasQuery || hasPage)) {
+    if (hasQuery && hasPage) throw bad('country/device can be combined with query or with page, not with both.');
+    if (!segmentsEnabled(ctx.config, r.site.id)) {
+      throw bad(
+        `country/device together with query or page needs the per-country and per-device segments, which are off for "${r.site.id}". Add the site id to the GSC_SEGMENT_SITES secret (or set it to "all"); they then sync for the last 3 months.`,
+      );
+    }
+  }
+  if (hasQuery && PAGE_ONLY_SEARCH_TYPES.includes(r.searchType))
+    throw bad(`${SEARCH_TYPE_NAMES[r.searchType]} reports pages, not queries.`);
   if (r.source === 'bing' && dimensions.includes('query') && dimensions.includes('page')) {
-    throw new SearchkeepError('bad_request', 'Bing reports queries and pages separately; use one of them.');
+    throw bad('Bing reports queries and pages separately; use one of them.');
   }
   const filters: PerformanceFilters = { brand: r.brand };
   if (p.queryContains) filters.queryContains = p.queryContains;
   if (p.pageContains) filters.pageContains = p.pageContains;
   if (p.country) filters.country = p.country.toLowerCase();
   if (p.device) filters.device = p.device.toUpperCase();
+  if (p.appearance) filters.appearance = p.appearance.toUpperCase();
   const rows = await ctx.store.queryPerformance({
     siteId: r.site.id,
     source: r.source,
+    searchType: r.searchType,
     range: r.range,
     dimensions,
     filters,
@@ -58,9 +127,23 @@ export async function queryPerformance(ctx: AnalysisContext, p: QueryPerformance
     order: p.order ?? (dimensions.length === 1 && ['date', 'week', 'month'].includes(dimensions[0]!) ? 'asc' : 'desc'),
     limit: r.limit,
   });
-  const notes = [...r.notes];
-  if (r.source === 'gsc' && (dimensions.includes('query') || p.queryContains || r.brand !== 'all')) notes.push(ANONYMIZED_NOTE);
-  return { site: r.site.id, source: r.source, range: r.range, dimensions, brand: r.brand, rows, notes };
+  const notes = [...r.notes, ...searchTypeNotes(r)];
+  if (r.source === 'gsc' && hasQuery) notes.push(ANONYMIZED_NOTE);
+  if (hasBreakdown && (hasQuery || hasPage)) notes.push(SEGMENT_NOTE);
+  if (r.source === 'bing' && !hasQuery && !hasPage)
+    notes.push("Bing reports no position for site totals; the position shown is the impression-weighted average of Bing's query rows.");
+  if (hasAppearance && rows.length === 0 && !ctx.config.gsc.searchAppearance)
+    notes.push('Search appearance is not synced (GSC_SEARCH_APPEARANCE is false).');
+  return {
+    site: r.site.id,
+    source: r.source,
+    ...(r.searchType !== 'web' ? { searchType: r.searchType } : {}),
+    range: r.range,
+    dimensions,
+    brand: r.brand,
+    rows,
+    notes,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -76,6 +159,7 @@ export interface ComparePeriodsParams extends CommonParams {
 export async function comparePeriods(ctx: AnalysisContext, p: ComparePeriodsParams) {
   const r = await resolve(ctx, p, { limit: 20 });
   const dimension = p.dimension ?? 'query';
+  if (dimension === 'query') requireQueries(r, 'a query comparison');
   let previous: DateRange;
   if (p.compareStart || p.compareEnd) {
     // One end is enough: the other is derived so both periods have the same length.
@@ -86,7 +170,7 @@ export async function comparePeriods(ctx: AnalysisContext, p: ComparePeriodsPara
   } else {
     previous = previousPeriod(r.range);
   }
-  const base = { siteId: r.site.id, source: r.source, filters: { brand: r.brand } } as const;
+  const base = { siteId: r.site.id, source: r.source, searchType: r.searchType, filters: { brand: r.brand } } as const;
   const [curTotals, prevTotals, cur, prev] = await Promise.all([
     ctx.store.queryPerformance({ ...base, range: r.range, dimensions: [], limit: 1 }),
     ctx.store.queryPerformance({ ...base, range: previous, dimensions: [], limit: 1 }),
@@ -126,12 +210,13 @@ export async function comparePeriods(ctx: AnalysisContext, p: ComparePeriodsPara
   const ct = t(curTotals);
   const pt = t(prevTotals);
   const change = (a: number, b: number) => (a === 0 ? null : pct((b - a) / a));
-  const notes = [...r.notes];
+  const notes = [...r.notes, ...searchTypeNotes(r)];
   if (rangeLength(r.range) !== rangeLength(previous)) notes.push('The two periods have different lengths; compare averages with care.');
   if (r.source === 'gsc' && dimension === 'query') notes.push(ANONYMIZED_NOTE);
   return {
     site: r.site.id,
     source: r.source,
+    ...(r.searchType !== 'web' ? { searchType: r.searchType } : {}),
     dimension,
     current: { range: r.range, ...strip(ct) },
     previous: { range: previous, ...strip(pt) },
@@ -187,6 +272,7 @@ export function benchmarkCtr(position: number): number {
 
 export async function findQuickWins(ctx: AnalysisContext, p: QuickWinsParams) {
   const r = await resolve(ctx, p, { limit: 25 });
+  requireQueries(r, 'quick wins');
   const minPosition = p.minPosition ?? 8;
   const maxPosition = p.maxPosition ?? 20;
   const minImpressions = p.minImpressions ?? Math.max(10, Math.round(rangeLength(r.range) * 2));
@@ -194,6 +280,7 @@ export async function findQuickWins(ctx: AnalysisContext, p: QuickWinsParams) {
   const rows = await ctx.store.queryPerformance({
     siteId: r.site.id,
     source: r.source,
+    searchType: r.searchType,
     range: r.range,
     dimensions: dims,
     filters: { brand: r.brand },
@@ -229,7 +316,11 @@ export async function findQuickWins(ctx: AnalysisContext, p: QuickWinsParams) {
     range: r.range,
     criteria: { minPosition, maxPosition, minImpressions },
     quickWins: wins,
-    notes: [...r.notes, 'potentialExtraClicks assumes a benchmark CTR for position 3; treat it as a ranking signal, not a forecast.'],
+    notes: [
+      ...r.notes,
+      ...searchTypeNotes(r),
+      'potentialExtraClicks assumes a benchmark CTR for position 3; treat it as a ranking signal, not a forecast.',
+    ],
   };
 }
 
@@ -245,11 +336,13 @@ export interface CannibalizationParams extends CommonParams {
 
 export async function findCannibalization(ctx: AnalysisContext, p: CannibalizationParams) {
   const r = await resolve(ctx, { ...p, source: 'gsc' }, { limit: 25 });
+  requireQueries(r, 'cannibalization');
   const minImpressions = p.minImpressions ?? 10;
   const minShare = p.minShare ?? 0.1;
   const rows = await ctx.store.queryPerformance({
     siteId: r.site.id,
     source: 'gsc',
+    searchType: r.searchType,
     range: r.range,
     dimensions: ['query', 'page'],
     filters: { brand: r.brand },
@@ -287,7 +380,7 @@ export async function findCannibalization(ctx: AnalysisContext, p: Cannibalizati
     });
   }
   issues.sort((a, b) => b.impressions - a.impressions);
-  const notes = [...r.notes];
+  const notes = [...r.notes, ...searchTypeNotes(r)];
   if (p.source === 'bing') notes.push('Cannibalization needs query × page data, which only Search Console provides; GSC was used.');
   return {
     site: r.site.id,
@@ -311,11 +404,13 @@ export interface CtrAnomalyParams extends CommonParams {
 
 export async function findCtrAnomalies(ctx: AnalysisContext, p: CtrAnomalyParams) {
   const r = await resolve(ctx, p, { limit: 25 });
+  requireQueries(r, 'CTR anomalies');
   const minImpressions = p.minImpressions ?? Math.max(50, rangeLength(r.range) * 5);
   const threshold = p.threshold ?? 0.5;
   const rows = await ctx.store.queryPerformance({
     siteId: r.site.id,
     source: r.source,
+    searchType: r.searchType,
     range: r.range,
     dimensions: ['query'],
     filters: { brand: r.brand },
@@ -368,6 +463,7 @@ export async function findCtrAnomalies(ctx: AnalysisContext, p: CtrAnomalyParams
     anomalies,
     notes: [
       ...r.notes,
+      ...searchTypeNotes(r),
       "Expected CTR is the median CTR of this site's queries at the same rounded position (benchmark curve when fewer than 8 samples). Low CTR often means a weak title/snippet, a SERP feature above you, or mismatched intent.",
     ],
   };
@@ -397,6 +493,7 @@ export async function findContentDecay(ctx: AnalysisContext, p: ContentDecayPara
   const rows = await ctx.store.queryPerformance({
     siteId: r0.site.id,
     source: r0.source,
+    searchType: r0.searchType,
     range,
     dimensions: ['page', 'week'],
     filters: { brand: r0.brand },
@@ -450,6 +547,7 @@ export async function findContentDecay(ctx: AnalysisContext, p: ContentDecayPara
     decaying: decaying.slice(0, clampLimit(p.limit, 25)),
     notes: [
       ...r0.notes.filter((n) => !n.startsWith('Bing data is weekly')),
+      ...searchTypeNotes(r0),
       'Compares the last 4 weeks with the best earlier 4-week window and requires a downward trend since that peak.',
     ],
   };

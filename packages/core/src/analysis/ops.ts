@@ -1,14 +1,16 @@
-import { findSite, SearchkeepError } from '../config.js';
+import { findSite, SearchkeepError, segmentsEnabled } from '../config.js';
 import { safeMessage } from '../errors.js';
 import type { ReadinessReport } from '../auth/readiness.js';
 import type { SourceClients } from '../sources.js';
 import { pageToUrl } from '../url.js';
 import type { SearchSource, SiteConfig } from '../types.js';
 import { previousPeriod, rangeLength } from '../dates.js';
-import { metrics, resolve, type AnalysisContext, type CommonParams } from './common.js';
+import { clampLimit, metrics, resolve, type AnalysisContext, type CommonParams } from './common.js';
 import { aiCrawlers } from './geo.js';
 import { syncProgress, type SyncProgressReport } from '../sync/progress.js';
-import { formatUntil, SOURCE_NAMES } from '../sync/state.js';
+import { MAX_INDEX_URLS } from '../sync/run-sync.js';
+import { formatUntil, REINSPECT_DAYS, SOURCE_NAMES } from '../sync/state.js';
+import type { IndexStatusRow } from '../types.js';
 
 export interface OpsContext extends AnalysisContext {
   clients: SourceClients;
@@ -19,7 +21,11 @@ function sourcesOf(ctx: OpsContext, site: SiteConfig) {
     gsc: Boolean(site.gscProperty && ctx.clients.gsc),
     bing: Boolean(site.bingSiteUrl && ctx.clients.bing),
     aiCrawlers: Boolean(site.cloudflareZoneId && ctx.clients.cloudflare),
+    searchCrawlers: Boolean(site.cloudflareZoneId && ctx.clients.cloudflare),
     webAnalytics: Boolean(site.webAnalyticsSiteTag && ctx.clients.cloudflare && ctx.config.cloudflare.accountId),
+    indexCoverage: Boolean(site.gscProperty && ctx.clients.gsc && ctx.clients.sitemaps && ctx.config.gsc.inspectionsPerDay > 0),
+    /** Query and page rows per country and device are synced (GSC_SEGMENT_SITES). */
+    segments: Boolean(site.gscProperty && ctx.clients.gsc && segmentsEnabled(ctx.config, site.id)),
   };
 }
 
@@ -55,9 +61,88 @@ export async function listSitemaps(ctx: OpsContext, p: { site?: string; live?: b
       throw new SearchkeepError('not_configured', 'Search Console is not configured for this site.');
     const maps = await ctx.clients.gsc.listSitemaps(site.gscProperty);
     await ctx.store.replaceSitemaps(site.id, 'gsc', maps);
-    return { site: site.id, live: true, sitemaps: maps };
+    return { site: site.id, live: true, sitemaps: maps, notes: [SITEMAP_INDEXED_NOTE] };
   }
-  return { site: site.id, live: false, sitemaps: await ctx.store.listSitemaps(site.id, 'gsc') };
+  return { site: site.id, live: false, sitemaps: await ctx.store.listSitemaps(site.id, 'gsc'), notes: [SITEMAP_INDEXED_NOTE] };
+}
+
+const SITEMAP_INDEXED_NOTE =
+  "Google's Sitemaps API no longer reports how many URLs are indexed (indexed is null); index_coverage inspects the sitemaps' URLs and counts them.";
+
+export interface IndexCoverageParams {
+  site?: string;
+  /** Only URLs whose coverage state contains this text, e.g. "Crawled - currently not indexed". */
+  coverageState?: string;
+  /** Only URLs with this verdict: PASS (indexed), NEUTRAL (excluded), FAIL (error), PENDING (not inspected yet), ERROR (inspection failed). */
+  verdict?: string;
+  /** Only URLs with rich result (structured data) issues. */
+  richResultIssues?: boolean;
+  /** Coverage changes of the last this many days. Default 7. */
+  changedDays?: number;
+  limit?: number;
+}
+
+const VERDICTS = ['PASS', 'NEUTRAL', 'FAIL', 'PENDING', 'ERROR'];
+
+/** Drops empty fields so long URL lists stay compact. */
+function compactRow(r: IndexStatusRow): Partial<IndexStatusRow> {
+  return Object.fromEntries(
+    Object.entries(r).filter(([, v]) => v !== null && v !== undefined && !(Array.isArray(v) && v.length === 0)),
+  ) as Partial<IndexStatusRow>;
+}
+
+/**
+ * Index coverage from the stored URL Inspection snapshot of the sitemaps' URLs: how many are
+ * indexed, why the others are not, rich result (structured data) problems, and recent changes.
+ */
+export async function indexCoverage(ctx: OpsContext, p: IndexCoverageParams) {
+  const site = findSite(ctx.config, p.site);
+  const verdict = p.verdict?.toUpperCase();
+  if (verdict && !VERDICTS.includes(verdict)) throw new SearchkeepError('bad_request', `verdict must be one of ${VERDICTS.join(', ')}.`);
+  const now = ctx.now ? ctx.now() : new Date();
+  const changedDays = Math.max(1, Math.min(365, Math.floor(p.changedDays ?? 7)));
+  const res = await ctx.store.indexCoverage({
+    siteId: site.id,
+    ...(p.coverageState ? { coverageState: p.coverageState } : {}),
+    ...(verdict ? { verdict } : {}),
+    ...(p.richResultIssues ? { richResultIssues: true } : {}),
+    changedSince: new Date(now.getTime() - changedDays * 86_400_000).toISOString(),
+    limit: clampLimit(p.limit, 50),
+  });
+  const count = (v: string) => res.states.filter((s) => s.verdict === v).reduce((t, s) => t + s.urls, 0);
+  const t = res.totals;
+  const perDay = ctx.config.gsc.inspectionsPerDay;
+  const notes: string[] = [];
+  if (!site.gscProperty || !ctx.clients.gsc) notes.push('Search Console is not configured for this site.');
+  else if (perDay === 0) notes.push('Index coverage is off: GSC_INSPECTIONS_PER_DAY is 0.');
+  else if (t.urls === 0)
+    notes.push(
+      'No URLs tracked yet. They come from the sitemaps Search Console knows (see list_sitemaps), read once a day; the sync then inspects them with the calls it has left over.',
+    );
+  else if (t.inspected < t.urls)
+    notes.push(`${t.urls - t.inspected} of ${t.urls} URLs are not inspected yet; up to ${perDay} are inspected per day.`);
+  if (t.urls >= MAX_INDEX_URLS) notes.push(`Only the first ${MAX_INDEX_URLS.toLocaleString('en-US')} sitemap URLs are tracked.`);
+  notes.push(
+    `A snapshot, not live: each URL is inspected again after about ${REINSPECT_DAYS} days (oldest first), up to GSC_INSPECTIONS_PER_DAY (${perDay}) per site and day. inspect_url shares the URL Inspection quota (about 2,000 per property and day).`,
+  );
+  return {
+    site: site.id,
+    totals: {
+      urls: t.urls,
+      inspected: t.inspected,
+      indexed: count('PASS'),
+      notIndexed: count('NEUTRAL') + count('FAIL'),
+      pending: t.urls - t.inspected,
+      errors: t.errors,
+      oldestInspectedAt: t.oldestInspectedAt,
+      newestInspectedAt: t.newestInspectedAt,
+    },
+    states: res.states,
+    richResults: res.richResults,
+    urls: res.urls.map(compactRow),
+    changes: res.changes,
+    notes,
+  };
 }
 
 export async function submitSitemap(ctx: OpsContext, p: { site?: string; sitemapUrl: string }) {
@@ -227,7 +312,7 @@ export function describeProgress(p: SyncProgressReport): string {
 
 /** Dashboard home: headline numbers and trends for one site. */
 export async function overview(ctx: OpsContext, p: CommonParams) {
-  const r = await resolve(ctx, p, { days: 28 });
+  const r = await resolve(ctx, { ...p, searchType: 'web' }, { days: 28 });
   const prev = previousPeriod(r.range);
   const sources: SearchSource[] = ['gsc', 'bing'];
   const perSource = await Promise.all(

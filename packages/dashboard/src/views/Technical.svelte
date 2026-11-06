@@ -5,6 +5,8 @@
   import EmptyState from '../components/EmptyState.svelte';
   import ErrorBanner from '../components/ErrorBanner.svelte';
   import Icon from '../components/Icon.svelte';
+  import IndexCoverageCard from '../components/IndexCoverageCard.svelte';
+  import SearchCrawlersCard from '../components/SearchCrawlersCard.svelte';
   import Notes from '../components/Notes.svelte';
   import PageHeader from '../components/PageHeader.svelte';
   import Pill from '../components/Pill.svelte';
@@ -86,7 +88,6 @@
     { key: 'path', label: 'Sitemap', grow: true, sortable: true, render: sitemapPath },
     { key: 'status', label: 'Status', width: '120px', render: sitemapStatus },
     { key: 'submitted', label: 'URLs', align: 'right', sortable: true, width: '80px', text: (r) => int(r.submitted) },
-    { key: 'indexed', label: 'Indexed', align: 'right', sortable: true, width: '84px', text: (r) => int(r.indexed), hideOnMobile: true },
     { key: 'lastSubmitted', label: 'Submitted', sortable: true, width: '120px', text: (r) => (r.lastSubmitted ? shortDate(r.lastSubmitted, true) : '—'), hideOnMobile: true },
     { key: 'lastDownloaded', label: 'Last read by Google', sortable: true, width: '160px', text: (r) => dateTime(r.lastDownloaded) },
   ]);
@@ -204,6 +205,10 @@
 <PageHeader title="Technical" meta={vitals.data ? `Web Vitals: ${rangeLabel(vitals.data.range)}` : vitals.error ? null : undefined} />
 
 <div class="stack">
+  <IndexCoverageCard />
+
+  <SearchCrawlersCard />
+
   <Card title="Core Web Vitals" subtitle="p75 · real visitors" busy={vitals.loading && Boolean(vitals.data)} flush>
     {#if vitals.error}
       <div class="pad"><ErrorBanner error={vitals.error} retry={vitals.reload} /></div>

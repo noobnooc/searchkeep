@@ -72,6 +72,7 @@ export const DATASET_LABEL: Record<SyncDataset, string> = {
   gsc: 'Search Console',
   bing: 'Bing',
   ai_crawlers: 'AI crawlers',
+  search_crawlers: 'Search engine crawlers',
   web_analytics: 'Web Analytics',
 };
 

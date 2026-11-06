@@ -134,6 +134,13 @@ describe('locked until ready', () => {
     const progress = (await (await call(env, '/api/sync-progress', { headers })).json()) as { phase: string; sites: unknown[] };
     // The test site has no sources connected, so there is nothing to sync.
     expect(progress).toMatchObject({ phase: 'done', sites: [{ siteId: 'acme', phase: 'done', datasets: [] }] });
+    // The new tables exist after the Worker's own migration, and their routes answer.
+    const coverage = (await (await call(env, '/api/index-coverage', { headers })).json()) as { totals: { urls: number } };
+    expect(coverage.totals).toMatchObject({ urls: 0, inspected: 0 });
+    const engines = (await (await call(env, '/api/search-crawlers', { headers })).json()) as { totalRequests: number };
+    expect(engines.totalRequests).toBe(0);
+    const appearance = await call(env, '/api/performance?dimensions=appearance', { headers });
+    expect(appearance.status).toBe(200);
     expect(await (await call(env, '/', { headers })).text()).toContain('dashboard');
     expect(await new D1Store(env.DB).getMeta(READY_FLAG_KEY)).not.toBeNull();
     const mcp = await call(env, '/mcp', {

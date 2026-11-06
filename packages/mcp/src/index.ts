@@ -15,12 +15,14 @@ import {
   findCtrAnomalies,
   findQuickWins,
   geoFunnel,
+  indexCoverage,
   inspectUrl,
   listSitemaps,
   listSites,
   queryPerformance,
   safeMessage,
   SearchkeepError,
+  searchCrawlers,
   setupStatus,
   submitSitemap,
   type OpsContext,
@@ -52,6 +54,25 @@ const source = z
   .enum(['gsc', 'bing'])
   .optional()
   .describe('gsc = Google Search Console (daily), bing = Bing Webmaster Tools (weekly). Default gsc.');
+const searchType = z
+  .enum(['web', 'image', 'video', 'news', 'discover', 'googleNews'])
+  .optional()
+  .describe(
+    'Search Console search type: web (default), image, video, news (the News tab), discover, googleNews. discover and googleNews have pages only (no queries or positions).',
+  );
+const crawlerInput = {
+  site: common.site,
+  start: common.start,
+  end: common.end,
+  days: common.days.describe('Window length in days. Default 7.'),
+  limit: common.limit,
+  groupBy: z
+    .array(z.enum(['crawler', 'operator', 'purpose', 'path', 'status', 'date']))
+    .max(3)
+    .optional()
+    .describe('Default [crawler].'),
+  pathContains: z.string().optional(),
+};
 
 const READ_ONLY = { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false } as const;
 
@@ -89,6 +110,8 @@ export const TOOL_NAMES = [
   'find_content_decay',
   'geo_funnel',
   'ai_crawlers',
+  'search_crawlers',
+  'index_coverage',
   'inspect_url',
   'list_sitemaps',
   'submit_sitemap',
@@ -102,7 +125,7 @@ export function createSearchkeepMcpServer(deps: McpDeps): McpServer {
     {
       jsonSchemaValidator: new CfWorkerJsonSchemaValidator(),
       instructions:
-        "Searchkeep answers SEO and GEO questions about the owner's own sites from first-party data (Google Search Console, Bing Webmaster Tools, Cloudflare AI crawler traffic and Web Analytics) kept in their own Cloudflare D1. Start with list_sites. Data is synced daily; GSC lags 2-3 days and Bing is weekly. Right after deploying, history is still being backfilled: if data looks incomplete, setup_status reports the sync progress. Results are aggregated and capped; use filters and limit to narrow down.",
+        "Searchkeep answers SEO and GEO questions about the owner's own sites from first-party data (Google Search Console, Bing Webmaster Tools, Cloudflare AI and search engine crawler traffic and Web Analytics) kept in their own Cloudflare D1. Start with list_sites. Data is synced daily; GSC lags 2-3 days and Bing is weekly. index_coverage answers indexing questions from a stored snapshot; use inspect_url only for spot checks. Right after deploying, history is still being backfilled: if data looks incomplete, setup_status reports the sync progress. Results are aggregated and capped; use filters and limit to narrow down.",
     },
   );
 
@@ -122,12 +145,13 @@ export function createSearchkeepMcpServer(deps: McpDeps): McpServer {
     {
       title: 'Query search performance',
       description:
-        'Clicks, impressions, CTR and average position from GSC or Bing, grouped by any of date/week/month/query/page/country/device, with filters. country/device cannot be combined with query/page.',
+        'Clicks, impressions, CTR and average position from GSC or Bing, grouped by any of date/week/month/query/page/country/device/appearance, with filters. GSC also covers image, video, News, Discover and Google News (searchType). country/device combine with query or page (not both) only for sites in GSC_SEGMENT_SITES. appearance (rich results, videos, ...) combines only with date/week/month.',
       inputSchema: {
         ...common,
         source,
+        searchType,
         dimensions: z
-          .array(z.enum(['date', 'week', 'month', 'query', 'page', 'country', 'device']))
+          .array(z.enum(['date', 'week', 'month', 'query', 'page', 'country', 'device', 'appearance']))
           .max(3)
           .optional()
           .describe('Group-by dimensions. Empty = totals.'),
@@ -135,6 +159,10 @@ export function createSearchkeepMcpServer(deps: McpDeps): McpServer {
         pageContains: z.string().optional().describe('Case-insensitive substring filter on the page path.'),
         country: z.string().optional().describe('ISO 3166-1 alpha-3 country code, e.g. usa.'),
         device: z.enum(['DESKTOP', 'MOBILE', 'TABLET']).optional(),
+        appearance: z
+          .string()
+          .optional()
+          .describe('Only this search appearance, e.g. VIDEO or REVIEW_SNIPPET (group by appearance to list them). GSC web search only.'),
         orderBy: z.enum(['clicks', 'impressions', 'ctr', 'position', 'date']).optional(),
         order: z.enum(['asc', 'desc']).optional(),
       },
@@ -152,6 +180,7 @@ export function createSearchkeepMcpServer(deps: McpDeps): McpServer {
       inputSchema: {
         ...common,
         source,
+        searchType,
         dimension: z.enum(['query', 'page']).optional().describe('Default query.'),
         compareStart: date
           .optional()
@@ -174,6 +203,7 @@ export function createSearchkeepMcpServer(deps: McpDeps): McpServer {
       inputSchema: {
         ...common,
         source,
+        searchType,
         minPosition: z.number().min(1).max(100).optional(),
         maxPosition: z.number().min(1).max(100).optional(),
         minImpressions: z.number().int().min(1).optional(),
@@ -190,6 +220,7 @@ export function createSearchkeepMcpServer(deps: McpDeps): McpServer {
       description: 'Queries where two or more of your pages compete for impressions (GSC only, needs query × page data).',
       inputSchema: {
         ...common,
+        searchType,
         minImpressions: z.number().int().min(1).optional().describe('Minimum impressions per query/page pair. Default 10.'),
         minShare: z.number().min(0.01).max(0.5).optional().describe("Minimum share of the query's impressions per page. Default 0.1."),
       },
@@ -207,6 +238,7 @@ export function createSearchkeepMcpServer(deps: McpDeps): McpServer {
       inputSchema: {
         ...common,
         source,
+        searchType,
         minImpressions: z.number().int().min(1).optional(),
         threshold: z.number().min(0.05).max(0.95).optional().describe('Flag when CTR < expected × threshold. Default 0.5.'),
       },
@@ -223,6 +255,7 @@ export function createSearchkeepMcpServer(deps: McpDeps): McpServer {
       inputSchema: {
         site: common.site,
         source,
+        searchType,
         brand: common.brand,
         limit: common.limit,
         end: common.end,
@@ -262,22 +295,52 @@ export function createSearchkeepMcpServer(deps: McpDeps): McpServer {
       description:
         'Requests from AI crawlers and assistants (GPTBot, ClaudeBot, PerplexityBot, …) recorded by Cloudflare, grouped by crawler, operator, purpose, path, status or date.',
       inputSchema: {
-        site: common.site,
-        start: common.start,
-        end: common.end,
-        days: common.days.describe('Window length in days. Default 7.'),
-        limit: common.limit,
-        groupBy: z
-          .array(z.enum(['crawler', 'operator', 'purpose', 'path', 'status', 'date']))
-          .max(3)
-          .optional()
-          .describe('Default [crawler].'),
+        ...crawlerInput,
         crawler: z.string().optional().describe('Only this crawler, e.g. GPTBot.'),
-        pathContains: z.string().optional(),
       },
       annotations: READ_ONLY,
     },
     async (args) => run(() => aiCrawlers(ctx, clean(args))),
+  );
+
+  server.registerTool(
+    'search_crawlers',
+    {
+      title: 'Search engine crawler traffic',
+      description:
+        "Requests from search engine crawlers (Googlebot, Bingbot, YandexBot, Applebot, …) recorded by Cloudflare, grouped by crawler, operator, purpose (search, media, ads, other), path, status or date. The closest thing to Search Console's Crawl stats report: crawl volume, response codes and the most crawled pages.",
+      inputSchema: {
+        ...crawlerInput,
+        crawler: z.string().optional().describe('Only this crawler, e.g. Googlebot or Bingbot.'),
+      },
+      annotations: READ_ONLY,
+    },
+    async (args) => run(() => searchCrawlers(ctx, clean(args))),
+  );
+
+  server.registerTool(
+    'index_coverage',
+    {
+      title: 'Index coverage',
+      description:
+        "Index status of the sitemaps' URLs from a stored URL Inspection snapshot (inspected in daily batches): how many are indexed, counts per coverage state (Crawled - currently not indexed, Soft 404, duplicates, ...), rich result (structured data) problems, the URLs in a state and recent changes. No quota is used.",
+      inputSchema: {
+        site: common.site,
+        coverageState: z
+          .string()
+          .optional()
+          .describe('Only URLs whose coverage state contains this text, e.g. "crawled - currently not indexed".'),
+        verdict: z
+          .enum(['PASS', 'NEUTRAL', 'FAIL', 'PENDING', 'ERROR'])
+          .optional()
+          .describe('PASS = indexed, NEUTRAL = excluded, FAIL = error, PENDING = not inspected yet, ERROR = inspection failed.'),
+        richResultIssues: z.boolean().optional().describe('Only URLs with rich result issues.'),
+        changedDays: z.number().int().min(1).max(365).optional().describe('List coverage changes of the last N days. Default 7.'),
+        limit: common.limit,
+      },
+      annotations: READ_ONLY,
+    },
+    async (args) => run(() => indexCoverage(ctx, clean(args))),
   );
 
   server.registerTool(

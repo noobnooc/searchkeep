@@ -21,7 +21,7 @@ cloudflared access curl "https://searchkeep.example.com/api/import/ai-citations?
       <tr>
         <td>Google Search Console</td>
         <td>Service account (<code>webmasters.readonly</code>), Restricted user</td>
-        <td>Search Analytics, sitemaps, URL Inspection</td>
+        <td>Search Analytics (web, image, video, News, Discover, Google News, search appearance), sitemaps, URL Inspection (index coverage)</td>
         <td>Daily</td>
       </tr>
       <tr>
@@ -33,7 +33,7 @@ cloudflared access curl "https://searchkeep.example.com/api/import/ai-citations?
       <tr>
         <td>Cloudflare</td>
         <td>API token (read-only)</td>
-        <td>AI crawler requests, Web Analytics page views and referrers, Web Vitals</td>
+        <td>AI and search engine crawler requests, Web Analytics page views and referrers, Web Vitals</td>
         <td>Daily</td>
       </tr>
       <tr>
@@ -60,13 +60,22 @@ cloudflared access curl "https://searchkeep.example.com/api/import/ai-citations?
     <strong>The latest days first, for every site.</strong> Every day each source is brought up to date before any
     history is backfilled: Search Console re-pulls the last 4 days and fills gaps of up to 30 days, the sitemap snapshot
     is refreshed, Bing is pulled in full, and Cloudflare adds each missing day of AI crawler requests and Web Analytics.
-    This work goes round-robin over the sites, so with many sites each one gets its latest days early.
+    This work goes round-robin over the sites, so with many sites each one gets its latest days early. The other
+    datasets follow: Search Console’s other search types and search appearance, the opt-in country × device segments,
+    and search engine crawler requests. Each keeps its own cursors, so a dataset added by an upgrade backfills on its
+    own.
   </li>
   <li>
     <strong>Then history, for all sites at once.</strong> Search Console back 16 months
-    (<code>GSC_BACKFILL_MONTHS</code>), AI crawler requests back 30 days and Web Analytics back 90 days, newest day first
-    across all sites. History stops for the day when it has written <code>SYNC_DAILY_WRITE_BUDGET</code> rows (80,000 by
+    (<code>GSC_BACKFILL_MONTHS</code>; 3 months for the segments), AI and search engine crawler requests back 30 days
+    and Web Analytics back 90 days, newest day first across all sites. History stops for the day when it has written <code>SYNC_DAILY_WRITE_BUDGET</code> rows (80,000 by
     default, under D1 Free’s 100,000 rows written per day), so on the free plan sites with a lot of data take days.
+  </li>
+  <li>
+    <strong>Index coverage with the calls left over.</strong> Once a day the URLs of the sitemaps Search Console knows
+    are read from your site, then up to <code>GSC_INSPECTIONS_PER_DAY</code> of them (200 by default) are inspected,
+    never-inspected URLs first, each again after about a week. This work only uses calls the other work left, so it never
+    slows the sync down.
   </li>
   <li>
     <strong>Many days per request.</strong> Search Console and Cloudflare answer for a date range with one row per day,
@@ -126,7 +135,21 @@ cloudflared access curl "https://searchkeep.example.com/api/import/ai-citations?
     Search Analytics per day: site totals, totals by country and device, and query × page rows with clicks,
     impressions, CTR and position.
   </li>
-  <li>Sitemaps: submission and download times, errors, warnings, submitted vs indexed counts (snapshot once a day).</li>
+  <li>
+    The other search types (<code>GSC_SEARCH_TYPES</code>, all by default): image and video search and the News tab
+    (totals and query × page), Discover and Google News (totals and pages; they have no queries or positions).
+  </li>
+  <li>Search appearance per day (rich results, videos, AMP, ...), unless <code>GSC_SEARCH_APPEARANCE</code> is <code>false</code>.</li>
+  <li>
+    Opt-in (<code>GSC_SEGMENT_SITES</code>): the top 1,000 queries and pages per day by country and device, for the last
+    3 months, so queries and pages can be combined with country and device.
+  </li>
+  <li>Sitemaps: submission and download times, errors, warnings and submitted URL counts (snapshot once a day).</li>
+  <li>
+    <strong>Index coverage</strong>: the URLs in your sitemaps (up to 5,000 per site), inspected in daily batches with
+    the URL Inspection API: verdict, coverage state, Google’s and your canonical, last crawl and rich result issues, and
+    the last change of each URL’s state (<code>index_coverage</code>). URLs no sitemap lists for a week are dropped.
+  </li>
   <li>URL Inspection, live, through <code>inspect_url</code>.</li>
 </ul>
 <h3 id="gsc-limits">Limitations</h3>
@@ -146,7 +169,18 @@ cloudflared access curl "https://searchkeep.example.com/api/import/ai-citations?
     raise it. Raising it keeps more of the long tail at the cost of D1 writes and CPU.
   </li>
   <li><strong>Delay.</strong> Data arrives two to three days late, and the most recent days can change.</li>
-  <li><strong>URL Inspection quota.</strong> About 2,000 inspections per property per day.</li>
+  <li>
+    <strong>URL Inspection quota.</strong> About 2,000 inspections per property per day, shared by the index coverage
+    snapshot (<code>GSC_INSPECTIONS_PER_DAY</code>) and <code>inspect_url</code>.
+  </li>
+  <li>
+    <strong>No indexed count per sitemap.</strong> The Sitemaps API no longer fills <code>indexed</code>; the index
+    coverage snapshot counts indexed URLs instead.
+  </li>
+  <li>
+    <strong>Search appearance on its own.</strong> Search Console reports it only by itself (with a date), never
+    together with query, page, country or device.
+  </li>
 </ul>
 
 <h2 id="bing">Bing Webmaster Tools</h2>
@@ -161,7 +195,10 @@ cloudflared access curl "https://searchkeep.example.com/api/import/ai-citations?
 </ul>
 <h3 id="bing-data">Data</h3>
 <ul>
-  <li>Traffic totals, query statistics and page statistics: clicks, impressions, average position.</li>
+  <li>
+    Traffic totals, query statistics and page statistics: clicks, impressions, average position. Traffic totals carry
+    no position; Searchkeep gives them the impression-weighted position of the query rows.
+  </li>
   <li>Crawl issues (URL, issue and HTTP code), refreshed once a day.</li>
 </ul>
 <h3 id="bing-limits">Limitations</h3>
@@ -183,7 +220,7 @@ cloudflared access curl "https://searchkeep.example.com/api/import/ai-citations?
 <h3 id="cf-access">Access</h3>
 <p>One API token with three read permissions:</p>
 <ul>
-  <li><strong>Zone · Analytics · Read</strong> for AI crawler traffic on each zone.</li>
+  <li><strong>Zone · Analytics · Read</strong> for AI and search engine crawler traffic on each zone.</li>
   <li><strong>Account · Account Analytics · Read</strong> for Web Analytics.</li>
   <li><strong>Account · Access: Apps and Policies · Read</strong> for the security checks (not a data source, but the same token).</li>
 </ul>
@@ -194,6 +231,13 @@ cloudflared access curl "https://searchkeep.example.com/api/import/ai-citations?
     status code. Searchkeep matches the user agent against a list of known AI crawlers and assistants and classifies
     them by operator (OpenAI, Anthropic, Perplexity, Google, and many more) and by purpose: <code>training</code>,
     <code>search</code>, or <code>user</code> (an assistant fetching a page because someone asked).
+  </li>
+  <li>
+    <strong>Search engine crawler requests</strong> from the same analytics: Googlebot (and its image, video and news
+    crawlers), Bingbot, YandexBot, Baiduspider, DuckDuckBot, Applebot and others, by day, path and status code, with
+    purpose <code>search</code>, <code>media</code>, <code>ads</code> or <code>other</code>. This is the closest
+    substitute for Search Console’s Crawl stats report, which has no API. Up to 2,000 path × status rows are kept per day;
+    the rest is summed under <code>(other pages)</code>.
   </li>
   <li>
     <strong>Web Analytics</strong>: page views and visits by path and referrer host, used for the <em>Clicked from

@@ -116,7 +116,7 @@ export function createCloudflareClient(opts: CloudflareClientOptions): Cloudflar
   }
 
   return {
-    async aiCrawlerRequests(zoneId, range, patterns): Promise<RangeResult<CloudflareCrawlerRow>> {
+    async crawlerRequests(zoneId, range, patterns): Promise<RangeResult<CloudflareCrawlerRow>> {
       const { start, end } = rangeBounds(range);
       const query = `query($zone: String!, $start: Time!, $end: Time!, $or: [ZoneHttpRequestsAdaptiveGroupsFilter_InputObject!]) {
         viewer { zones(filter: { zoneTag: $zone }) {

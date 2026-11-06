@@ -1,6 +1,7 @@
 /**
  * Google Search Console adapter. Authenticates as a service account with a
- * self-signed RS256 JWT (WebCrypto) exchanged for an access token.
+ * self-signed RS256 JWT (WebCrypto) exchanged for an access token. Also reads
+ * the site's own sitemaps (plain GET) for the index coverage snapshot.
  */
 import {
   requestJson,
@@ -9,8 +10,11 @@ import {
   type GscRow,
   type GscSearchAnalyticsRequest,
   type GscUrlInspection,
+  type RichResultIssue,
   type SitemapRecord,
 } from '@searchkeep/core';
+
+export { createSitemapReader, parseSitemap } from './sitemaps.js';
 
 export const GSC_READONLY_SCOPE = 'https://www.googleapis.com/auth/webmasters.readonly';
 export const GSC_FULL_SCOPE = 'https://www.googleapis.com/auth/webmasters';
@@ -119,7 +123,14 @@ export function createGscClient(opts: GscClientOptions): GscClient {
         rowLimit: Math.min(25_000, Math.max(1, req.rowLimit)),
         startRow: req.startRow ?? 0,
         dataState: req.dataState ?? 'final',
-        type: 'web',
+        type: req.type ?? 'web',
+        ...(req.searchAppearance
+          ? {
+              dimensionFilterGroups: [
+                { groupType: 'and', filters: [{ dimension: 'searchAppearance', operator: 'equals', expression: req.searchAppearance }] },
+              ],
+            }
+          : {}),
       };
       const res = await call<{ rows?: GscRow[] }>(`${site(req.property)}/searchAnalytics/query`, { method: 'POST', body });
       return res?.rows ?? [];
@@ -138,10 +149,7 @@ export function createGscClient(opts: GscClientOptions): GscClient {
       const res = await call<{ sitemap?: Raw[] }>(`${site(property)}/sitemaps`);
       return (res?.sitemap ?? []).map((s) => {
         const contents = s.contents ?? [];
-        const sum = (k: 'submitted' | 'indexed') => {
-          const vals = contents.map((c) => c[k]).filter((v) => v !== undefined);
-          return vals.length ? vals.reduce<number>((t, v) => t + Number(v), 0) : null;
-        };
+        const vals = contents.map((c) => c.submitted).filter((v) => v !== undefined);
         return {
           path: s.path,
           lastSubmitted: s.lastSubmitted ?? null,
@@ -149,8 +157,9 @@ export function createGscClient(opts: GscClientOptions): GscClient {
           isPending: Boolean(s.isPending),
           errors: Number(s.errors ?? 0),
           warnings: Number(s.warnings ?? 0),
-          submitted: sum('submitted'),
-          indexed: sum('indexed'),
+          submitted: vals.length ? vals.reduce<number>((t, v) => t + Number(v), 0) : null,
+          // `contents[].indexed` is "Deprecated; do not use" and arrives as 0: the index coverage snapshot replaces it.
+          indexed: null,
         };
       });
     },
@@ -166,7 +175,13 @@ export function createGscClient(opts: GscClientOptions): GscClient {
           inspectionResultLink?: string;
           indexStatusResult?: Record<string, string | undefined>;
           mobileUsabilityResult?: { verdict?: string };
-          richResultsResult?: { verdict?: string };
+          richResultsResult?: {
+            verdict?: string;
+            detectedItems?: Array<{
+              richResultType?: string;
+              items?: Array<{ name?: string; issues?: Array<{ issueMessage?: string; severity?: string }> }>;
+            }>;
+          };
         };
       }
       const res = await call<Raw>(INSPECT_URL, { method: 'POST', body: { inspectionUrl: url, siteUrl: property } });
@@ -185,6 +200,7 @@ export function createGscClient(opts: GscClientOptions): GscClient {
         crawledAs: i.crawledAs ?? null,
         mobileUsabilityVerdict: r.mobileUsabilityResult?.verdict ?? null,
         richResultsVerdict: r.richResultsResult?.verdict ?? null,
+        ...richResults(r.richResultsResult?.detectedItems ?? []),
         inspectionResultLink: r.inspectionResultLink ?? null,
       };
     },
@@ -194,6 +210,25 @@ export function createGscClient(opts: GscClientOptions): GscClient {
       return res?.siteEntry ?? [];
     },
   };
+}
+
+/** Detected rich result types and their issues, one entry per distinct type, severity and message. */
+function richResults(
+  detected: Array<{ richResultType?: string; items?: Array<{ issues?: Array<{ issueMessage?: string; severity?: string }> }> }>,
+): { richResultTypes: string[]; richResultIssues: RichResultIssue[] } {
+  const types = new Set<string>();
+  const issues = new Map<string, RichResultIssue>();
+  for (const d of detected) {
+    const type = d.richResultType ?? 'Unknown';
+    types.add(type);
+    for (const item of d.items ?? []) {
+      for (const i of item.issues ?? []) {
+        const issue = { type, severity: i.severity ?? 'SEVERITY_UNSPECIFIED', message: (i.issueMessage ?? '').slice(0, 300) };
+        issues.set(`${issue.type}\u0000${issue.severity}\u0000${issue.message}`, issue);
+      }
+    }
+  }
+  return { richResultTypes: [...types], richResultIssues: [...issues.values()] };
 }
 
 /** Test helper. */

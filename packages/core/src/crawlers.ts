@@ -48,8 +48,55 @@ export const AI_CRAWLERS: CrawlerSignature[] = [
 ];
 
 export function classifyCrawler(userAgent: string): CrawlerSignature | null {
+  return classifyWith(AI_CRAWLERS, userAgent);
+}
+
+/**
+ * Search engine crawlers, most specific first. `match` is the exact spelling in
+ * the user agent (Cloudflare matches it case-sensitively). Purposes: `search`
+ * (web search index), `media` (image and video indexes), `ads` (ad landing page
+ * checks), `other` (previews, testing tools and other fetchers). AI crawlers of
+ * the same operators (Google-CloudVertexBot, ...) are in `AI_CRAWLERS`.
+ */
+export const SEARCH_CRAWLERS: CrawlerSignature[] = [
+  { match: 'Googlebot-Image', name: 'Googlebot-Image', operator: 'Google', purpose: 'media' },
+  { match: 'Googlebot-Video', name: 'Googlebot-Video', operator: 'Google', purpose: 'media' },
+  { match: 'Googlebot-News', name: 'Googlebot-News', operator: 'Google', purpose: 'search' },
+  { match: 'Google-InspectionTool', name: 'Google-InspectionTool', operator: 'Google', purpose: 'other' },
+  { match: 'Storebot-Google', name: 'Storebot-Google', operator: 'Google', purpose: 'other' },
+  { match: 'GoogleOther', name: 'GoogleOther', operator: 'Google', purpose: 'other' },
+  { match: 'AdsBot-Google', name: 'AdsBot-Google', operator: 'Google', purpose: 'ads' },
+  { match: 'Mediapartners-Google', name: 'Mediapartners-Google', operator: 'Google', purpose: 'ads' },
+  { match: 'Googlebot', name: 'Googlebot', operator: 'Google', purpose: 'search' },
+  { match: 'adidxbot', name: 'AdIdxBot', operator: 'Microsoft', purpose: 'ads' },
+  { match: 'BingPreview', name: 'BingPreview', operator: 'Microsoft', purpose: 'other' },
+  { match: 'MicrosoftPreview', name: 'MicrosoftPreview', operator: 'Microsoft', purpose: 'other' },
+  { match: 'bingbot', name: 'Bingbot', operator: 'Microsoft', purpose: 'search' },
+  { match: 'YandexImages', name: 'YandexImages', operator: 'Yandex', purpose: 'media' },
+  { match: 'YandexMobileBot', name: 'YandexBot', operator: 'Yandex', purpose: 'search' },
+  { match: 'YandexBot', name: 'YandexBot', operator: 'Yandex', purpose: 'search' },
+  { match: 'Baiduspider-image', name: 'Baiduspider-image', operator: 'Baidu', purpose: 'media' },
+  { match: 'Baiduspider', name: 'Baiduspider', operator: 'Baidu', purpose: 'search' },
+  { match: 'DuckDuckBot', name: 'DuckDuckBot', operator: 'DuckDuckGo', purpose: 'search' },
+  { match: 'Applebot', name: 'Applebot', operator: 'Apple', purpose: 'search' },
+  { match: 'Slurp', name: 'Yahoo Slurp', operator: 'Yahoo', purpose: 'search' },
+  { match: 'SeznamBot', name: 'SeznamBot', operator: 'Seznam', purpose: 'search' },
+  { match: 'Yeti/', name: 'Yeti', operator: 'Naver', purpose: 'search' },
+  { match: 'Sogou', name: 'Sogou', operator: 'Sogou', purpose: 'search' },
+  { match: 'Qwantbot', name: 'Qwantbot', operator: 'Qwant', purpose: 'search' },
+  { match: 'coccocbot', name: 'coccocbot', operator: 'Coc Coc', purpose: 'search' },
+  { match: 'MojeekBot', name: 'MojeekBot', operator: 'Mojeek', purpose: 'search' },
+];
+
+export function classifySearchCrawler(userAgent: string): CrawlerSignature | null {
+  // An AI fetcher that mentions a search engine (rare) stays an AI crawler.
+  if (classifyCrawler(userAgent)) return null;
+  return classifyWith(SEARCH_CRAWLERS, userAgent);
+}
+
+function classifyWith(list: CrawlerSignature[], userAgent: string): CrawlerSignature | null {
   const ua = userAgent.toLowerCase();
-  for (const sig of AI_CRAWLERS) {
+  for (const sig of list) {
     if (ua.includes(sig.match.toLowerCase())) return sig;
   }
   return null;

@@ -1,7 +1,15 @@
 import { findSite, SearchkeepError, type SearchkeepConfig } from '../config.js';
 import { addDays, assertRange, isIsoDate, toIsoDate, weekStart } from '../dates.js';
 import type { Store } from '../store.js';
-import type { BrandFilter, DateRange, Metrics, SearchSource, SiteConfig } from '../types.js';
+import {
+  GSC_SEARCH_TYPES,
+  type BrandFilter,
+  type DateRange,
+  type GscSearchType,
+  type Metrics,
+  type SearchSource,
+  type SiteConfig,
+} from '../types.js';
 import { classifyBrandQueries } from '../brand.js';
 
 export interface AnalysisContext {
@@ -21,6 +29,8 @@ export interface CommonParams {
   /** Window length when start is omitted. Default 28. */
   days?: number;
   source?: SearchSource;
+  /** Search Console search type (web, image, video, news, discover, googleNews). Default web. */
+  searchType?: GscSearchType;
   brand?: BrandFilter;
   limit?: number;
 }
@@ -28,6 +38,7 @@ export interface CommonParams {
 export interface Resolved {
   site: SiteConfig;
   source: SearchSource;
+  searchType: GscSearchType;
   range: DateRange;
   brand: BrandFilter;
   limit: number;
@@ -45,7 +56,15 @@ export async function resolve(ctx: AnalysisContext, p: CommonParams, defaults: {
   const site = findSite(ctx.config, p.site);
   const source: SearchSource = p.source ?? 'gsc';
   if (source !== 'gsc' && source !== 'bing') throw new SearchkeepError('bad_request', 'source must be "gsc" or "bing".');
+  const searchType: GscSearchType = p.searchType ?? 'web';
+  if (!GSC_SEARCH_TYPES.includes(searchType))
+    throw new SearchkeepError('bad_request', `searchType must be one of ${GSC_SEARCH_TYPES.join(', ')}.`);
+  if (searchType !== 'web' && source !== 'gsc')
+    throw new SearchkeepError('bad_request', 'searchType is a Search Console option; Bing reports web search only.');
   const notes: string[] = [];
+  if (searchType !== 'web' && !ctx.config.gsc.searchTypes.includes(searchType)) {
+    notes.push(`The ${searchType} search type is not synced (GSC_SEARCH_TYPES), so there is no data for it.`);
+  }
   const now = ctx.now ? ctx.now() : new Date();
   let end: string;
   if (p.end !== undefined) {
@@ -80,7 +99,7 @@ export async function resolve(ctx: AnalysisContext, p: CommonParams, defaults: {
       notes.push("No brand regex is configured (BRAND_REGEX or the site's brandRegex), so every query counts as non-brand.");
     }
   }
-  return { site, source, range, brand, limit: clampLimit(p.limit, defaults.limit ?? 50), notes };
+  return { site, source, searchType, range, brand, limit: clampLimit(p.limit, defaults.limit ?? 50), notes };
 }
 
 export function metrics(clicks: number, impressions: number, position: number | null): Metrics {

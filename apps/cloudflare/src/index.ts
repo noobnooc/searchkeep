@@ -18,6 +18,8 @@ import {
   findSite,
   geoFunnel,
   type GeoSortKey,
+  type GscSearchType,
+  indexCoverage,
   inspectUrl,
   listSitemaps,
   listSites,
@@ -29,6 +31,7 @@ import {
   runSync,
   safeMessage,
   SearchkeepError,
+  searchCrawlers,
   setupStatus,
   syncProgress,
   toIsoDate,
@@ -46,7 +49,7 @@ import {
 import { handleMcpRequest, mcpLockedResponse } from '@searchkeep/mcp';
 import { createBingClient } from '@searchkeep/source-bing';
 import { createCloudflareClient } from '@searchkeep/source-cloudflare';
-import { createGscClient } from '@searchkeep/source-gsc';
+import { createGscClient, createSitemapReader } from '@searchkeep/source-gsc';
 import { D1Store, ensureMigrated } from '@searchkeep/store-d1';
 import { Hono, type Context } from 'hono';
 import { authenticate, inspectAccess, readinessFor } from './auth/access.js';
@@ -82,6 +85,8 @@ export function buildClients(config: SearchkeepConfig, browser: BrowserFetch | n
       privateKey: config.gsc.privateKey,
       allowWrites: config.enableWrites,
     });
+    // The site's own sitemaps, for the index coverage snapshot.
+    clients.sitemaps = createSitemapReader();
   }
   if (config.bing.apiKey)
     clients.bing = createBingClient({
@@ -190,6 +195,7 @@ function q(c: C) {
       end: get('end'),
       days: num('days'),
       source: get('source') as 'gsc' | 'bing' | undefined,
+      searchType: get('searchType') as GscSearchType | undefined,
       brand: get('brand') as 'all' | 'brand' | 'non_brand' | undefined,
       limit: num('limit'),
     });
@@ -317,6 +323,7 @@ app.get(
         pageContains: x.get('pageContains'),
         country: x.get('country'),
         device: x.get('device'),
+        appearance: x.get('appearance'),
         orderBy: x.get('orderBy') as 'clicks' | undefined,
         order: x.get('order') as 'asc' | 'desc' | undefined,
       }),
@@ -400,6 +407,33 @@ app.get(
     return aiCrawlers(
       opsContext(c),
       x.strip({ ...x.common(), groupBy: x.list<CrawlerGroup>('groupBy'), crawler: x.get('crawler'), pathContains: x.get('pathContains') }),
+    );
+  }),
+);
+app.get(
+  '/api/search-crawlers',
+  handle((c) => {
+    const x = q(c);
+    return searchCrawlers(
+      opsContext(c),
+      x.strip({ ...x.common(), groupBy: x.list<CrawlerGroup>('groupBy'), crawler: x.get('crawler'), pathContains: x.get('pathContains') }),
+    );
+  }),
+);
+app.get(
+  '/api/index-coverage',
+  handle((c) => {
+    const x = q(c);
+    return indexCoverage(
+      opsContext(c),
+      x.strip({
+        site: x.get('site'),
+        coverageState: x.get('coverageState'),
+        verdict: x.get('verdict'),
+        richResultIssues: x.get('richResultIssues') === '1' || x.get('richResultIssues') === 'true' ? true : undefined,
+        changedDays: x.num('changedDays'),
+        limit: x.num('limit'),
+      }),
     );
   }),
 );

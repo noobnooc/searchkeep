@@ -7,8 +7,11 @@
 export type Source = 'gsc' | 'bing';
 export type Brand = 'all' | 'brand' | 'non_brand';
 export type ReadinessState = 'no_access' | 'oauth_disabled' | 'policy_too_broad' | 'ready';
-export type Dimension = 'date' | 'week' | 'month' | 'query' | 'page' | 'country' | 'device';
-export type CrawlerPurpose = 'training' | 'search' | 'user' | 'other';
+export type Dimension = 'date' | 'week' | 'month' | 'query' | 'page' | 'country' | 'device' | 'appearance';
+/** Search Console search types; discover and googleNews have pages only (no queries or positions). */
+export type SearchType = 'web' | 'image' | 'video' | 'news' | 'discover' | 'googleNews';
+/** AI crawlers: training, search, user, other. Search engine crawlers: search, media, ads, other. */
+export type CrawlerPurpose = 'training' | 'search' | 'user' | 'media' | 'ads' | 'other';
 export type CrawlerGroup = 'crawler' | 'operator' | 'purpose' | 'path' | 'status' | 'date';
 
 export interface DateRange {
@@ -51,7 +54,11 @@ export interface SiteSources {
   gsc: boolean;
   bing: boolean;
   aiCrawlers: boolean;
+  searchCrawlers?: boolean;
   webAnalytics: boolean;
+  indexCoverage?: boolean;
+  /** Query and page rows per country and device are synced (GSC_SEGMENT_SITES). */
+  segments?: boolean;
 }
 
 export interface SiteInfo {
@@ -80,6 +87,7 @@ export interface PerformanceRow extends Metrics {
   page?: string;
   country?: string;
   device?: string;
+  appearance?: string;
 }
 
 export interface CrawlerRow {
@@ -314,6 +322,51 @@ export interface SitemapsResponse {
   site: string;
   live: boolean;
   sitemaps: Sitemap[];
+  notes?: string[];
+}
+
+export interface IndexStatusRow {
+  url: string;
+  firstSeen?: string;
+  lastSeen?: string;
+  inspectedAt?: string;
+  verdict?: string;
+  coverageState?: string;
+  indexingState?: string;
+  pageFetchState?: string;
+  lastCrawlTime?: string;
+  googleCanonical?: string;
+  userCanonical?: string;
+  richResultsVerdict?: string;
+  richResultTypes?: string[];
+  richResultIssues?: Array<{ type: string; severity: string; message: string }>;
+  error?: string;
+  previousCoverageState?: string;
+  changedAt?: string;
+}
+
+export interface IndexCoverageResponse {
+  site: string;
+  totals: {
+    urls: number;
+    inspected: number;
+    indexed: number;
+    notIndexed: number;
+    pending: number;
+    errors: number;
+    oldestInspectedAt: string | null;
+    newestInspectedAt: string | null;
+  };
+  /** verdict: PASS, NEUTRAL, FAIL, PENDING (not inspected yet) or ERROR (inspection failed). */
+  states: Array<{ verdict: string; coverageState: string | null; urls: number }>;
+  richResults: {
+    verdicts: Array<{ verdict: string; urls: number }>;
+    types: Array<{ type: string; urls: number; urlsWithIssues: number }>;
+    issues: Array<{ type: string; severity: string; message: string; urls: number }>;
+  };
+  urls: IndexStatusRow[];
+  changes: Array<{ url: string; from: string | null; to: string | null; changedAt: string }>;
+  notes: string[];
 }
 
 export interface CrawlIssue {
@@ -378,7 +431,7 @@ export interface SetupStatusResponse {
 
 /** waiting: nothing synced yet · recent: latest days coming in · history: older days coming in · done. */
 export type SyncPhase = 'waiting' | 'recent' | 'history' | 'done';
-export type SyncDataset = 'gsc' | 'bing' | 'ai_crawlers' | 'web_analytics';
+export type SyncDataset = 'gsc' | 'bing' | 'ai_crawlers' | 'search_crawlers' | 'web_analytics';
 
 export interface DatasetProgress {
   dataset: SyncDataset;

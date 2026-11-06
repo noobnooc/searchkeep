@@ -46,6 +46,26 @@ const source: ToolParam = {
   description:
     '`gsc` (Google Search Console, daily) or `bing` (Bing Webmaster Tools, weekly; ranges are aligned to whole Monday–Sunday weeks). Defaults to `gsc`.',
 };
+const searchType: ToolParam = {
+  name: 'searchType',
+  type: '"web" | "image" | "video" | "news" | "discover" | "googleNews"',
+  description:
+    'Search Console search type: `web` (default), `image`, `video`, `news` (the News tab in Search), `discover` or `googleNews`. Discover and Google News report pages only, without queries or positions. GSC only.',
+};
+const crawlerParams = (example: string): ToolParam[] => [
+  site,
+  start,
+  end,
+  days(7),
+  {
+    name: 'groupBy',
+    type: 'Array<"crawler" | "operator" | "purpose" | "path" | "status" | "date">',
+    description: 'Up to three group-by dimensions. Defaults to `["crawler"]`.',
+  },
+  { name: 'crawler', type: 'string', description: `Only this crawler, e.g. \`${example}\`.` },
+  { name: 'pathContains', type: 'string', description: 'Case-insensitive substring filter on the path.' },
+  limit(50),
+];
 const brand: ToolParam = {
   name: 'brand',
   type: '"all" | "brand" | "non_brand"',
@@ -62,7 +82,7 @@ export const TOOLS: Tool[] = [
     name: 'list_sites',
     summary: 'Configured sites, their connected sources and stored date ranges.',
     description:
-      'Lists every configured site (added in the dashboard or the `SITES` secret) with the sources connected for it (GSC, Bing, Cloudflare AI crawlers, Web Analytics) and, for each dataset, the first and last date stored in D1. Start here.',
+      'Lists every configured site (added in the dashboard or the `SITES` secret) with the sources connected for it (GSC, Bing, Cloudflare AI and search engine crawlers, Web Analytics, index coverage, country × device segments) and, for each dataset, the first and last date stored in D1. Start here.',
     readOnly: true,
     params: [],
     example: 'Which sites are connected, and how far back does each one’s data go?',
@@ -71,7 +91,7 @@ export const TOOLS: Tool[] = [
     name: 'query_performance',
     summary: 'Clicks, impressions, CTR and position by any dimension.',
     description:
-      'The general-purpose search analytics query. Groups GSC or Bing data by up to three dimensions and filters by query, page, country or device. It reads the history stored in D1, so ranges older than 16 months work once you have kept them. `country` and `device` cannot be combined with `query`/`page` dimensions, their filters or a brand split, because Search Console stores them separately; Bing has no country or device data and reports queries and pages separately.',
+      'The general-purpose search analytics query. Groups GSC or Bing data by up to three dimensions and filters by query, page, country, device or search appearance. It reads the history stored in D1, so ranges older than 16 months work once you have kept them. Besides web search, GSC data covers image, video, News, Discover and Google News (`searchType`). `country` and `device` combine with `query` or `page` (not both) only for sites in `GSC_SEGMENT_SITES`, which also syncs those rows; otherwise Search Console stores them separately. `appearance` (rich results, videos, AMP, ...) combines only with `date`, `week` and `month`, as Search Console reports it on its own. Bing has no country, device or appearance data and reports queries and pages separately; its site totals take the position of its query rows.',
     readOnly: true,
     params: [
       site,
@@ -79,9 +99,10 @@ export const TOOLS: Tool[] = [
       end,
       days(28),
       source,
+      searchType,
       {
         name: 'dimensions',
-        type: 'Array<"date" | "week" | "month" | "query" | "page" | "country" | "device">',
+        type: 'Array<"date" | "week" | "month" | "query" | "page" | "country" | "device" | "appearance">',
         description: 'Up to three group-by dimensions. Omit for totals over the range.',
       },
       {
@@ -96,6 +117,12 @@ export const TOOLS: Tool[] = [
       },
       { name: 'country', type: 'string', description: 'ISO 3166-1 alpha-3 country code, as GSC reports it (e.g. `usa`).' },
       { name: 'device', type: '"DESKTOP" | "MOBILE" | "TABLET"', description: 'Device filter.' },
+      {
+        name: 'appearance',
+        type: 'string',
+        description:
+          'Only this search appearance, e.g. `VIDEO` or `REVIEW_SNIPPET` (group by `appearance` to list them). GSC web search only.',
+      },
       brand,
       {
         name: 'orderBy',
@@ -123,6 +150,7 @@ export const TOOLS: Tool[] = [
       end,
       days(28),
       source,
+      searchType,
       { name: 'dimension', type: '"query" | "page"', description: 'What to compare. Defaults to `query`.' },
       {
         name: 'compareStart',
@@ -147,6 +175,7 @@ export const TOOLS: Tool[] = [
       end,
       days(28),
       source,
+      searchType,
       { name: 'minPosition', type: 'number', description: 'Lower bound of average position. Defaults to 8.' },
       { name: 'maxPosition', type: 'number', description: 'Upper bound of average position. Defaults to 20.' },
       {
@@ -169,6 +198,7 @@ export const TOOLS: Tool[] = [
       start,
       end,
       days(28),
+      searchType,
       { name: 'minImpressions', type: 'number', description: 'Minimum impressions per query/page pair. Defaults to 10.' },
       {
         name: 'minShare',
@@ -191,6 +221,7 @@ export const TOOLS: Tool[] = [
       end,
       days(28),
       source,
+      searchType,
       {
         name: 'minImpressions',
         type: 'number',
@@ -218,6 +249,7 @@ export const TOOLS: Tool[] = [
       { name: 'minWeeklyClicks', type: 'number', description: 'Ignore pages below this many weekly clicks at their peak. Defaults to 5.' },
       { name: 'minDecline', type: 'number', description: 'Minimum decline from the peak (0.05–0.95). Defaults to 0.3.' },
       source,
+      searchType,
       brand,
       limit(25),
     ],
@@ -266,6 +298,39 @@ export const TOOLS: Tool[] = [
     example: 'Are any AI crawlers getting 4xx or 5xx responses from us?',
   },
   {
+    name: 'search_crawlers',
+    summary: 'Search engine crawler requests: Crawl stats, kept.',
+    description:
+      "Summarises requests from search engine crawlers (Googlebot and its image, video and news crawlers, Bingbot, YandexBot, Baiduspider, DuckDuckBot, Applebot and others) recorded by Cloudflare, classified by operator and purpose (`search`, `media`, `ads`, `other`). It is the closest thing to Search Console's Crawl stats report, which has no API: crawl volume per day, response codes and the most crawled pages, for as long as you keep them. Crawlers are matched by user agent; up to 2,000 page × status rows are kept per day and the rest is summed under `(other pages)`.",
+    readOnly: true,
+    params: crawlerParams('Googlebot'),
+    example: 'How often did Googlebot crawl us this week, and which pages returned 404?',
+  },
+  {
+    name: 'index_coverage',
+    summary: 'Indexed and not-indexed sitemap URLs, with reasons and rich results.',
+    description:
+      'Reads the index coverage snapshot the sync builds: the URLs of the sitemaps Search Console knows (up to 5,000 per site), inspected with the URL Inspection API in daily batches (`GSC_INSPECTIONS_PER_DAY`, default 200) and again about weekly. Returns how many are indexed, URL counts per coverage state (Crawled - currently not indexed, Soft 404, duplicates, ...), rich result (structured data) verdicts and issues, the URLs in a state, and coverage changes. It uses no quota itself.',
+    readOnly: true,
+    params: [
+      site,
+      {
+        name: 'coverageState',
+        type: 'string',
+        description: 'Only URLs whose coverage state contains this text, e.g. `crawled - currently not indexed`.',
+      },
+      {
+        name: 'verdict',
+        type: '"PASS" | "NEUTRAL" | "FAIL" | "PENDING" | "ERROR"',
+        description: '`PASS` = indexed, `NEUTRAL` = excluded, `FAIL` = error, `PENDING` = not inspected yet, `ERROR` = inspection failed.',
+      },
+      { name: 'richResultIssues', type: 'boolean', description: 'Only URLs with rich result issues.' },
+      { name: 'changedDays', type: 'number', description: 'List coverage changes of the last N days (1–365). Defaults to 7.' },
+      limit(50),
+    ],
+    example: 'Which of my pages are not indexed, and why?',
+  },
+  {
     name: 'inspect_url',
     summary: 'Live Google URL Inspection for one URL.',
     description:
@@ -280,7 +345,7 @@ export const TOOLS: Tool[] = [
     name: 'list_sitemaps',
     summary: 'Sitemaps known to Search Console, with status.',
     description:
-      'Lists the sitemaps Search Console knows for the property, with last submitted and downloaded times, pending state, errors, warnings and submitted vs indexed counts. By default it reads the snapshot the sync takes once a day.',
+      'Lists the sitemaps Search Console knows for the property, with last submitted and downloaded times, pending state, errors, warnings and submitted URL counts. Google no longer reports indexed counts per sitemap; `index_coverage` counts the indexed URLs instead. By default it reads the snapshot the sync takes once a day.',
     readOnly: true,
     params: [site, { name: 'live', type: 'boolean', description: '`true` refreshes the list from the Search Console API first.' }],
   },
@@ -399,6 +464,33 @@ export const SECRETS: Secret[] = [
       'Maximum outbound API calls per sync pass (5–900). Defaults to `35`, within the Workers Free limit of 50 outbound requests per invocation. On Workers Paid, `100` or more makes the first sync of many sites faster.',
     example: '100',
   },
+  {
+    name: 'GSC_SEARCH_TYPES',
+    required: 'optional',
+    description:
+      'Search Console search types synced besides web search, comma-separated: `image`, `video`, `news` (the News tab), `discover`, `googleNews`. Defaults to all five; `none` for none. A search type without traffic costs one call per 30 days.',
+    example: 'image,video,discover',
+  },
+  {
+    name: 'GSC_SEARCH_APPEARANCE',
+    required: 'optional',
+    description: 'Set to `false` to stop syncing search appearance (rich results, videos, AMP, ...). Defaults to `true`.',
+    example: 'false',
+  },
+  {
+    name: 'GSC_SEGMENT_SITES',
+    required: 'optional',
+    description:
+      'Site ids (comma-separated) or `all` whose top 1,000 queries and pages per day are also synced per country and device, for the last 3 months, so `query_performance` can combine them. Off by default because of the extra D1 writes.',
+    example: 'acme,docs',
+  },
+  {
+    name: 'GSC_INSPECTIONS_PER_DAY',
+    required: 'optional',
+    description:
+      'URL inspections per site and day for the index coverage snapshot (0–2,000; Google allows 2,000 per property and day, shared with `inspect_url`). Defaults to `200`; `0` turns index coverage off.',
+    example: '200',
+  },
 ];
 
 export const SITE_FIELDS: { name: string; required: boolean; description: string }[] = [
@@ -419,7 +511,7 @@ export const SITE_FIELDS: { name: string; required: boolean; description: string
     required: false,
     description: 'Site URL exactly as registered in Bing Webmaster Tools, e.g. `https://acme.com/`.',
   },
-  { name: 'cloudflareZoneId', required: false, description: 'Zone ID of the proxied zone. Enables AI crawler data.' },
+  { name: 'cloudflareZoneId', required: false, description: 'Zone ID of the proxied zone. Enables AI and search engine crawler data.' },
   {
     name: 'webAnalyticsSiteTag',
     required: false,

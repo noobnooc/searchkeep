@@ -26,6 +26,42 @@ Because users sync `main` at any time, the `Unreleased` section is always accura
 
 ### Added
 
+- Index coverage, kept (#24). Once a day the sync reads the URLs of the sitemaps Search Console
+  knows (up to 5,000 per site, only URLs inside the property; URLs no sitemap lists for a week are
+  dropped; large sitemap indexes are read over several passes) and inspects them with the URL
+  Inspection API in batches, never-inspected URLs first and each again after about a week, up to
+  `GSC_INSPECTIONS_PER_DAY` per site and day (default `200`; Google allows 2,000 per property and
+  day, shared with `inspect_url`). It uses only the calls a pass has left over, never makes a pass
+  `partial`, and reaching the quota stops it for the day without pausing Search Console. The new
+  `index_coverage` tool (and `GET /api/index-coverage`, the **Index coverage** card on **Technical**)
+  reports how many URLs are indexed, the URL counts per coverage state (Crawled - currently not
+  indexed, Soft 404, duplicates, ...), rich result (structured data) verdicts and issues, the URLs
+  in a state, and coverage changes. New table `index_status`.
+- Search engine crawlers (#24). Cloudflare's HTTP request analytics now also give Googlebot (and its
+  image, video and news crawlers), Bingbot, YandexBot, Baiduspider, DuckDuckBot, Applebot and other
+  search engine crawlers by day, crawler, path and status: the closest thing to Search Console's
+  Crawl stats report, which has no API. New tool `search_crawlers` (same parameters as
+  `ai_crawlers`), `GET /api/search-crawlers`, the **Search engine crawlers** card on **Technical**
+  and a `search_crawlers` dataset in the sync progress. Up to 2,000 path × status rows are kept per
+  site and day; requests to the other pages are summed under `(other pages)`. Uses the existing
+  Zone Analytics permission. New table `search_crawler_requests`.
+- Search Console search types and search appearance (#24). Image and video search, the News tab,
+  Discover and Google News are synced besides web search (`GSC_SEARCH_TYPES`, all by default;
+  Discover and Google News have pages only, without queries or positions), and so is web search's
+  search appearance (`GSC_SEARCH_APPEARANCE`, on by default), in two steps as Search Console
+  requires: the appearances of a range, then one daily series each. `query_performance`,
+  `compare_periods`, `find_quick_wins`, `find_cannibalization`, `find_ctr_anomalies` and
+  `find_content_decay` take a `searchType` parameter; `query_performance` groups and filters by
+  `appearance`. The dashboard's **Performance** page has a search type menu and an **Appearance**
+  breakdown. Each of these datasets keeps its own cursors, so existing deployments backfill them
+  without re-pulling web search; a search type without traffic costs one call per 30 days. New table
+  `search_appearances`.
+- Queries and pages by country and device, opt-in (#24). For the sites in `GSC_SEGMENT_SITES` (site
+  ids or `all`; off by default because of the extra D1 writes) the top 1,000 queries and pages per
+  day are also synced per country and device, for the last 3 months, so `query_performance` can
+  combine `country`/`device` with `query` or `page` ("top queries in the US"). The **Performance**
+  page shows country and device filters for those sites. New table `search_segments`.
+
 - Bing data through Cloudflare Browser Run. Bing's Webmaster API refuses the egress IPs of Workers
   (`ThrottleIP`), often for days, so Bing never synced on many deployments. When a direct call gets
   `ThrottleIP`, the Bing calls of that run now go through Browser Run, whose IPs Bing accepts. One
@@ -50,6 +86,13 @@ Because users sync `main` at any time, the `Unreleased` section is always accura
   `bad_request` error instead of an unsorted list.
 
 ### Changed
+
+- Bing site totals have an average position (#24). Bing reports none for them, so they now take the
+  impression-weighted position of Bing's query rows (by day, week and month too); query and page
+  rows keep their own positions.
+- `list_sitemaps` returns `indexed: null` instead of `0`: Google's Sitemaps API no longer fills it
+  ("Deprecated; do not use"). Use `index_coverage` instead. The dashboard's sitemap table drops the
+  Indexed column.
 
 - Much faster first sync: one request now covers many days. Search Console and Cloudflare answer
   for a date range with one row per day, so a request covers up to 30 days of Search Console (totals,
