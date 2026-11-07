@@ -117,3 +117,31 @@ function defaultDescribe(status: number, body: string): string {
   }
   return `HTTP ${status}`;
 }
+
+/** Up to `max` bytes of a stream; `truncated` when there was more. */
+export async function readCapped(stream: ReadableStream<Uint8Array>, max: number): Promise<{ bytes: Uint8Array; truncated: boolean }> {
+  const reader = stream.getReader();
+  const parts: Uint8Array[] = [];
+  let size = 0;
+  let truncated = false;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    if (size + value.byteLength > max) {
+      parts.push(value.subarray(0, max - size));
+      size = max;
+      truncated = true;
+      await reader.cancel().catch(() => undefined);
+      break;
+    }
+    parts.push(value);
+    size += value.byteLength;
+  }
+  const bytes = new Uint8Array(size);
+  let at = 0;
+  for (const p of parts) {
+    bytes.set(p, at);
+    at += p.byteLength;
+  }
+  return { bytes, truncated };
+}

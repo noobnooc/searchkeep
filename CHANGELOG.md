@@ -26,6 +26,12 @@ Because users sync `main` at any time, the `Unreleased` section is always accura
 
 ### Added
 
+- Site icons in the site switcher. Each site now shows its own icon instead of the first letter of
+  its domain. The new `GET /api/site-icon?site=<id>` reads it from the site itself, as
+  `Searchkeep icon reader`: the `apple-touch-icon` links on the home page, then
+  `/apple-touch-icon.png`, then the `icon` links, then `/favicon.ico`. Only URLs on the site's own
+  domain and its subdomains are read (redirects included), a response counts only if its bytes are an image, and no
+  third-party icon service is used. The letter remains when no icon loads.
 - Index coverage, kept (#24). Once a day the sync reads the URLs of the sitemaps Search Console
   knows (up to 5,000 per site, only URLs inside the property; URLs no sitemap lists for a week are
   dropped; large sitemap indexes are read over several passes) and inspects them with the URL

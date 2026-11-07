@@ -38,3 +38,15 @@ export function pageToUrl(page: string, domain: string): string {
   if (page.startsWith('//')) return `https:${page}`;
   return `https://${domain}${page}`;
 }
+
+/** Whether a URL may be fetched for a site: http(s) on the site's domain or one of its subdomains. */
+export function onSiteDomain(url: string, domain: string): boolean {
+  try {
+    const u = new URL(url);
+    const d = domain.toLowerCase().replace(/^www\./, '');
+    const host = u.hostname.toLowerCase();
+    return (u.protocol === 'https:' || u.protocol === 'http:') && (host === d || host.endsWith(`.${d}`));
+  } catch {
+    return false;
+  }
+}

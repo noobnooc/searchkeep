@@ -23,7 +23,7 @@ import {
   type SyncTaskResult,
   type UrlInspectionInput,
 } from '../types.js';
-import { normalizePage } from '../url.js';
+import { normalizePage, onSiteDomain } from '../url.js';
 import {
   activeBackoff,
   BING_DATASETS,
@@ -1212,18 +1212,6 @@ export function inPropertyScope(url: string, property: string): boolean {
     return host === d || host.endsWith(`.${d}`);
   }
   return url.toLowerCase().startsWith(property.toLowerCase());
-}
-
-/** Whether a sitemap URL may be fetched: http(s) on the site's domain or one of its subdomains. */
-function onSiteDomain(url: string, domain: string): boolean {
-  try {
-    const u = new URL(url);
-    const d = domain.toLowerCase().replace(/^www\./, '');
-    const host = u.hostname.toLowerCase();
-    return (u.protocol === 'https:' || u.protocol === 'http:') && (host === d || host.endsWith(`.${d}`));
-  } catch {
-    return false;
-  }
 }
 
 function inspectionInput(r: GscUrlInspection, inspectedAt: string): UrlInspectionInput {

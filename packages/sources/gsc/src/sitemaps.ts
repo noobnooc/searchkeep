@@ -4,7 +4,7 @@
  * sitemaps, and plain-text sitemaps list one URL per line. Gzipped files are
  * unpacked with DecompressionStream. Reads at most `maxBytes` per file.
  */
-import { SourceError, type SitemapContents, type SitemapReader } from '@searchkeep/core';
+import { readCapped, SourceError, type SitemapContents, type SitemapReader } from '@searchkeep/core';
 
 export interface SitemapReaderOptions {
   fetch?: typeof fetch;
@@ -48,34 +48,6 @@ export function parseSitemap(text: string): SitemapContents {
     if (isUrl(url)) locs.push(url);
   }
   return isIndex ? { urls: [], sitemaps: locs } : { urls: locs, sitemaps: [] };
-}
-
-/** Up to `max` bytes of a stream; `truncated` when there was more. */
-async function readCapped(stream: ReadableStream<Uint8Array>, max: number): Promise<{ bytes: Uint8Array; truncated: boolean }> {
-  const reader = stream.getReader();
-  const parts: Uint8Array[] = [];
-  let size = 0;
-  let truncated = false;
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    if (size + value.byteLength > max) {
-      parts.push(value.subarray(0, max - size));
-      size = max;
-      truncated = true;
-      await reader.cancel().catch(() => undefined);
-      break;
-    }
-    parts.push(value);
-    size += value.byteLength;
-  }
-  const bytes = new Uint8Array(size);
-  let at = 0;
-  for (const p of parts) {
-    bytes.set(p, at);
-    at += p.byteLength;
-  }
-  return { bytes, truncated };
 }
 
 export function createSitemapReader(opts: SitemapReaderOptions = {}): SitemapReader {
