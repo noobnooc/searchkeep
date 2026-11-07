@@ -443,4 +443,38 @@ describe('site icon', () => {
     const big = site({ 'https://acme.com/favicon.ico': () => new Response(new Uint8Array(2_000).map((_, i) => ICO[i] ?? 1)) });
     expect(await findSiteIcon('acme.com', { fetch: big.fetch, maxBytes: 1_000 })).toBeNull();
   });
+
+  it('drops off-domain links before limiting them, so an on-domain icon is still tried', async () => {
+    const s = site({
+      'https://acme.com/': () =>
+        new Response(
+          '<link rel="icon" href="https://a.example/1.svg"><link rel="icon" href="https://b.example/2.svg"><link rel="icon" href="/own.png">',
+        ),
+      'https://acme.com/own.png': () => new Response(PNG),
+    });
+    expect(await findSiteIcon('acme.com', { fetch: s.fetch })).toMatchObject({ url: 'https://acme.com/own.png' });
+    expect(s.fetched.some((u) => u.includes('.example/'))).toBe(false);
+  });
+
+  it('follows redirects only while they stay on the site domain', async () => {
+    const redirect = (to: string) => () => new Response(null, { status: 301, headers: { location: to } });
+    const s = site({
+      'https://acme.com/': redirect('https://www.acme.com/'),
+      'https://www.acme.com/': () => new Response('<link rel="apple-touch-icon" href="/touch.png">'),
+      'https://www.acme.com/touch.png': redirect('https://icons.example/acme.png'),
+      'https://acme.com/apple-touch-icon.png': redirect('/static/touch.png'),
+      'https://acme.com/static/touch.png': () => new Response(PNG),
+    });
+    expect(await findSiteIcon('acme.com', { fetch: s.fetch })).toMatchObject({
+      contentType: 'image/png',
+      url: 'https://acme.com/apple-touch-icon.png',
+    });
+    expect(s.fetched).toEqual([
+      'https://acme.com/',
+      'https://www.acme.com/',
+      'https://www.acme.com/touch.png',
+      'https://acme.com/apple-touch-icon.png',
+      'https://acme.com/static/touch.png',
+    ]);
+  });
 });

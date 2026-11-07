@@ -3,8 +3,8 @@
  * the `apple-touch-icon` links on the home page, the conventional
  * `/apple-touch-icon.png`, the `icon` links on the home page, then
  * `/favicon.ico`. Only URLs on the site's domain and its subdomains are
- * fetched, and a response counts only when its bytes are an image, so an HTML
- * "soft 404" is skipped.
+ * fetched, redirects included, and a response counts only when its bytes are
+ * an image, so an HTML "soft 404" is skipped.
  */
 import { readCapped } from './http.js';
 import { onSiteDomain } from './url.js';
@@ -39,6 +39,7 @@ const DEFAULT_MAX_BYTES = 512_000;
 const DEFAULT_TIMEOUT_MS = 8_000;
 /** Declared links tried per kind: when the best one fails, the smaller variants usually fail too. */
 const LINKS_PER_KIND = 2;
+const MAX_REDIRECTS = 5;
 const USER_AGENT = 'Searchkeep icon reader';
 
 const ENTITIES: Record<string, string> = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'" };
@@ -135,20 +136,30 @@ export function sniffImage(bytes: Uint8Array): string | null {
   return null;
 }
 
+/** GETs `url`, following redirects only while they stay on the site's domain and its subdomains. */
 async function read(
   f: typeof fetch,
+  domain: string,
   url: string,
   accept: string,
   max: number,
   signal: AbortSignal,
 ): Promise<{ url: string; bytes: Uint8Array; truncated: boolean } | null> {
   try {
-    const res = await f(url, { headers: { accept, 'user-agent': USER_AGENT }, redirect: 'follow', signal });
-    if (!res.ok || !res.body) {
-      res.body?.cancel().catch(() => undefined);
-      return null;
+    let current = url;
+    for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
+      if (!onSiteDomain(current, domain)) return null;
+      const res = await f(current, { headers: { accept, 'user-agent': USER_AGENT }, redirect: 'manual', signal });
+      const location = res.status >= 300 && res.status < 400 ? res.headers.get('location') : null;
+      if (location || !res.ok || !res.body) {
+        res.body?.cancel().catch(() => undefined);
+        if (!location) return null;
+        current = new URL(location, current).href;
+        continue;
+      }
+      return { url: current, ...(await readCapped(res.body, max)) };
     }
-    return { url: res.url || url, ...(await readCapped(res.body, max)) };
+    return null;
   } catch {
     // Network errors, timeouts and bot challenges all mean "no icon here".
     return null;
@@ -162,27 +173,27 @@ export async function findSiteIcon(domain: string, opts: SiteIconOptions = {}): 
   const signal = AbortSignal.timeout(opts.timeoutMs ?? DEFAULT_TIMEOUT_MS);
   const home = `https://${domain}/`;
 
-  const page = await read(f, home, 'text/html,application/xhtml+xml;q=0.9,*/*;q=0.5', HTML_BYTES, signal);
-  const links = page ? parseIconLinks(new TextDecoder().decode(page.bytes), page.url) : [];
+  const page = await read(f, domain, home, 'text/html,application/xhtml+xml;q=0.9,*/*;q=0.5', HTML_BYTES, signal);
+  // Off-domain links are dropped before the per-kind limit, so they never take an on-domain link's place.
+  const links = page ? parseIconLinks(new TextDecoder().decode(page.bytes), page.url).filter((l) => onSiteDomain(l.url, domain)) : [];
+  const declared = (kind: IconLink['kind']) =>
+    links
+      .filter((l) => l.kind === kind)
+      .slice(0, LINKS_PER_KIND)
+      .map((l) => l.url);
   const candidates = [
-    ...links
-      .filter((l) => l.kind === 'apple-touch-icon')
-      .slice(0, LINKS_PER_KIND)
-      .map((l) => l.url),
+    ...declared('apple-touch-icon'),
     new URL('/apple-touch-icon.png', home).href,
-    ...links
-      .filter((l) => l.kind === 'icon')
-      .slice(0, LINKS_PER_KIND)
-      .map((l) => l.url),
+    ...declared('icon'),
     new URL('/favicon.ico', home).href,
   ];
 
   const tried = new Set<string>();
   for (const url of candidates) {
     if (signal.aborted) break;
-    if (tried.has(url) || !onSiteDomain(url, domain)) continue;
+    if (tried.has(url)) continue;
     tried.add(url);
-    const icon = await read(f, url, 'image/avif,image/webp,image/svg+xml,image/*;q=0.9,*/*;q=0.5', max, signal);
+    const icon = await read(f, domain, url, 'image/avif,image/webp,image/svg+xml,image/*;q=0.9,*/*;q=0.5', max, signal);
     if (!icon || icon.truncated || icon.bytes.byteLength === 0) continue;
     const contentType = sniffImage(icon.bytes);
     if (contentType) return { contentType, body: icon.bytes, url };
