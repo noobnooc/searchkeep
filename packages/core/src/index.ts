@@ -19,3 +19,4 @@ export * from './analysis/geo.js';
 export * from './analysis/ops.js';
 export * from './http.js';
 export * from './import.js';
+export * from './site-icon.js';

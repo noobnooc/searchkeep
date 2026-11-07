@@ -9,6 +9,7 @@ import {
   segmentsEnabled,
   clearJwksCache,
   evaluateReadiness,
+  findSiteIcon,
   geoFunnel,
   isRateLimited,
   loadConfig,
@@ -16,10 +17,12 @@ import {
   normalizePage,
   OidcVerifier,
   parseAiCitationsCsv,
+  parseIconLinks,
   parseRetryAfter,
   requestJson,
   safeMessage,
   SearchkeepError,
+  sniffImage,
   validateSite,
   weekStart,
   withStoredSites,
@@ -349,5 +352,95 @@ describe('geoFunnel', () => {
 
   it('rejects an unknown sort key', async () => {
     await expect(geoFunnel(ctx, { ...range, sortBy: 'position' as 'crawled' })).rejects.toBeInstanceOf(SearchkeepError);
+  });
+});
+
+describe('site icon', () => {
+  const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13]);
+  const ICO = new Uint8Array([0, 0, 1, 0, 1, 0, 16, 16]);
+
+  it('ranks declared icons: apple-touch-icon first, then SVG and the largest, links with media last', () => {
+    const html = `<!doctype html><head>
+      <!-- <link rel="apple-touch-icon" href="/commented.png"> -->
+      <link rel="icon" href="/favicon-16.png" sizes="16x16">
+      <link rel="mask-icon" href="/pinned.svg" color="#000">
+      <link rel="icon" href="/dark.svg" media="(prefers-color-scheme: dark)">
+      <LINK REL="Shortcut Icon" HREF='/favicon.ico'>
+      <link href="/icon.svg" rel="icon" type="image/svg+xml" />
+      <link rel="icon" href="data:image/svg+xml,%3Csvg%3E">
+      <link rel="apple-touch-icon" href="/apple-120.png" sizes="120x120">
+      <link rel="apple-touch-icon" href="https://cdn.acme.com/apple.png?v=1&amp;x=2">
+      <script>document.write('<link rel="icon" href="/script.png">')</script>
+    </head>`;
+    expect(parseIconLinks(html, 'https://www.acme.com/').map((l) => [l.kind, l.url])).toEqual([
+      ['apple-touch-icon', 'https://cdn.acme.com/apple.png?v=1&x=2'],
+      ['apple-touch-icon', 'https://www.acme.com/apple-120.png'],
+      ['icon', 'https://www.acme.com/icon.svg'],
+      ['icon', 'https://www.acme.com/favicon-16.png'],
+      ['icon', 'https://www.acme.com/favicon.ico'],
+      ['icon', 'https://www.acme.com/dark.svg'],
+    ]);
+  });
+
+  it('recognizes images by their bytes, not by an HTML page', () => {
+    const text = (s: string) => new TextEncoder().encode(s);
+    expect(sniffImage(PNG)).toBe('image/png');
+    expect(sniffImage(ICO)).toBe('image/x-icon');
+    expect(sniffImage(text('GIF89a'))).toBe('image/gif');
+    expect(sniffImage(text('\uFEFF <?xml version="1.0"?>\n<svg xmlns="http://www.w3.org/2000/svg"></svg>'))).toBe('image/svg+xml');
+    expect(sniffImage(text('<!doctype html><title>Not found</title><svg></svg>'))).toBeNull();
+    expect(sniffImage(text('<html><body>404</body></html>'))).toBeNull();
+    expect(sniffImage(new Uint8Array())).toBeNull();
+  });
+
+  const site = (files: Record<string, () => Response>) => {
+    const fetched: string[] = [];
+    const fetchMock = (async (input: RequestInfo | URL) => {
+      const url = String(input);
+      fetched.push(url);
+      const file = files[url];
+      if (!file) return new Response('<!doctype html><title>Not found</title>', { status: 404, headers: { 'content-type': 'text/html' } });
+      return file();
+    }) as typeof fetch;
+    return { fetch: fetchMock, fetched };
+  };
+
+  it('uses the declared apple-touch-icon and skips URLs off the site domain', async () => {
+    const s = site({
+      'https://acme.com/': () =>
+        new Response(
+          '<link rel="apple-touch-icon" href="https://elsewhere.net/a.png"><link rel="apple-touch-icon" href="/touch.png"><link rel="icon" href="/i.svg">',
+        ),
+      'https://acme.com/touch.png': () => new Response(PNG, { headers: { 'content-type': 'application/octet-stream' } }),
+    });
+    const icon = await findSiteIcon('acme.com', { fetch: s.fetch });
+    expect(icon).toMatchObject({ contentType: 'image/png', url: 'https://acme.com/touch.png' });
+    expect(s.fetched).toEqual(['https://acme.com/', 'https://acme.com/touch.png']);
+  });
+
+  it('falls back from soft 404s to the conventional locations, and to null', async () => {
+    const soft404 = () => new Response('<!doctype html><title>Home</title>', { headers: { 'content-type': 'image/png' } });
+    const s = site({
+      'https://acme.com/': () => new Response('<link rel="icon" href="/missing.png">'),
+      'https://acme.com/apple-touch-icon.png': soft404,
+      'https://acme.com/favicon.ico': () => new Response(ICO),
+    });
+    expect(await findSiteIcon('acme.com', { fetch: s.fetch })).toMatchObject({
+      contentType: 'image/x-icon',
+      url: 'https://acme.com/favicon.ico',
+    });
+    expect(s.fetched).toEqual([
+      'https://acme.com/',
+      'https://acme.com/apple-touch-icon.png',
+      'https://acme.com/missing.png',
+      'https://acme.com/favicon.ico',
+    ]);
+
+    const down = (async () => {
+      throw new TypeError('network down');
+    }) as typeof fetch;
+    expect(await findSiteIcon('acme.com', { fetch: down })).toBeNull();
+    const big = site({ 'https://acme.com/favicon.ico': () => new Response(new Uint8Array(2_000).map((_, i) => ICO[i] ?? 1)) });
+    expect(await findSiteIcon('acme.com', { fetch: big.fetch, maxBytes: 1_000 })).toBeNull();
   });
 });

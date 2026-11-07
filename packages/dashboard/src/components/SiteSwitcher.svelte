@@ -2,19 +2,16 @@
   import { dismissable } from '../lib/dismiss';
   import { ui } from '../lib/state.svelte';
   import Icon from './Icon.svelte';
+  import SiteIcon from './SiteIcon.svelte';
 
   let open = $state(false);
   const site = $derived(ui.site);
   const multiple = $derived(ui.sites.length > 1);
-
-  function initial(domain: string): string {
-    return domain.replace(/^www\./, '').charAt(0).toUpperCase() || '?';
-  }
 </script>
 
 <div class="switcher" {@attach dismissable(() => open, () => (open = false))}>
   <button class="trigger" aria-haspopup="listbox" aria-expanded={open} disabled={!multiple} onclick={() => (open = !open)} title={multiple ? 'Switch site' : undefined}>
-    <span class="avatar" aria-hidden="true">{site ? initial(site.domain) : '?'}</span>
+    <SiteIcon {site} />
     <span class="names">
       <span class="domain truncate">{site?.domain ?? 'No site configured'}</span>
       {#if site}<span class="id truncate">{site.id}</span>{/if}
@@ -32,7 +29,7 @@
               ui.setSite(s.id);
               open = false;
             }}>
-            <span class="avatar sm" aria-hidden="true">{initial(s.domain)}</span>
+            <SiteIcon site={s} small />
             <span class="names">
               <span class="domain truncate">{s.domain}</span>
               <span class="id truncate">{s.id}</span>
@@ -72,26 +69,6 @@
   .trigger :global(.chev) {
     color: var(--text-3);
     margin-left: auto;
-  }
-  .avatar {
-    width: 26px;
-    height: 26px;
-    border-radius: 7px;
-    display: grid;
-    place-items: center;
-    font-family: var(--mono);
-    font-size: 12px;
-    font-weight: 500;
-    color: var(--text);
-    background: var(--surface-3);
-    border: 1px solid var(--border-2);
-    flex: none;
-  }
-  .avatar.sm {
-    width: 22px;
-    height: 22px;
-    font-size: 11px;
-    border-radius: 6px;
   }
   .names {
     display: flex;

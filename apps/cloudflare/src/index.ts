@@ -16,6 +16,7 @@ import {
   findCtrAnomalies,
   findQuickWins,
   findSite,
+  findSiteIcon,
   geoFunnel,
   type GeoSortKey,
   type GscSearchType,
@@ -306,6 +307,25 @@ app.get(
   '/api/sites',
   handle((c) => listSites(opsContext(c))),
 );
+// The site's own icon for the site switcher, read from the site itself (never from a third-party icon service).
+app.get('/api/site-icon', async (c) => {
+  try {
+    const site = findSite(c.get('config'), q(c).get('site'));
+    const icon = await findSiteIcon(site.domain);
+    if (!icon) {
+      c.header('cache-control', 'private, max-age=3600');
+      return c.json({ error: `No icon found on ${site.domain}.`, code: 'not_found' }, 404);
+    }
+    return c.body(icon.body as Uint8Array<ArrayBuffer>, 200, {
+      'content-type': icon.contentType,
+      'cache-control': 'private, max-age=86400',
+      // An SVG icon opened directly must not run scripts on the dashboard's origin.
+      'content-security-policy': "default-src 'none'; style-src 'unsafe-inline'; sandbox",
+    });
+  } catch (err) {
+    return errorResponse(c, err);
+  }
+});
 app.get(
   '/api/overview',
   handle((c) => overview(opsContext(c), q(c).common())),

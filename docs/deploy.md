@@ -977,6 +977,22 @@ imported and skipped.
 **Verify:** `index_coverage` reports `totals.urls` greater than 0 the day after a sitemap is listed,
 and `totals.inspected` grows each day.
 
+### A site shows a letter instead of its icon
+
+**Who:** Agent or human.
+
+- The site switcher shows each site's own icon, which the Worker reads from the site itself as
+  `Searchkeep icon reader`: the `apple-touch-icon` links on the home page, then
+  `/apple-touch-icon.png`, then the `icon` links, then `/favicon.ico`. Only URLs on the site's own
+  domain and its subdomains are read, and no third-party icon service is used.
+- The first letter of the domain is shown when none of these loads as an image: the site has no
+  icon, the icon is on another domain, or a bot protection (Bot Fight Mode, a WAF rule, a challenge)
+  blocks the reader. Allow that user agent for the home page and the icon paths, or exempt them.
+- Browsers keep the icon for a day, and the "no icon" answer for an hour.
+
+**Verify:** `cloudflared access curl "https://<your-domain>/api/site-icon?site=<id>" -o icon` saves
+an image (HTTP 200); a 404 means no icon was found.
+
 ### Sync is slow or units are skipped
 
 - Open **Settings** → **Sync progress** in the dashboard (or `setup_status` → `syncProgress`): it

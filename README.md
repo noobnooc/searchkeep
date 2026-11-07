@@ -153,7 +153,9 @@ The JSON API mirrors the tools: `/api/sites`, `/api/overview`, `/api/performance
 `/api/geo-funnel`, `/api/ai-crawlers`, `/api/ai-referrals`, `/api/web-vitals`, `/api/crawl-issues`,
 `/api/sitemaps`, `POST /api/inspect`, `/api/setup-status`, `/api/sync-progress`, `/api/sync-runs`,
 `POST /api/sync` and
-`POST /api/import/ai-citations`. Query parameters use the same names as the MCP tools. Without a
+`POST /api/import/ai-citations`. Query parameters use the same names as the MCP tools.
+`/api/site-icon?site=<id>` returns the site's own icon for the site switcher, read from the site
+itself (its apple-touch-icon, icon or `/favicon.ico`), never from a third-party icon service. Without a
 valid Access JWT, `/api/*` returns 403 `{"code":"locked","state":"no_access",...}` and `/mcp`
 returns a JSON-RPC error.
 
