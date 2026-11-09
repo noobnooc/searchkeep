@@ -587,7 +587,10 @@ app.post(
       await ctx.store.syncSites(ctx.config.sites);
       seeded += await seedDemo(ctx.store, site.id, site.domain);
     }
-    for (const a of appId ? [findApp(ctx.config, appId)] : ctx.config.apps) seeded += await seedAppDemo(ctx.store, a);
+    for (const a of appId ? [findApp(ctx.config, appId)] : ctx.config.apps) {
+      const site = ctx.config.sites.find((s) => s.id === a.siteId);
+      seeded += await seedAppDemo(ctx.store, a, site?.domain);
+    }
     return { seeded };
   }),
 );

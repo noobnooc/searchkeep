@@ -7,10 +7,14 @@
   import Shell from './components/Shell.svelte';
   import { ApiError, apiUrl, onLocked, request } from './lib/api';
   import { refreshAll } from './lib/resource.svelte';
-  import { href, router } from './lib/router.svelte';
+  import { APP_VIEWS, href, router } from './lib/router.svelte';
   import { ui } from './lib/state.svelte';
   import { syncWatch } from './lib/sync.svelte';
-  import type { SitesResponse, StatusResponse } from './lib/types';
+  import type { AppsResponse, SitesResponse, StatusResponse } from './lib/types';
+  import AppAcquisition from './views/AppAcquisition.svelte';
+  import AppOverview from './views/AppOverview.svelte';
+  import AppReviews from './views/AppReviews.svelte';
+  import AppStability from './views/AppStability.svelte';
   import AiCrawlers from './views/AiCrawlers.svelte';
   import AiReferrals from './views/AiReferrals.svelte';
   import Compare from './views/Compare.svelte';
@@ -26,9 +30,11 @@
   let checking = $state(false);
 
   async function loadSites() {
-    const res = await request<SitesResponse>('/api/sites');
-    ui.setSites(res.sites);
+    const [sites, apps] = await Promise.all([request<SitesResponse>('/api/sites'), request<AppsResponse>('/api/apps')]);
+    ui.setSites(sites.sites);
+    ui.setApps(apps.apps);
   }
+  const appArea = $derived(APP_VIEWS.includes(router.view));
 
   async function boot(refresh = false) {
     checking = true;
@@ -81,6 +87,10 @@
     'ai-referrals': 'AI referrals',
     technical: 'Technical',
     settings: 'Settings',
+    'app-overview': 'App overview',
+    'app-acquisition': 'Acquisition',
+    'app-reviews': 'Ratings & reviews',
+    'app-stability': 'Stability',
   };
   $effect(() => {
     document.title = phase === 'locked' ? 'Locked · Searchkeep' : `${VIEW_TITLES[router.view] ?? 'Searchkeep'} · Searchkeep`;
@@ -103,7 +113,26 @@
   <Locked status={ui.status} {checking} onrecheck={() => boot(true)} />
 {:else}
   <Shell>
-    {#if ui.sites.length === 0 && router.view !== 'settings'}
+    {#if appArea && ui.apps.length === 0}
+      <EmptyState title="Add your first app" icon="plus">
+        <p>The App Store Apple ID, the Google Play package name, or both. Its store data stays apart from your sites.</p>
+        {#snippet actions()}
+          <a class="btn primary" href={href('settings', 'apps')}><Icon name="plus" size={14} /> Add an app</a>
+        {/snippet}
+      </EmptyState>
+    {:else if appArea}
+      {#key ui.appId}
+        {#if router.view === 'app-overview'}
+          <AppOverview />
+        {:else if router.view === 'app-acquisition'}
+          <AppAcquisition />
+        {:else if router.view === 'app-reviews'}
+          <AppReviews />
+        {:else if router.view === 'app-stability'}
+          <AppStability />
+        {/if}
+      {/key}
+    {:else if ui.sites.length === 0 && router.view !== 'settings'}
       <EmptyState title="Add your first site" icon="globe">
         <p>Just the domain. Connect sources in the same form.</p>
         {#snippet actions()}

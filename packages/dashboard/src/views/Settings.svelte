@@ -9,6 +9,7 @@
   import PageHeader from '../components/PageHeader.svelte';
   import Pill from '../components/Pill.svelte';
   import Segmented from '../components/Segmented.svelte';
+  import AppsManager from '../components/AppsManager.svelte';
   import SitesManager from '../components/SitesManager.svelte';
   import Skeleton from '../components/Skeleton.svelte';
   import SyncProgressCard from '../components/SyncProgressCard.svelte';
@@ -162,6 +163,8 @@
 
 <div class="stack">
   <SitesManager {reloadSites} />
+
+  <AppsManager {reloadSites} />
 
   <SyncProgressCard />
 

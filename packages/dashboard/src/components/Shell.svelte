@@ -1,9 +1,11 @@
 <script lang="ts">
   import type { Snippet } from 'svelte';
-  import { href, router, type ViewId } from '../lib/router.svelte';
+  import { APP_VIEWS, href, navigate, router, type ViewId } from '../lib/router.svelte';
   import { effectiveTheme, ui } from '../lib/state.svelte';
+  import AppSwitcher from './AppSwitcher.svelte';
   import Icon, { type IconName } from './Icon.svelte';
   import Logo from './Logo.svelte';
+  import Segmented from './Segmented.svelte';
   import SiteSwitcher from './SiteSwitcher.svelte';
   import SyncBanner from './SyncBanner.svelte';
   import SyncStatus from './SyncStatus.svelte';
@@ -46,6 +48,35 @@
     },
   ];
 
+  /** The Apps area (ADR 0009): app store data, kept apart from the sites. */
+  const APP_NAV: Array<{ heading?: string; items: NavItem[] }> = [
+    { items: [{ view: 'app-overview', label: 'Overview', icon: 'overview' }] },
+    {
+      heading: 'Store',
+      items: [
+        { view: 'app-acquisition', label: 'Acquisition', icon: 'search' },
+        { view: 'app-reviews', label: 'Ratings & reviews', icon: 'sparkle' },
+        { view: 'app-stability', label: 'Stability', icon: 'shield' },
+      ],
+    },
+  ];
+  type Mode = 'sites' | 'apps';
+  // Settings belongs to both areas: it keeps the area you came from.
+  let lastMode = $state<Mode>(APP_VIEWS.includes(router.view) ? 'apps' : 'sites');
+  $effect(() => {
+    if (router.view !== 'settings') lastMode = APP_VIEWS.includes(router.view) ? 'apps' : 'sites';
+  });
+  const mode = $derived<Mode>(router.view === 'settings' ? lastMode : APP_VIEWS.includes(router.view) ? 'apps' : 'sites');
+  const nav = $derived(mode === 'apps' ? APP_NAV : NAV);
+  const MODES: Array<{ value: Mode; label: string }> = [
+    { value: 'sites', label: 'Sites' },
+    { value: 'apps', label: 'Apps' },
+  ];
+  function setMode(m: Mode) {
+    lastMode = m;
+    navigate(m === 'apps' ? 'app-overview' : 'overview');
+  }
+
   let menuOpen = $state(false);
   let themeTick = $state(0);
   const theme = $derived((void themeTick, void ui.theme, effectiveTheme()));
@@ -86,9 +117,14 @@
   const noData = $derived(Boolean(ui.site && !ui.site.data.some((d) => d.lastDate)));
 </script>
 
-{#snippet nav()}
+{#snippet switcher()}
+  <div class="mode"><Segmented label="Area" options={MODES} value={mode} onchange={setMode} size="sm" /></div>
+  {#if mode === 'apps'}<AppSwitcher />{:else}<SiteSwitcher />{/if}
+{/snippet}
+
+{#snippet navList()}
   <nav aria-label="Main">
-    {#each NAV as group, gi (gi)}
+    {#each nav as group, gi (gi)}
       <div class="group">
         {#if group.heading}<div class="heading">{group.heading}</div>{/if}
         {#each group.items as item (item.view)}
@@ -124,8 +160,8 @@
   <div class="side-col">
     <aside class="side">
       <div class="brand"><a href={href('overview')} aria-label="Searchkeep overview"><Logo /></a></div>
-      <SiteSwitcher />
-      {@render nav()}
+      {@render switcher()}
+      {@render navList()}
       <div class="spacer"></div>
       {@render foot()}
     </aside>
@@ -144,15 +180,16 @@
   {#if menuOpen}
     <button class="scrim" aria-label="Close menu" tabindex="-1" onclick={() => (menuOpen = false)}></button>
     <div class="drawer" id="mobile-menu">
-      <SiteSwitcher />
-      {@render nav()}
+      {@render switcher()}
+      {@render navList()}
       {@render foot()}
     </div>
   {/if}
 
   <main class="main">
     <div class="content">
-      {#if router.view !== 'settings'}<SyncBanner />{/if}
+      <!-- The banner reports the selected site's first sync; the Apps area shows its own state. -->
+      {#if router.view !== 'settings' && mode === 'sites'}<SyncBanner />{/if}
       {@render children()}
     </div>
   </main>
@@ -181,6 +218,12 @@
   }
   .brand {
     padding: 4px 6px 2px;
+  }
+  .mode :global(.seg) {
+    width: 100%;
+  }
+  .mode :global(.seg button) {
+    flex: 1;
   }
   .brand a:hover {
     text-decoration: none;

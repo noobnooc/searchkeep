@@ -6,7 +6,7 @@
  */
 import { request } from './api';
 import { dateTime, shortDate } from './format';
-import type { DatasetProgress, SiteSyncProgress, SyncDataset, SyncProgressResponse } from './types';
+import type { AppSyncProgress, DatasetProgress, SiteSyncProgress, SyncDataset, SyncProgressResponse } from './types';
 
 const BUSY_MS = 60_000;
 const IDLE_MS = 15 * 60_000;
@@ -52,6 +52,10 @@ class SyncWatch {
     return this.progress?.sites.find((s) => s.siteId === id);
   }
 
+  app(id: string): AppSyncProgress | undefined {
+    return this.progress?.apps?.find((a) => a.appId === id);
+  }
+
   private schedule(): void {
     if (this.timer) clearTimeout(this.timer);
     const p = this.progress;
@@ -74,9 +78,19 @@ export const DATASET_LABEL: Record<SyncDataset, string> = {
   ai_crawlers: 'AI crawlers',
   search_crawlers: 'Search engine crawlers',
   web_analytics: 'Web Analytics',
+  app_store: 'App Store',
+  google_play: 'Google Play',
+  app_store_public: 'App Store public feeds',
 };
 
-export const SOURCE_LABEL: Record<string, string> = { gsc: 'Search Console', bing: 'Bing', cloudflare: 'Cloudflare' };
+export const SOURCE_LABEL: Record<string, string> = {
+  gsc: 'Search Console',
+  bing: 'Bing',
+  cloudflare: 'Cloudflare',
+  asc: 'App Store Connect',
+  play: 'Google Play',
+  appstore: 'App Store public feeds',
+};
 
 /** "at 14:30 UTC", "on Nov 6, 02:30 UTC", or "on the next run" once the time has passed. */
 export function when(iso: string | undefined, now = Date.now()): string {
@@ -104,7 +118,8 @@ export function pauseText(source: string, reason: string | undefined, until: str
 export function datasetLine(d: DatasetProgress): string {
   switch (d.state) {
     case 'error':
-      return `Failed; retrying ${when(d.retryAt)}`;
+      // An error without a retry time is something only the user can fix (e.g. start App Store reports).
+      return d.retryAt ? `Failed; retrying ${when(d.retryAt)}` : 'Needs your action';
     case 'paused':
       return ipBlocked(d.message) ? `Blocked by Bing, retrying ${when(d.retryAt)}` : `Paused, resumes ${when(d.retryAt)}`;
     case 'waiting':

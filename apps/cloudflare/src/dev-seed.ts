@@ -275,14 +275,14 @@ const REVIEWS: Array<[number, string, string]> = [
 ];
 
 /** Demo data for one app (both stores, as configured), for local development only. */
-export async function seedAppDemo(store: Store, app: AppConfig, today = toIsoDate(new Date())): Promise<number> {
+export async function seedAppDemo(store: Store, app: AppConfig, siteDomain = 'acme.com', today = toIsoDate(new Date())): Promise<number> {
   const r = rng(7);
   const days = 120;
   const end = addDays(today, -2);
   const dates = Array.from({ length: days }, (_, i) => addDays(end, -(days - 1 - i)));
   const trend = (i: number) => (0.7 + (0.5 * i) / days) * (1 + 0.25 * Math.sin(i / 5));
   let n = 0;
-  const domain = 'acme.com';
+  const domain = siteDomain.replace(/^www\./, '');
   if (app.appleId) {
     const rows: AppStoreDailyInput[] = [];
     const referrers: AppReferrerInput[] = [];

@@ -187,7 +187,11 @@ export async function appPerformance(ctx: OpsContext, p: AppPerformanceParams) {
         ...(p.referrerKind ? { kind: p.referrerKind } : {}),
         limit: r.limit,
       })
-    ).map((x) => ({ ...x, ownSite: x.kind === 'web' && own.some((d) => x.referrer === d || x.referrer.endsWith(`.${d}`)) }));
+    ).map((x) => {
+      // Websites, and UTM sources named after a domain, are the user's own when they match one of their sites.
+      const host = x.referrer.toLowerCase().replace(/^www\./, '');
+      return { ...x, ownSite: x.kind !== 'app' && own.some((d) => host === d || host.endsWith(`.${d}`)) };
+    });
   }
   const charts = r.store !== 'play' && r.app.appleId ? await latestCharts(ctx, r.app.id, r.range) : [];
   const notes = [...r.notes, ...stores.map((s) => STORE_NOTES[s])];

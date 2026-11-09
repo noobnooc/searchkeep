@@ -2,7 +2,7 @@
 import type { Params } from './api';
 import { addDays } from './format';
 import { load, save } from './storage';
-import type { Brand, SiteInfo, Source, StatusResponse } from './types';
+import type { AppInfo, Brand, SiteInfo, Source, StatusResponse } from './types';
 
 export type Preset = '7d' | '28d' | '90d' | '6m' | '12m' | '16m' | 'all' | 'custom';
 export type ThemePref = 'system' | 'light' | 'dark';
@@ -24,6 +24,9 @@ class UiState {
   status = $state.raw<StatusResponse | null>(null);
   sites = $state.raw<SiteInfo[]>([]);
   siteId = $state<string>(load('site', '', (v) => typeof v === 'string'));
+  /** Apps (ADR 0009). */
+  apps = $state.raw<AppInfo[]>([]);
+  appId = $state<string>(load('app', '', (v) => typeof v === 'string'));
   preset = $state<Preset>(load('range', '28d', (v) => typeof v === 'string' && PRESET_IDS.has(v)));
   customStart = $state<string>(load('customStart', '', isIso));
   customEnd = $state<string>(load('customEnd', '', isIso));
@@ -43,6 +46,34 @@ class UiState {
   setSite(id: string) {
     this.siteId = id;
     save('site', id);
+  }
+
+  get app(): AppInfo | undefined {
+    return this.apps.find((a) => a.id === this.appId);
+  }
+
+  setApps(apps: AppInfo[]) {
+    this.apps = apps;
+    if (!apps.some((a) => a.id === this.appId)) this.appId = apps[0]?.id ?? '';
+  }
+
+  setApp(id: string) {
+    this.appId = id;
+    save('app', id);
+  }
+
+  /** Query parameters for the selected range in the Apps area ("All time" as far back as stored). */
+  appRangeParams(): Params {
+    if (this.preset === 'custom' && this.customStart && this.customEnd) return { start: this.customStart, end: this.customEnd };
+    if (this.preset === 'all') {
+      const first = (this.app?.data ?? [])
+        .filter((d) => d.dataset === 'store' && d.firstDate)
+        .map((d) => d.firstDate!)
+        .sort()[0];
+      return first ? { start: first } : { days: 3660 };
+    }
+    const p = PRESETS.find((x) => x.id === this.preset) ?? PRESETS[1]!;
+    return { days: p.days };
   }
 
   setPreset(p: Exclude<Preset, 'custom'>) {

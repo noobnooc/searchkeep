@@ -560,7 +560,7 @@ export function appContract(name: string, makeStore: () => Promise<Store>): void
           activeDevices: 127,
         });
         expect(playPerf.referrers).toEqual([
-          { store: 'play', kind: 'utm', referrer: 'acme.com', pageViews: 5, downloads: 6, ownSite: false },
+          { store: 'play', kind: 'utm', referrer: 'acme.com', pageViews: 5, downloads: 6, ownSite: true },
         ]);
         const terms = await appSearchTerms(ctx, { app: APP.id, start: '2026-10-01', end: '2026-10-19', minVisitors: 5 });
         expect(terms.terms.map((t) => [t.term, t.visitors, t.acquisitions])).toEqual([

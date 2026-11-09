@@ -1,0 +1,198 @@
+<script lang="ts">
+  import BarList from '../components/BarList.svelte';
+  import Card from '../components/Card.svelte';
+  import DataTable from '../components/DataTable.svelte';
+  import EmptyState from '../components/EmptyState.svelte';
+  import ErrorBanner from '../components/ErrorBanner.svelte';
+  import Notes from '../components/Notes.svelte';
+  import PageHeader from '../components/PageHeader.svelte';
+  import Pill from '../components/Pill.svelte';
+  import Segmented from '../components/Segmented.svelte';
+  import Skeleton from '../components/Skeleton.svelte';
+  import { apiUrl } from '../lib/api';
+  import { sourceLabel, STORE_LABEL } from '../lib/apps';
+  import { deltaCompact, int, percent, rangeLabel } from '../lib/format';
+  import { resource } from '../lib/resource.svelte';
+  import { ui } from '../lib/state.svelte';
+  import type { Column } from '../lib/table';
+  import type { AppPerformanceResponse, AppReferrerRow, AppRow, AppSearchTerm, AppSearchTermsResponse, AppStore } from '../lib/types';
+
+  const app = $derived(ui.app);
+  const both = $derived(Boolean(app?.appleId && app?.playPackage));
+  let store = $state<AppStore | 'all'>('all');
+  const STORES: Array<{ value: AppStore | 'all'; label: string }> = [
+    { value: 'all', label: 'Both stores' },
+    { value: 'apple', label: 'App Store' },
+    { value: 'play', label: 'Google Play' },
+  ];
+  const params = () => ({ app: ui.appId, ...(store === 'all' ? {} : { store }), ...ui.appRangeParams() });
+  const bySource = resource<AppPerformanceResponse>(() => (ui.appId ? apiUrl('/api/app-performance', { ...params(), groupBy: 'store,source', limit: 100 }) : null));
+  const byTerritory = resource<AppPerformanceResponse>(() => (ui.appId ? apiUrl('/api/app-performance', { ...params(), groupBy: 'store,territory', limit: 200 }) : null));
+  const referrers = resource<AppPerformanceResponse>(() => (ui.appId ? apiUrl('/api/app-performance', { ...params(), groupBy: 'referrer', limit: 100 }) : null));
+  const terms = resource<AppSearchTermsResponse>(() =>
+    ui.appId && app?.playPackage && store !== 'apple' ? apiUrl('/api/app-search-terms', { app: ui.appId, ...ui.appRangeParams(), limit: 200 }) : null,
+  );
+
+  /** Page views as each store counts them: product page views (App Store), unique visitors (Google Play). */
+  const views = (r: AppRow) => (r.store === 'play' ? r.pageViewsUnique : r.pageViews);
+
+  const sourceGroups = $derived(
+    (['apple', 'play'] as const)
+      .map((s) => ({
+        store: s,
+        rows: (bySource.data?.rows ?? []).filter((r) => r.store === s && (r.downloads > 0 || views(r) > 0)).sort((a, b) => b.downloads - a.downloads),
+      }))
+      .filter((g) => g.rows.length > 0),
+  );
+
+  const maxViews = $derived(Math.max(1, ...(byTerritory.data?.rows ?? []).map(views)));
+  const territoryCols: Column<AppRow>[] = $derived([
+    { key: 'territory', label: 'Territory', grow: true, sortable: true },
+    ...(both ? [{ key: 'store', label: 'Store', sortable: true, text: (r: AppRow) => (r.store ? STORE_LABEL[r.store] : '') }] : []),
+    { key: 'views', label: 'Page views', align: 'right', sortable: true, sortValue: views, text: (r) => int(views(r)), bar: (r) => ({ value: views(r), max: maxViews }) },
+    { key: 'downloads', label: 'Downloads', align: 'right', sortable: true, text: (r) => int(r.downloads) },
+    { key: 'pageConversion', label: 'Conversion', align: 'right', sortable: true, text: (r) => percent(r.pageConversion), hideOnMobile: true },
+  ]);
+
+  const refCols: Column<AppReferrerRow>[] = $derived([
+    { key: 'referrer', label: 'Referrer', grow: true, sortable: true, render: refCell },
+    ...(both ? [{ key: 'store', label: 'Store', sortable: true, text: (r: AppReferrerRow) => STORE_LABEL[r.store] }] : []),
+    { key: 'pageViews', label: 'Page views', align: 'right', sortable: true, text: (r) => int(r.pageViews) },
+    { key: 'downloads', label: 'Downloads', align: 'right', sortable: true, text: (r) => int(r.downloads) },
+  ]);
+  const KIND: Record<AppReferrerRow['kind'], string> = { web: 'Website', app: 'App', utm: 'UTM source' };
+
+  const maxVisitors = $derived(Math.max(1, ...(terms.data?.terms ?? []).map((t) => t.visitors)));
+  const termCols: Column<AppSearchTerm>[] = $derived([
+    { key: 'term', label: 'Search term', grow: true, sortable: true },
+    { key: 'visitors', label: 'Visitors', align: 'right', sortable: true, text: (t) => int(t.visitors), bar: (t) => ({ value: t.visitors, max: maxVisitors }) },
+    { key: 'acquisitions', label: 'Acquisitions', align: 'right', sortable: true, text: (t) => int(t.acquisitions) },
+    { key: 'conversion', label: 'Conversion', align: 'right', sortable: true, text: (t) => percent(t.conversion) },
+    { key: 'visitorsChange', label: 'Change', align: 'right', sortable: true, text: (t) => deltaCompact(t.visitorsChange), hideOnMobile: true },
+  ]);
+</script>
+
+{#snippet refCell(r: AppReferrerRow)}
+  <span class="ref">
+    <span class="truncate">{r.referrer}</span>
+    <span class="kind">{KIND[r.kind]}</span>
+    {#if r.ownSite}<Pill tone="ok">Your site</Pill>{/if}
+  </span>
+{/snippet}
+
+<PageHeader title="Acquisition" description="Where people find the app" meta={bySource.data ? rangeLabel(bySource.data.range) : bySource.error ? null : undefined}>
+  {#snippet controls()}
+    {#if both}<Segmented label="Store" options={STORES} value={store} onchange={(v) => (store = v)} />{/if}
+  {/snippet}
+</PageHeader>
+
+{#if bySource.error}
+  <ErrorBanner error={bySource.error} retry={bySource.reload} />
+{:else}
+  <div class="stack">
+    <div class="grid-2 top">
+      <Card title="Sources" subtitle="Downloads by where people found the app" busy={bySource.loading && Boolean(bySource.data)}>
+        {#if !bySource.data}
+          <Skeleton kind="table" rows={5} />
+        {:else if sourceGroups.length === 0}
+          <EmptyState compact title="No store data in this range" icon="search" />
+        {:else}
+          {#each sourceGroups as g (g.store)}
+            {#if sourceGroups.length > 1}<h3 class="store">{STORE_LABEL[g.store]}</h3>{/if}
+            <BarList
+              label="{STORE_LABEL[g.store]} downloads by source"
+              items={g.rows.map((r) => ({ key: `${g.store}-${r.source}`, label: sourceLabel(r.source), value: r.downloads, meta: `${int(views(r))} page views · ${percent(r.pageConversion)}` }))} />
+          {/each}
+        {/if}
+      </Card>
+      <Card title="Territories" flush busy={byTerritory.loading && Boolean(byTerritory.data)}>
+        {#if byTerritory.error}
+          <div class="pad"><ErrorBanner error={byTerritory.error} retry={byTerritory.reload} /></div>
+        {:else if !byTerritory.data}
+          <div class="pad"><Skeleton kind="table" rows={6} /></div>
+        {:else if (byTerritory.data.rows ?? []).length === 0}
+          <EmptyState compact title="No store data in this range" icon="globe" />
+        {:else}
+          <DataTable label="Store funnel by territory" rows={byTerritory.data.rows ?? []} columns={territoryCols} sort={{ key: 'downloads', dir: 'desc' }} rowKey={(r) => `${r.store}-${r.territory}`} limit={10} />
+        {/if}
+      </Card>
+    </div>
+
+    <Card title="Referrers" subtitle="Websites, apps and UTM sources that sent people to the store page" flush busy={referrers.loading && Boolean(referrers.data)}>
+      {#if referrers.error}
+        <div class="pad"><ErrorBanner error={referrers.error} retry={referrers.reload} /></div>
+      {:else if !referrers.data}
+        <div class="pad"><Skeleton kind="table" rows={5} /></div>
+      {:else if (referrers.data.referrers ?? []).length === 0}
+        <EmptyState compact title="No referrers in this range" icon="referral">
+          <p>App Store referrers come from Apple's Detailed reports; Google Play lists the UTM sources of third-party referrals.</p>
+        </EmptyState>
+      {:else}
+        <DataTable label="Referrers" rows={referrers.data.referrers ?? []} columns={refCols} sort={{ key: 'downloads', dir: 'desc' }} rowKey={(r) => `${r.store}-${r.kind}-${r.referrer}`} limit={15} />
+      {/if}
+    </Card>
+
+    {#if app?.playPackage && store !== 'apple'}
+      <Card title="Google Play search terms" subtitle="Searches on Google Play that brought store listing visitors" flush busy={terms.loading && Boolean(terms.data)}>
+        {#if terms.error}
+          <div class="pad"><ErrorBanner error={terms.error} retry={terms.reload} /></div>
+        {:else if !terms.data}
+          <div class="pad"><Skeleton kind="table" rows={8} /></div>
+        {:else if terms.data.terms.length === 0}
+          <EmptyState compact title="No search terms in this range" icon="search" />
+        {:else}
+          {#if terms.data.lowConverting.length}
+            <div class="low">
+              <strong>Visited, but rarely installed:</strong>
+              {#each terms.data.lowConverting.slice(0, 8) as t (t.term)}<span class="chip">{t.term} <span class="muted num">{percent(t.conversion)}</span></span>{/each}
+            </div>
+          {/if}
+          <DataTable label="Google Play search terms" rows={terms.data.terms} columns={termCols} sort={{ key: 'visitors', dir: 'desc' }} rowKey={(t) => t.term} limit={20} />
+        {/if}
+        {#snippet footer()}<Notes notes={terms.data?.notes} />{/snippet}
+      </Card>
+    {/if}
+
+    <Notes notes={bySource.data?.notes} />
+  </div>
+{/if}
+
+<style>
+  .pad {
+    padding: 4px 16px 16px;
+  }
+  .store {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-3);
+    margin: 12px 0 6px;
+  }
+  .store:first-child {
+    margin-top: 0;
+  }
+  .ref {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+  }
+  .kind {
+    font-size: 11.5px;
+    color: var(--text-3);
+    flex: none;
+  }
+  .low {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 16px 12px;
+    font-size: 13px;
+  }
+  .chip {
+    padding: 2px 8px;
+    border-radius: 999px;
+    background: var(--surface-3);
+    font-size: 12px;
+  }
+</style>

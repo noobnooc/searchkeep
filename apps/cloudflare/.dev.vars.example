@@ -1,3 +1,5 @@
 # Copy to .dev.vars for `pnpm dev`. Never commit .dev.vars.
 SITES=[{"id":"demo","domain":"demo.example.com","gscProperty":"sc-domain:demo.example.com","cloudflareZoneId":"demo-zone","webAnalyticsSiteTag":"demo-tag"}]
 BRAND_REGEX=acme
+# Optional: a demo app for the Apps area (POST /api/dev/seed fills it with demo data).
+APPS=[{"id":"demo-app","name":"Demo App","appleId":"1234567890","playPackage":"com.example.demo","siteId":"demo"}]

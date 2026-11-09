@@ -431,11 +431,13 @@ export interface SetupStatusResponse {
 
 /** waiting: nothing synced yet · recent: latest days coming in · history: older days coming in · done. */
 export type SyncPhase = 'waiting' | 'recent' | 'history' | 'done';
-export type SyncDataset = 'gsc' | 'bing' | 'ai_crawlers' | 'search_crawlers' | 'web_analytics';
+export type SyncDataset =
+  'gsc' | 'bing' | 'ai_crawlers' | 'search_crawlers' | 'web_analytics' | 'app_store' | 'google_play' | 'app_store_public';
+export type SyncSource = 'gsc' | 'bing' | 'cloudflare' | 'asc' | 'play' | 'appstore';
 
 export interface DatasetProgress {
   dataset: SyncDataset;
-  source: 'gsc' | 'bing' | 'cloudflare';
+  source: SyncSource;
   state: 'waiting' | 'syncing' | 'paused' | 'error' | 'done';
   recent: boolean;
   complete: boolean;
@@ -454,11 +456,26 @@ export interface SiteSyncProgress {
   datasets: DatasetProgress[];
 }
 
+export interface AppSyncProgress {
+  appId: string;
+  name: string;
+  phase: SyncPhase;
+  datasets: DatasetProgress[];
+}
+
 export interface SyncProgressResponse {
   checkedAt: string;
   phase: SyncPhase;
-  summary: { sites: number; sitesWithRecentData: number; historyPercent: number; issues: number };
-  paused: Array<{ source: 'gsc' | 'bing' | 'cloudflare'; until: string; reason: string }>;
+  summary: {
+    sites: number;
+    sitesWithRecentData: number;
+    apps?: number;
+    appsWithRecentData?: number;
+    historyPercent: number;
+    issues: number;
+  };
+  paused: Array<{ source: SyncSource; until: string; reason: string }>;
+  apps?: AppSyncProgress[];
   writeBudget: { used: number; limit: number; reached: boolean };
   lastRun: { at: string; status: SyncRun['status']; rowsWritten: number; message?: string | null } | null;
   sites: SiteSyncProgress[];
@@ -518,4 +535,181 @@ export interface DiscoverResponse {
   bingSites: Discovery<{ url: string; verified: boolean }>;
   zones: Discovery<{ id: string; name: string }>;
   webAnalytics: Discovery<{ siteTag: string; host: string | null }>;
+}
+
+// ------------------------------------------------------------------------ apps
+
+export type AppStore = 'apple' | 'play';
+
+export interface AppStores {
+  appStore: boolean;
+  googlePlay: boolean;
+  appStorePublic: boolean;
+}
+
+export interface AppInfo {
+  id: string;
+  name: string;
+  appleId?: string;
+  playPackage?: string;
+  siteId?: string;
+  territories?: string[];
+  origin: 'secret' | 'dashboard';
+  stores: AppStores;
+  appStoreReports?: { started: boolean; stopped: boolean; snapshot: boolean; snapshotRequestedOn?: string; problem?: string };
+  data: Array<{ store: AppStore; dataset: string; firstDate: string | null; lastDate: string | null }>;
+}
+
+export interface AppsResponse {
+  apps: AppInfo[];
+}
+
+export interface AppMetrics {
+  impressions: number;
+  impressionsUnique: number;
+  pageViews: number;
+  pageViewsUnique: number;
+  downloads: number;
+  redownloads: number;
+  installs: number;
+  deletions: number;
+  activeDevices: number;
+  pageConversion: number | null;
+  impressionConversion: number | null;
+}
+
+export interface AppRow extends AppMetrics {
+  date?: string;
+  week?: string;
+  month?: string;
+  store?: AppStore;
+  territory?: string;
+  source?: string;
+}
+
+export interface AppReferrerRow {
+  store: AppStore;
+  kind: 'web' | 'app' | 'utm';
+  referrer: string;
+  pageViews: number;
+  downloads: number;
+  ownSite: boolean;
+}
+
+export interface AppChartRank {
+  date: string;
+  territory: string;
+  chart: string;
+  genre: string;
+  rank: number | null;
+}
+
+export interface AppPerformanceResponse {
+  app: string;
+  name: string;
+  range: DateRange;
+  previousRange: DateRange;
+  stores: Array<{ store: AppStore; current: AppMetrics; previous: AppMetrics; series: Array<AppMetrics & { date: string }> }>;
+  rows?: AppRow[];
+  referrers?: AppReferrerRow[];
+  charts?: AppChartRank[];
+  notes: string[];
+}
+
+export interface AppSearchTerm {
+  term: string;
+  visitors: number;
+  acquisitions: number;
+  conversion: number | null;
+  previousVisitors: number;
+  visitorsChange: number;
+}
+
+export interface AppSearchTermsResponse {
+  app: string;
+  range: DateRange;
+  previousRange: DateRange;
+  totals: { terms: number; visitors: number; acquisitions: number; conversion: number | null };
+  terms: AppSearchTerm[];
+  lowConverting: AppSearchTerm[];
+  notes: string[];
+}
+
+export interface AppReview {
+  store: AppStore;
+  id: string;
+  createdAt: string;
+  rating: number;
+  title: string | null;
+  body: string | null;
+  territory: string | null;
+  language: string | null;
+  version: string | null;
+  replied: boolean;
+}
+
+export interface AppReviewsResponse {
+  app: string;
+  range: DateRange;
+  summary: Array<{
+    store: AppStore;
+    reviews: number;
+    reviewAverage: number | null;
+    distribution: Record<string, number>;
+    rating: { date: string; territory: string; average: number | null; count: number | null } | null;
+    ratingSeries: Array<{ date: string; average: number | null; dailyAverage: number | null; count: number | null }>;
+  }>;
+  reviews: AppReview[];
+  notes: string[];
+}
+
+export interface AppVitalsRow {
+  store: AppStore;
+  date?: string;
+  version?: string;
+  crashRate: number | null;
+  userPerceivedCrashRate: number | null;
+  anrRate: number | null;
+  userPerceivedAnrRate: number | null;
+  distinctUsers: number | null;
+  crashes: number | null;
+  crashDevices: number | null;
+}
+
+export interface AppStabilityResponse {
+  app: string;
+  range: DateRange;
+  groupBy: 'date' | 'version';
+  summary: Array<Omit<AppVitalsRow, 'date' | 'version' | 'distinctUsers'>>;
+  rows: AppVitalsRow[];
+  notes: string[];
+}
+
+export interface AppConfig {
+  id: string;
+  name: string;
+  appleId?: string;
+  playPackage?: string;
+  siteId?: string;
+  territories?: string[];
+  origin?: 'secret' | 'dashboard';
+}
+
+export interface AppConfigsResponse {
+  apps: AppConfig[];
+}
+
+type Found<T> = { ok: true; items: T[] } | { ok: false; reason: string };
+
+export interface AppDiscoverResponse {
+  appStore: Found<{ id: string; name: string; bundleId: string }>;
+  googlePlay: Found<{ packageName: string; name: string }>;
+  sites: Array<{ id: string; domain: string }>;
+}
+
+export interface EnableAppStoreResponse {
+  app: string;
+  ongoing: { id: string; created: boolean };
+  snapshot: { id: string; created: boolean } | null;
+  notes: string[];
 }

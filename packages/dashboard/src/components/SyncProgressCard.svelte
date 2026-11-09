@@ -10,6 +10,9 @@
 
   const p = $derived(syncWatch.progress);
   const DATASETS: SyncDataset[] = ['gsc', 'bing', 'ai_crawlers', 'search_crawlers', 'web_analytics'];
+  const APP_DATASETS: SyncDataset[] = ['app_store', 'google_play', 'app_store_public'];
+  const apps = $derived((p?.apps ?? []).filter((a) => a.datasets.length > 0));
+  const appColumns = $derived(APP_DATASETS.filter((ds) => apps.some((a) => a.datasets.some((d) => d.dataset === ds))));
   const PHASE: Record<SyncPhase, { label: string; tone: 'ok' | 'warn' | 'neutral' | 'accent' }> = {
     waiting: { label: 'Waiting', tone: 'neutral' },
     recent: { label: 'Latest days', tone: 'accent' },
@@ -43,15 +46,24 @@
   {/snippet}
   {#if !p}
     <Skeleton kind="table" rows={4} />
-  {:else if p.sites.length === 0}
-    <p class="muted">No sites yet.</p>
+  {:else if p.sites.length === 0 && apps.length === 0}
+    <p class="muted">No sites or apps yet.</p>
   {:else}
     <div class="summary">
-      <div class="stat">
-        <span class="k">Latest days</span>
-        <span class="v num">{p.summary.sitesWithRecentData}<span class="of"> / {p.summary.sites} sites</span></span>
-        <ProgressBar value={(p.summary.sitesWithRecentData / p.summary.sites) * 100} tone={p.summary.sitesWithRecentData === p.summary.sites ? 'ok' : 'accent'} label="Sites with their latest days" />
-      </div>
+      {#if p.summary.sites > 0}
+        <div class="stat">
+          <span class="k">Latest days</span>
+          <span class="v num">{p.summary.sitesWithRecentData}<span class="of"> / {p.summary.sites} sites</span></span>
+          <ProgressBar value={(p.summary.sitesWithRecentData / p.summary.sites) * 100} tone={p.summary.sitesWithRecentData === p.summary.sites ? 'ok' : 'accent'} label="Sites with their latest days" />
+        </div>
+      {/if}
+      {#if apps.length > 0}
+        <div class="stat">
+          <span class="k">Apps</span>
+          <span class="v num">{p.summary.appsWithRecentData ?? 0}<span class="of"> / {apps.length} apps</span></span>
+          <ProgressBar value={((p.summary.appsWithRecentData ?? 0) / apps.length) * 100} tone={(p.summary.appsWithRecentData ?? 0) === apps.length ? 'ok' : 'accent'} label="Apps with their latest data" />
+        </div>
+      {/if}
       <div class="stat">
         <span class="k">History</span>
         <span class="v num">{Math.floor(p.summary.historyPercent)}<span class="of">%</span></span>
@@ -87,6 +99,7 @@
       </ul>
     {/if}
 
+    {#if p.sites.length > 0}
     <div class="table-wrap">
       <table aria-label="Sync progress per site">
         <thead>
@@ -119,6 +132,41 @@
         </tbody>
       </table>
     </div>
+    {/if}
+    {#if apps.length > 0}
+      <div class="table-wrap apps">
+        <table aria-label="Sync progress per app">
+          <thead>
+            <tr>
+              <th scope="col">App</th>
+              {#each appColumns as d (d)}<th scope="col">{DATASET_LABEL[d]}</th>{/each}
+            </tr>
+          </thead>
+          <tbody>
+            {#each apps as a (a.appId)}
+              <tr>
+                <th scope="row">
+                  <span class="domain truncate">{a.name}</span>
+                  <span class="phase {a.phase}">{PHASE[a.phase].label}</span>
+                </th>
+                {#each appColumns as ds (ds)}
+                  {@const d = a.datasets.find((x) => x.dataset === ds)}
+                  <td title={d?.message}>
+                    {#if d}
+                      <ProgressBar value={d.state === 'waiting' ? 0 : d.percent} tone={datasetTone(d)} label="{a.name} {DATASET_LABEL[ds]}" />
+                      <span class="line" class:err={d.state === 'error'} class:warn={d.state === 'paused'}>{datasetLine(d)}</span>
+                      {#if d.state === 'error' && d.message}<span class="msg">{d.message}</span>{/if}
+                    {:else}
+                      <span class="muted">Not connected</span>
+                    {/if}
+                  </td>
+                {/each}
+              </tr>
+            {/each}
+          </tbody>
+        </table>
+      </div>
+    {/if}
     {#if sites.length > LIMIT}
       <button class="btn ghost sm more" onclick={() => (expanded = !expanded)}>{expanded ? 'Show fewer' : `Show all ${sites.length} sites`}</button>
     {/if}
@@ -188,6 +236,9 @@
   }
   .notes .err :global(.icon) {
     color: var(--neg);
+  }
+  .table-wrap.apps {
+    margin-top: 16px;
   }
   .table-wrap {
     overflow-x: auto;

@@ -61,7 +61,12 @@ export function createPlayClient(opts: PlayClientOptions): PlayClient {
     const key = `${opts.clientEmail}|${PLAY_SCOPES}`;
     const cached = tokenCache.get(key);
     if (cached && cached.expiresAt > Date.now() + 60_000) return cached.token;
-    const assertion = await signServiceAccountJwt(opts.clientEmail, opts.privateKey, PLAY_SCOPES);
+    let assertion: string;
+    try {
+      assertion = await signServiceAccountJwt(opts.clientEmail, opts.privateKey, PLAY_SCOPES);
+    } catch {
+      throw new SourceError('play', 0, 'the service account key (PLAY_PRIVATE_KEY, or GSC_PRIVATE_KEY) could not be imported');
+    }
     const res = await f(TOKEN_URL, {
       method: 'POST',
       headers: { 'content-type': 'application/x-www-form-urlencoded' },
