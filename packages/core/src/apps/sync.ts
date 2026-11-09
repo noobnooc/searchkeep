@@ -250,7 +250,9 @@ function planAppStore(args: AppPlanArgs, app: AppConfig, asc: AscClient, place: 
       siteId,
       source: 'asc',
       backfill: kind === 'snapshot',
-      ...(kind === 'snapshot' ? { date: inst.processingDate } : {}),
+      // One date for every instance: history is sorted newest date first, and a stable sort keeps
+      // these in the oldest-first order they were planned in (a newer instance must win).
+      ...(kind === 'snapshot' ? { date: today } : {}),
       calls: 2,
       key: `${task}:${app.id}:${inst.id}`,
       run: async () => {

@@ -105,10 +105,13 @@ function keep<T extends { date: IsoDate }>(rows: Iterable<T>, before?: IsoDate |
 
 const datesOf = (rows: Array<{ date: IsoDate }>) => [...new Set(rows.map((r) => r.date))].sort();
 const oldestOf = (rows: Array<{ date: IsoDate }>) => (rows.length ? datesOf(rows)[0]! : null);
+/** The days a report covers (every row with a date, also the rows a collector does not keep), before `before`. */
+const coveredDays = (days: Set<IsoDate>, before?: IsoDate | null) => [...days].filter((d) => !before || d < before).sort();
 
 /** Store funnel rows keyed by day, territory and source. */
 class FunnelCollector implements ReportCollector {
   protected readonly rows = new Map<string, AppStoreDailyInput>();
+  protected readonly days = new Set<IsoDate>();
   protected readonly col = columns();
 
   constructor(
@@ -122,6 +125,7 @@ class FunnelCollector implements ReportCollector {
   add(row: DelimitedRow): void {
     const date = cellDate(this.col(row, 'date'));
     if (!date) return;
+    this.days.add(date);
     const values = this.read(row, this.col);
     if (!values) return;
     const { territory, source } = this.keys(row, this.col);
@@ -136,15 +140,12 @@ class FunnelCollector implements ReportCollector {
   }
 
   async write(store: Store, appId: string, before?: IsoDate | null): Promise<WriteResult> {
+    // Every day the file covers is replaced, also a day none of whose rows were kept: its old values go.
+    const dates = coveredDays(this.days, before);
+    if (dates.length === 0) return { written: 0, oldest: null };
     const rows = keep(this.rows.values(), before);
-    if (rows.length === 0) return { written: 0, oldest: null };
-    const written = await store.writeAppStoreDaily(appId, this.store, {
-      metrics: this.metrics,
-      shape: this.shape,
-      dates: datesOf(rows),
-      rows,
-    });
-    return { written, oldest: oldestOf(rows) };
+    const written = await store.writeAppStoreDaily(appId, this.store, { metrics: this.metrics, shape: this.shape, dates, rows });
+    return { written, oldest: dates[0]! };
   }
 }
 
@@ -208,6 +209,7 @@ export function installsCollector(): ReportCollector {
 /** Referring websites and apps from the Detailed reports (`Source Info`). */
 class ReferrerCollector implements ReportCollector {
   private readonly rows = new Map<string, AppReferrerInput>();
+  private readonly days = new Set<IsoDate>();
   private readonly col = columns();
 
   constructor(private readonly metric: 'pageViews' | 'downloads') {}
@@ -215,6 +217,7 @@ class ReferrerCollector implements ReportCollector {
   add(row: DelimitedRow): void {
     const date = cellDate(this.col(row, 'date'));
     if (!date) return;
+    this.days.add(date);
     const source = normalizeAppSource(this.col(row, 'source type'));
     if (source !== 'web_referrer' && source !== 'app_referrer') return;
     const info = this.col(row, 'source info').trim();
@@ -231,10 +234,15 @@ class ReferrerCollector implements ReportCollector {
   }
 
   async write(store: Store, appId: string, before?: IsoDate | null): Promise<WriteResult> {
-    const rows = keep(this.rows.values(), before);
-    if (rows.length === 0) return { written: 0, oldest: null };
-    const written = await store.writeAppReferrers(appId, 'apple', { metrics: [this.metric], dates: datesOf(rows), rows });
-    return { written, oldest: oldestOf(rows) };
+    // A day the report covers without referrers any more (Apple leaves out small numbers) loses its old ones.
+    const dates = coveredDays(this.days, before);
+    if (dates.length === 0) return { written: 0, oldest: null };
+    const written = await store.writeAppReferrers(appId, 'apple', {
+      metrics: [this.metric],
+      dates,
+      rows: keep(this.rows.values(), before),
+    });
+    return { written, oldest: dates[0]! };
   }
 }
 

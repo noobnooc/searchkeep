@@ -4,6 +4,7 @@
  */
 import { beforeEach, describe, expect, it } from 'vitest';
 import { appPerformance, appReviews, appSearchTerms, appStability, listApps, startAppStoreReports } from '../apps/analysis.js';
+import { downloadReferrersCollector, engagementCollector } from '../apps/reports.js';
 import { loadConfig, withStoredApps, type SearchkeepConfig } from '../config.js';
 import { addDays, daysBetween } from '../dates.js';
 import type { DelimitedRow } from '../delimited.js';
@@ -474,11 +475,91 @@ export function appContract(name: string, makeStore: () => Promise<Store>): void
       expect(cov.find((c) => c.dataset === 'reviews' && c.store === 'apple')).toMatchObject({ firstDate: d1 });
     });
 
+    it('replaces every day a newer report covers, also days without kept rows or referrers', async () => {
+      const day = '2026-10-05';
+      const row = (extra: Record<string, string>): DelimitedRow => ({
+        date: day,
+        territory: 'US',
+        counts: '4',
+        'unique counts': '3',
+        ...extra,
+      });
+      // An older instance: a website referrer, and impressions from search.
+      const older = downloadReferrersCollector();
+      older.add(row({ 'source type': 'Web referrer', 'source info': 'acme.com', 'download type': 'First-time download' }));
+      await older.write(store, 'x');
+      const olderFunnel = engagementCollector();
+      olderFunnel.add(row({ 'source type': 'App Store search', event: 'Impression', 'page type': 'No page' }));
+      await olderFunnel.write(store, 'x');
+      // The newer instance still covers the day, but Apple left out the referrer and the impressions.
+      const newer = downloadReferrersCollector();
+      newer.add(row({ 'source type': 'App Store search', 'download type': 'First-time download' }));
+      expect(await newer.write(store, 'x')).toMatchObject({ oldest: day });
+      const newerFunnel = engagementCollector();
+      newerFunnel.add(row({ 'source type': 'App Store search', event: 'Tap', 'page type': 'No page' }));
+      await newerFunnel.write(store, 'x');
+      const range = { start: day, end: day };
+      expect(await store.queryAppReferrers({ appId: 'x', range })).toEqual([]);
+      const [total] = await store.queryAppStore({ appId: 'x', range, dimensions: [] });
+      expect(total!.impressions).toBe(0);
+    });
+
     describe('sync', () => {
       const clients = (asc = fakeAsc(), play = fakePlay()): SourceClients => ({
         asc: asc.client,
         play: play.client,
         appStore: fakePublic(),
+      });
+
+      it('reads snapshot instances left pending by an earlier run oldest first, so the newer one wins', async () => {
+        const cfg = config({ APP_STORE_PUBLIC_DATA: 'false' });
+        const today = '2026-10-20';
+        await store.setMeta(syncKeys.ascRequests(APP.id), JSON.stringify({ ongoing: 'ongoing', snapshot: 'snap', checkedOn: today }));
+        await store.setMeta(syncKeys.ascReviews(APP.id), JSON.stringify({ historyDone: true, checkedOn: today }));
+        await store.setMeta(
+          syncKeys.ascReports(APP.id, 'ongoing'),
+          JSON.stringify({ requestId: 'ongoing', checkedOn: today, reports: {} }),
+        );
+        await store.setMeta(
+          syncKeys.ascReports(APP.id, 'snapshot'),
+          JSON.stringify({ requestId: 'snap', checkedOn: today, reports: { engagement: 'snap-eng' } }),
+        );
+        await store.setMeta(
+          syncKeys.ascPending(APP.id, 'snapshot', 'engagement'),
+          JSON.stringify({
+            listedOn: today,
+            instances: [
+              { id: 's-old', processingDate: '2026-10-18' },
+              { id: 's-new', processingDate: '2026-10-19' },
+            ],
+          }),
+        );
+        await store.setMeta(syncKeys.ascFrom(APP.id, 'engagement'), '2026-10-15');
+        const read: string[] = [];
+        const asc = fakeAsc();
+        asc.client.listSegments = async (id) => [{ id: `${id}-0`, url: id, sizeInBytes: 1 }];
+        asc.client.readSegment = async (segment, onRow) => {
+          read.push(segment.url);
+          onRow({
+            date: '2026-10-01',
+            event: 'Impression',
+            'page type': 'No page',
+            'source type': 'App Store search',
+            territory: 'US',
+            counts: segment.url === 's-new' ? '7' : '5',
+            'unique counts': '1',
+          });
+          return 1;
+        };
+        await runSync({ store, config: cfg, clients: { asc: asc.client }, trigger: 'cron', now: NOW, pacing: {} });
+        expect(read).toEqual(['s-old', 's-new']);
+        const [day] = await store.queryAppStore({
+          appId: APP.id,
+          store: 'apple',
+          range: { start: '2026-10-01', end: '2026-10-01' },
+          dimensions: [],
+        });
+        expect(day!.impressions).toBe(7);
       });
 
       it('syncs App Store reports oldest instance first, history only before them, and Google Play files once', async () => {
