@@ -28,6 +28,7 @@ choice without knowing why it was made.
 | [0006](0006-discrete-mcp-tools-not-code-mode.md)     | Discrete, task-shaped MCP tools instead of Code Mode | Accepted |
 | [0007](0007-agent-operations-via-github.md)          | Agent operations only through GitHub issues and PRs  | Accepted |
 | [0008](0008-sites-managed-in-the-dashboard.md)       | Sites can be managed in the dashboard                | Accepted |
+| [0009](0009-apps-as-a-second-kind-of-property.md)    | Apps as a second kind of property                    | Accepted |
 
 ## Template
 

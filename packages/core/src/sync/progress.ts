@@ -6,9 +6,13 @@ import type { SearchkeepConfig } from '../config.js';
 import { addDays, addMonths, toIsoDate } from '../dates.js';
 import type { SourceClients } from '../sources.js';
 import type { Store } from '../store.js';
-import type { IsoDate, SiteConfig, SourceId } from '../types.js';
+import { ASC_REPORTS, classifyPlayFile } from '../apps/reports.js';
+import type { AppConfig, IsoDate, SiteConfig, SourceId } from '../types.js';
 import {
   activeBackoff,
+  appTaskId,
+  type AscRequestState,
+  type PlayListing,
   BING_DATASETS,
   CF_CRAWLER_LOOKBACK_DAYS,
   CF_RUM_LOOKBACK_DAYS,
@@ -29,7 +33,8 @@ import {
  * - `done`: everything that can be synced is in.
  */
 export type SyncPhase = 'waiting' | 'recent' | 'history' | 'done';
-export type SyncDataset = 'gsc' | 'bing' | 'ai_crawlers' | 'search_crawlers' | 'web_analytics';
+export type SyncDataset =
+  'gsc' | 'bing' | 'ai_crawlers' | 'search_crawlers' | 'web_analytics' | 'app_store' | 'google_play' | 'app_store_public';
 
 export interface DatasetProgress {
   dataset: SyncDataset;
@@ -57,6 +62,13 @@ export interface SiteSyncProgress {
   datasets: DatasetProgress[];
 }
 
+export interface AppSyncProgress {
+  appId: string;
+  name: string;
+  phase: SyncPhase;
+  datasets: DatasetProgress[];
+}
+
 export interface SyncProgressReport {
   checkedAt: string;
   phase: SyncPhase;
@@ -64,6 +76,9 @@ export interface SyncProgressReport {
     sites: number;
     /** Sites whose latest days are in for every dataset. */
     sitesWithRecentData: number;
+    apps: number;
+    /** Apps whose latest data is in for every store. */
+    appsWithRecentData: number;
     /** History synced across all sites and datasets, weighted by the API calls each needs, 0–100. */
     historyPercent: number;
     /** Datasets that failed and wait to be retried. */
@@ -75,6 +90,7 @@ export interface SyncProgressReport {
   writeBudget: { used: number; limit: number; reached: boolean };
   lastRun: LastRunMeta | null;
   sites: SiteSyncProgress[];
+  apps: AppSyncProgress[];
 }
 
 export interface ProgressContext {
@@ -90,6 +106,16 @@ const TASKS: Record<SyncDataset, string[]> = {
   ai_crawlers: ['cloudflare.ai_crawlers'],
   search_crawlers: ['cloudflare.search_crawlers'],
   web_analytics: ['cloudflare.web_analytics'],
+  app_store: ['asc.requests', 'asc.reports', 'asc.reviews', ...ASC_REPORTS.flatMap((r) => [`asc.${r.key}`, `asc.${r.key}_history`])],
+  google_play: [
+    'play.list',
+    'play.vitals',
+    ...['store_country', 'store_traffic', 'installs', 'ratings', 'ratings_overall', 'reviews'].flatMap((k) => [
+      `play.${k}`,
+      `play.${k}_history`,
+    ]),
+  ],
+  app_store_public: ['appstore.public'],
 };
 
 const DAY_MS = 86_400_000;
@@ -123,13 +149,17 @@ export async function syncProgress(ctx: ProgressContext): Promise<SyncProgressRe
   let issues = 0;
 
   const finish = (
-    site: SiteConfig,
-    p: Omit<DatasetProgress, 'state' | 'message' | 'retryAt'> & { started: boolean },
+    site: Pick<SiteConfig, 'id'>,
+    p: Omit<DatasetProgress, 'state' | 'message' | 'retryAt'> & { started: boolean; problem?: string },
     weight: number,
   ): DatasetProgress => {
-    const { started, ...rest } = p;
+    const { started, problem, ...rest } = p;
     weightTotal += weight;
     weightDone += (weight * rest.percent) / 100;
+    if (problem) {
+      issues++;
+      return { ...rest, state: 'error', message: problem };
+    }
     const issue = TASKS[rest.dataset].map((t) => backoff[taskBackoffKey(t, site.id)]).find(Boolean);
     const pause = rest.complete ? undefined : pausedSources.get(rest.source);
     if (issue) {
@@ -238,13 +268,104 @@ export async function syncProgress(ctx: ProgressContext): Promise<SyncProgressRe
     return { siteId: site.id, domain: site.domain, phase: phaseOf(datasets), datasets };
   });
 
+  const apps: AppSyncProgress[] = config.apps.map((app) => {
+    const datasets = appDatasets(app);
+    return { appId: app.id, name: app.name, phase: phaseOf(datasets), datasets };
+  });
+
+  /** App Store, Google Play and public feed progress of one app, from the app sync's cursors. */
+  function appDatasets(app: AppConfig): DatasetProgress[] {
+    const owner = { id: appTaskId(app.id) };
+    const out: DatasetProgress[] = [];
+    if (clients.asc && app.appleId) {
+      const st = parseJson<AscRequestState>(get(syncKeys.ascRequests(app.id))) ?? {};
+      const cursor = get(syncKeys.ascInstance(app.id, 'engagement'));
+      const from = get(syncKeys.ascFrom(app.id, 'engagement'));
+      const recent = Boolean(cursor && cursor >= addDays(today, -3));
+      const snapshotPending = st.snapshot
+        ? (parseJson<{ instances: unknown[] }>(get(syncKeys.ascPending(app.id, 'snapshot', 'engagement')))?.instances.length ?? 1)
+        : 0;
+      const snapshotRead = st.snapshot ? (parseJson<string[]>(get(syncKeys.ascSnapshot(app.id, 'engagement')))?.length ?? 0) : 0;
+      const historyDone = !st.snapshot || (snapshotRead > 0 && snapshotPending === 0);
+      const complete = recent && historyDone;
+      const problem = st.problem && (!st.ongoing || st.stopped) ? st.problem : undefined;
+      out.push(
+        finish(
+          owner,
+          {
+            dataset: 'app_store',
+            source: 'asc',
+            recent,
+            complete,
+            percent: complete ? 100 : recent ? 50 : cursor ? 25 : 0,
+            from,
+            target: st.snapshot ? '2024-01-01' : null,
+            started: Boolean(st.checkedOn),
+            ...(problem ? { problem } : {}),
+          },
+          40,
+        ),
+      );
+    }
+    if (clients.play && app.playPackage && config.play.bucket) {
+      const listing = parseJson<PlayListing>(get(syncKeys.playListing(app.id)));
+      const files = (listing?.objects ?? []).filter((o) => classifyPlayFile(o.name, app.playPackage!));
+      const read = files.filter((o) => get(syncKeys.playObject(app.id, o.name)) === o.generation).length;
+      const lastMonth = addDays(`${today.slice(0, 7)}-01`, -1)
+        .slice(0, 7)
+        .replace('-', '');
+      const recentFiles = files.filter((o) => classifyPlayFile(o.name, app.playPackage!)!.month >= lastMonth);
+      const recent = Boolean(listing) && recentFiles.every((o) => get(syncKeys.playObject(app.id, o.name)) === o.generation);
+      const complete = Boolean(listing) && read === files.length;
+      const months = files.map((o) => classifyPlayFile(o.name, app.playPackage!)!.month).sort();
+      out.push(
+        finish(
+          owner,
+          {
+            dataset: 'google_play',
+            source: 'play',
+            recent,
+            complete,
+            percent: complete ? 100 : files.length ? clampPct((read / files.length) * 100) : 0,
+            from: months.length ? `${months[0]!.slice(0, 4)}-${months[0]!.slice(4, 6)}-01` : null,
+            target: null,
+            started: Boolean(listing),
+          },
+          Math.max(1, files.length),
+        ),
+      );
+    }
+    if (clients.appStore && app.appleId) {
+      const done = get(syncKeys.appStorePublic(app.id)) === today;
+      out.push(
+        finish(
+          owner,
+          {
+            dataset: 'app_store_public',
+            source: 'appstore',
+            recent: done,
+            complete: done,
+            percent: done ? 100 : 0,
+            from: null,
+            target: null,
+            started: done,
+          },
+          1,
+        ),
+      );
+    }
+    return out;
+  }
+
   const used = Number(writesRaw ?? '0') || 0;
   return {
     checkedAt: now.toISOString(),
-    phase: overallPhase(sites.map((s) => s.phase)),
+    phase: overallPhase([...sites.map((s) => s.phase), ...apps.filter((a) => a.datasets.length > 0).map((a) => a.phase)]),
     summary: {
       sites: sites.length,
       sitesWithRecentData: sites.filter((s) => s.phase === 'history' || s.phase === 'done').length,
+      apps: apps.length,
+      appsWithRecentData: apps.filter((a) => a.datasets.length > 0 && (a.phase === 'history' || a.phase === 'done')).length,
       historyPercent: weightTotal === 0 ? 100 : clampPct((weightDone / weightTotal) * 100),
       issues,
     },
@@ -252,6 +373,7 @@ export async function syncProgress(ctx: ProgressContext): Promise<SyncProgressRe
     writeBudget: { used, limit: config.sync.dailyWriteBudget, reached: used >= config.sync.dailyWriteBudget },
     lastRun: parseJson<LastRunMeta>(lastRunRaw),
     sites,
+    apps,
   };
 }
 

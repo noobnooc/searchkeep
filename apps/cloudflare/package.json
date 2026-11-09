@@ -17,8 +17,11 @@
     "@cloudflare/puppeteer": "^1.4.0",
     "@searchkeep/core": "workspace:*",
     "@searchkeep/mcp": "workspace:*",
+    "@searchkeep/source-app-store-connect": "workspace:*",
+    "@searchkeep/source-app-store-public": "workspace:*",
     "@searchkeep/source-bing": "workspace:*",
     "@searchkeep/source-cloudflare": "workspace:*",
+    "@searchkeep/source-google-play": "workspace:*",
     "@searchkeep/source-gsc": "workspace:*",
     "@searchkeep/store-d1": "workspace:*",
     "hono": "^4.13.0"

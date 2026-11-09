@@ -3,7 +3,7 @@ import { safeMessage } from '../errors.js';
 import type { ReadinessReport } from '../auth/readiness.js';
 import type { SourceClients } from '../sources.js';
 import { pageToUrl } from '../url.js';
-import type { SearchSource, SiteConfig } from '../types.js';
+import type { AppConfig, SearchSource, SiteConfig } from '../types.js';
 import { previousPeriod, rangeLength } from '../dates.js';
 import { clampLimit, metrics, resolve, type AnalysisContext, type CommonParams } from './common.js';
 import { aiCrawlers } from './geo.js';
@@ -26,6 +26,15 @@ function sourcesOf(ctx: OpsContext, site: SiteConfig) {
     indexCoverage: Boolean(site.gscProperty && ctx.clients.gsc && ctx.clients.sitemaps && ctx.config.gsc.inspectionsPerDay > 0),
     /** Query and page rows per country and device are synced (GSC_SEGMENT_SITES). */
     segments: Boolean(site.gscProperty && ctx.clients.gsc && segmentsEnabled(ctx.config, site.id)),
+  };
+}
+
+/** Which app sources are connected for an app. */
+export function appStoresOf(ctx: OpsContext, app: AppConfig) {
+  return {
+    appStore: Boolean(app.appleId && ctx.clients.asc),
+    googlePlay: Boolean(app.playPackage && ctx.clients.play && ctx.config.play.bucket),
+    appStorePublic: Boolean(app.appleId && ctx.clients.appStore),
   };
 }
 
@@ -179,9 +188,11 @@ export async function setupStatus(ctx: OpsContext, p: { readiness: ReadinessRepo
   for (const e of config.errors) add({ id: 'config', label: 'Configuration', status: 'error', detail: e });
   add({
     id: 'config.sites',
-    label: 'At least one site is configured',
-    status: config.sites.length > 0 ? 'ok' : 'error',
-    ...(config.sites.length ? {} : { detail: 'Add a site in the dashboard (Settings → Sites), or set the SITES secret.' }),
+    label: 'At least one site or app is configured',
+    status: config.sites.length > 0 || config.apps.length > 0 ? 'ok' : 'error',
+    ...(config.sites.length || config.apps.length
+      ? {}
+      : { detail: 'Add a site or an app in the dashboard (Settings), or set the SITES or APPS secret.' }),
   });
   add({ id: 'config.cloudflare_account', label: 'CLOUDFLARE_ACCOUNT_ID is set', status: config.cloudflare.accountId ? 'ok' : 'error' });
   add({ id: 'config.cloudflare_token', label: 'CLOUDFLARE_API_TOKEN is set', status: config.cloudflare.apiToken ? 'ok' : 'error' });
@@ -199,6 +210,34 @@ export async function setupStatus(ctx: OpsContext, p: { readiness: ReadinessRepo
     status: !anyBing ? 'skipped' : config.bing.apiKey ? 'ok' : 'error',
     ...(!anyBing ? { detail: 'No site has bingSiteUrl.' } : {}),
   });
+  const anyApple = config.apps.some((a) => a.appleId);
+  const anyPlay = config.apps.some((a) => a.playPackage);
+  const ascSet = [config.asc.keyId, config.asc.issuerId, config.asc.privateKey].filter(Boolean).length;
+  add({
+    id: 'config.asc',
+    label: 'App Store Connect key (ASC_KEY_ID, ASC_ISSUER_ID, ASC_PRIVATE_KEY; Sales and Reports role)',
+    status: !anyApple ? 'skipped' : ascSet === 3 ? 'ok' : 'error',
+    ...(!anyApple ? { detail: 'No app has an App Store Apple ID.' } : ascSet === 3 ? {} : { detail: 'Set all three secrets.' }),
+  });
+  add({
+    id: 'config.play',
+    label: 'Google Play reports (PLAY_REPORTS_BUCKET and a service account)',
+    status: !anyPlay ? 'skipped' : config.play.bucket && config.play.clientEmail && config.play.privateKey ? 'ok' : 'error',
+    ...(!anyPlay
+      ? { detail: 'No app has a Google Play package name.' }
+      : !config.play.bucket
+        ? { detail: 'Set PLAY_REPORTS_BUCKET to the Cloud Storage bucket of your Play Console reports.' }
+        : !(config.play.clientEmail && config.play.privateKey)
+          ? { detail: 'Set GSC_CLIENT_EMAIL and GSC_PRIVATE_KEY (or PLAY_CLIENT_EMAIL and PLAY_PRIVATE_KEY).' }
+          : {}),
+  });
+  if (config.appStorePublic)
+    add({
+      id: 'config.app_store_public',
+      label: 'App Store public feeds (opt-in plugin)',
+      status: 'ok',
+      detail: "On: reads Apple's public charts and ratings and keeps only your own apps' position and rating.",
+    });
   add({
     id: 'config.writes',
     label: 'Writes to external systems',
@@ -216,7 +255,28 @@ export async function setupStatus(ctx: OpsContext, p: { readiness: ReadinessRepo
         add({ id, label, status: 'error', detail: safeMessage(err) });
       }
     };
-    const { gsc, bing, cloudflare } = ctx.clients;
+    const { gsc, bing, cloudflare, asc, play } = ctx.clients;
+    if (asc && anyApple) {
+      await probe('probe.asc', 'App Store Connect key can see each app', async () => {
+        const apps = await asc.listApps();
+        const missing = config.apps.filter((a) => a.appleId && !apps.some((x) => x.id === a.appleId));
+        if (missing.length)
+          return ['error', `Not visible to the App Store Connect key: ${missing.map((a) => `${a.name} (${a.appleId})`).join(', ')}.`];
+        return 'ok';
+      });
+    }
+    if (play && anyPlay && config.play.bucket) {
+      await probe('probe.play', 'Service account can read the Play Console reports', async () => {
+        const pkg = config.apps.find((a) => a.playPackage)!.playPackage!;
+        const files = await play.listObjects(config.play.bucket!, `stats/installs/installs_${pkg}_`);
+        if (files.length === 0)
+          return [
+            'warn',
+            `No report files for ${pkg} yet. The Play Console writes them within a day or two; access granted to a new service account can take up to 24 hours.`,
+          ];
+        return 'ok';
+      });
+    }
     if (cloudflare) {
       await probe('probe.cloudflare_token', 'Cloudflare API token is active', async () => {
         const v = await cloudflare.verifyToken();
@@ -278,6 +338,7 @@ export async function setupStatus(ctx: OpsContext, p: { readiness: ReadinessRepo
     summary: errors === 0 ? 'All checks passed.' : `${errors} check(s) need attention.`,
     checks,
     sites: config.sites.map((s) => ({ id: s.id, domain: s.domain, sources: sourcesOf(ctx, s) })),
+    apps: config.apps.map((a) => ({ id: a.id, name: a.name, stores: appStoresOf(ctx, a) })),
     coverage: await ctx.store.coverage(),
     syncProgress: progress,
     recentSyncs: runs.map((r) => ({
@@ -295,12 +356,16 @@ export async function setupStatus(ctx: OpsContext, p: { readiness: ReadinessRepo
 export function describeProgress(p: SyncProgressReport): string {
   const today = p.checkedAt.slice(0, 10);
   const parts: string[] = [];
-  if (p.summary.sites === 0) parts.push('No sites to sync.');
+  const apps = p.summary.apps ?? 0;
+  if (p.summary.sites === 0 && apps === 0) parts.push('No sites or apps to sync.');
   else if (p.phase === 'done') parts.push('Everything is synced; new days arrive with the daily increments.');
-  else
-    parts.push(
-      `Latest days are in for ${p.summary.sitesWithRecentData} of ${p.summary.sites} site${p.summary.sites === 1 ? '' : 's'}; history is ${p.summary.historyPercent}% synced.`,
-    );
+  else {
+    const what = [
+      ...(p.summary.sites ? [`${p.summary.sitesWithRecentData} of ${p.summary.sites} site${p.summary.sites === 1 ? '' : 's'}`] : []),
+      ...(apps ? [`${p.summary.appsWithRecentData} of ${apps} app${apps === 1 ? '' : 's'}`] : []),
+    ];
+    parts.push(`Latest days are in for ${what.join(' and ')}; history is ${p.summary.historyPercent}% synced.`);
+  }
   for (const x of p.paused) parts.push(`${SOURCE_NAMES[x.source]} is paused until ${formatUntil(x.until, today)} (rate limited).`);
   if (p.writeBudget.reached && p.phase !== 'done') parts.push('History continues after 00:00 UTC (daily write budget reached).');
   if (p.summary.issues > 0)

@@ -9,7 +9,9 @@
 export type IsoDate = string;
 
 export type SearchSource = 'gsc' | 'bing';
-export type SourceId = SearchSource | 'cloudflare';
+/** App sources: App Store Connect, Google Play, and Apple's public App Store feeds (opt-in). */
+export type AppSourceId = 'asc' | 'play' | 'appstore';
+export type SourceId = SearchSource | 'cloudflare' | AppSourceId;
 
 /**
  * Search Console search types. `web` is the default everywhere; the others are
@@ -371,4 +373,309 @@ export interface DataCoverage {
   lastDate: IsoDate | null;
   /** Days with data, when cheap to compute (search totals); otherwise null. */
   days: number | null;
+}
+
+// ------------------------------------------------------------------------ apps
+
+/** The two app stores. */
+export type AppStore = 'apple' | 'play';
+export const APP_STORES: readonly AppStore[] = ['apple', 'play'];
+
+export interface AppConfig {
+  /** Short stable identifier, e.g. `acme-ios`. Lowercase letters, digits, dashes. */
+  id: string;
+  /** Display name, e.g. `Acme`. */
+  name: string;
+  /** App Store Apple ID (numeric), e.g. `1476097583`. */
+  appleId?: string;
+  /** Google Play package name, e.g. `com.acme.app`. */
+  playPackage?: string;
+  /** One of the user's sites: web referrers from its domain are marked as the user's own. */
+  siteId?: string;
+  /** Storefronts (ISO 3166 alpha-2, lower case) for the opt-in public App Store feeds. Default `us`. */
+  territories?: string[];
+  /** Where the app is defined: the APPS secret (read-only) or the dashboard. */
+  origin?: 'secret' | 'dashboard';
+}
+
+/** Territory or source of a row that covers all of them (Google Play reports its two breakdowns separately). */
+export const ALL_KEY = '*';
+
+/**
+ * Where people found the app, normalized from Apple's "Source Type" and Google Play's traffic
+ * source: `search` (App Store search, Google Play search), `browse` (App Store browse, Google Play
+ * explore), `app_referrer`, `web_referrer`, `referral` (Google Play third-party referrals),
+ * `app_clip`, `notification`, `institutional`, `unavailable`, `other`.
+ */
+export type AppSourceType =
+  | 'search'
+  | 'browse'
+  | 'app_referrer'
+  | 'web_referrer'
+  | 'referral'
+  | 'app_clip'
+  | 'notification'
+  | 'institutional'
+  | 'unavailable'
+  | 'other';
+
+/**
+ * Store funnel metrics per app, store, day, territory and source.
+ * - `impressions`, `impressionsUnique`: the app was shown in a list (App Store only).
+ * - `pageViews`, `pageViewsUnique`: product page views (App Store), store listing visitors (Google
+ *   Play, unique only).
+ * - `downloads`: first-time downloads (App Store), store listing acquisitions (Google Play).
+ * - `redownloads`: App Store only.
+ * - `installs`, `deletions`: App Store (users who share analytics only), Google Play device installs
+ *   and uninstalls.
+ * - `activeDevices`: devices with the app installed (Google Play), a level, not a daily count.
+ */
+export type AppStoreMetric =
+  | 'impressions'
+  | 'impressionsUnique'
+  | 'pageViews'
+  | 'pageViewsUnique'
+  | 'downloads'
+  | 'redownloads'
+  | 'installs'
+  | 'deletions'
+  | 'activeDevices';
+export const APP_STORE_METRICS: readonly AppStoreMetric[] = [
+  'impressions',
+  'impressionsUnique',
+  'pageViews',
+  'pageViewsUnique',
+  'downloads',
+  'redownloads',
+  'installs',
+  'deletions',
+  'activeDevices',
+];
+
+export type AppStoreMetrics = Record<AppStoreMetric, number>;
+
+export interface AppStoreDailyInput extends Partial<AppStoreMetrics> {
+  date: IsoDate;
+  /** Upper-case territory code as the store reports it, or `*`. */
+  territory: string;
+  /** An `AppSourceType` (or another slug), or `*`. */
+  source: string;
+}
+
+/**
+ * Which rows a write replaces: `cross` (territory × source, App Store), `territory` (per territory,
+ * all sources) or `source` (per source, all territories). Google Play sends the last two separately.
+ */
+export type AppRowShape = 'cross' | 'territory' | 'source';
+
+export interface AppStoreWrite {
+  /** The metrics this write sets; other metrics of the same rows are left alone. */
+  metrics: AppStoreMetric[];
+  shape: AppRowShape;
+  /** Days the write covers completely: rows of these days it does not mention get 0 for `metrics`. */
+  dates: IsoDate[];
+  rows: AppStoreDailyInput[];
+}
+
+export type AppDimension = 'date' | 'week' | 'month' | 'store' | 'territory' | 'source';
+
+export interface AppStoreQuery {
+  appId: string;
+  /** Both stores when omitted. */
+  store?: AppStore;
+  range: DateRange;
+  dimensions: AppDimension[];
+  territory?: string;
+  source?: string;
+  orderBy?: AppStoreMetric | 'date';
+  order?: 'asc' | 'desc';
+  limit?: number;
+}
+
+export interface AppStoreRow extends AppStoreMetrics {
+  date?: IsoDate;
+  week?: IsoDate;
+  month?: string;
+  store?: AppStore;
+  territory?: string;
+  source?: string;
+}
+
+/** Google Play search terms that brought store listing visitors. */
+export interface AppSearchTermInput {
+  date: IsoDate;
+  term: string;
+  visitors: number;
+  acquisitions: number;
+}
+
+export interface AppSearchTermQuery {
+  appId: string;
+  range: DateRange;
+  termContains?: string;
+  orderBy?: 'visitors' | 'acquisitions';
+  limit?: number;
+}
+
+export interface AppSearchTermRow {
+  term: string;
+  visitors: number;
+  acquisitions: number;
+}
+
+/** `web`: a website (App Store web referrer), `app`: another app, `utm`: a Google Play UTM source. */
+export type AppReferrerKind = 'web' | 'app' | 'utm';
+
+export interface AppReferrerInput {
+  date: IsoDate;
+  kind: AppReferrerKind;
+  referrer: string;
+  pageViews?: number;
+  downloads?: number;
+}
+
+export interface AppReferrerWrite {
+  metrics: Array<'pageViews' | 'downloads'>;
+  dates: IsoDate[];
+  rows: AppReferrerInput[];
+}
+
+export interface AppReferrerQuery {
+  appId: string;
+  store?: AppStore;
+  range: DateRange;
+  kind?: AppReferrerKind;
+  limit?: number;
+}
+
+export interface AppReferrerRow {
+  store: AppStore;
+  kind: AppReferrerKind;
+  referrer: string;
+  pageViews: number;
+  downloads: number;
+}
+
+export interface AppRatingInput {
+  date: IsoDate;
+  /** Upper-case territory code, or `*`. */
+  territory: string;
+  /** Average rating of all time (or of the current version, as the store reports it). */
+  average: number | null;
+  /** Number of ratings, when the store reports it. */
+  count?: number | null;
+  /** Average of the ratings given that day (Google Play). */
+  dailyAverage?: number | null;
+}
+
+export interface AppRatingQuery {
+  appId: string;
+  store?: AppStore;
+  range: DateRange;
+  territory?: string;
+}
+
+export interface AppRatingRow extends AppRatingInput {
+  store: AppStore;
+}
+
+/** One store review. Reviewer names are not stored. */
+export interface AppReviewInput {
+  id: string;
+  /** ISO timestamp the review was written (or last edited). */
+  createdAt: string;
+  rating: number;
+  title: string | null;
+  body: string | null;
+  territory: string | null;
+  language: string | null;
+  version: string | null;
+  /** The developer replied. */
+  replied: boolean;
+}
+
+export interface AppReviewQuery {
+  appId: string;
+  store?: AppStore;
+  range: DateRange;
+  ratings?: number[];
+  territory?: string;
+  version?: string;
+  /** Case-insensitive substring of the title or body. */
+  contains?: string;
+  limit?: number;
+}
+
+export interface AppReviewRow extends AppReviewInput {
+  store: AppStore;
+}
+
+export interface AppReviewStat {
+  store: AppStore;
+  rating: number;
+  reviews: number;
+}
+
+/**
+ * Stability per day and app version (`version` is empty for all versions). Rates are shares of
+ * distinct users (Google Play); `crashes` and `crashDevices` are counts (App Store).
+ */
+export interface AppVitalsInput {
+  date: IsoDate;
+  version: string;
+  crashRate?: number | null;
+  userPerceivedCrashRate?: number | null;
+  anrRate?: number | null;
+  userPerceivedAnrRate?: number | null;
+  distinctUsers?: number | null;
+  crashes?: number | null;
+  crashDevices?: number | null;
+}
+
+export type AppVitalsMetric = Exclude<keyof AppVitalsInput, 'date' | 'version'>;
+
+export interface AppVitalsWrite {
+  metrics: AppVitalsMetric[];
+  rows: AppVitalsInput[];
+}
+
+export interface AppVitalsQuery {
+  appId: string;
+  store?: AppStore;
+  range: DateRange;
+  groupBy: 'date' | 'version';
+  limit?: number;
+}
+
+export interface AppVitalsRow {
+  store: AppStore;
+  date?: IsoDate;
+  version?: string;
+  crashRate: number | null;
+  userPerceivedCrashRate: number | null;
+  anrRate: number | null;
+  userPerceivedAnrRate: number | null;
+  distinctUsers: number | null;
+  crashes: number | null;
+  crashDevices: number | null;
+}
+
+/** The user's own app's position in an App Store top chart (opt-in public feeds). */
+export interface AppChartRankInput {
+  date: IsoDate;
+  territory: string;
+  /** `top-free`, `top-paid` or `top-grossing`. */
+  chart: string;
+  /** Genre id, or empty for all apps. */
+  genre: string;
+  /** 1-based position, or null when the app is not in the chart. */
+  rank: number | null;
+}
+
+export interface AppDataCoverage {
+  appId: string;
+  store: AppStore;
+  dataset: string;
+  firstDate: IsoDate | null;
+  lastDate: IsoDate | null;
 }

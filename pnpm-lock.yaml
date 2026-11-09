@@ -35,12 +35,21 @@ importers:
       '@searchkeep/mcp':
         specifier: workspace:*
         version: link:../../packages/mcp
+      '@searchkeep/source-app-store-connect':
+        specifier: workspace:*
+        version: link:../../packages/sources/app-store-connect
+      '@searchkeep/source-app-store-public':
+        specifier: workspace:*
+        version: link:../../packages/sources/app-store-public
       '@searchkeep/source-bing':
         specifier: workspace:*
         version: link:../../packages/sources/bing
       '@searchkeep/source-cloudflare':
         specifier: workspace:*
         version: link:../../packages/sources/cloudflare
+      '@searchkeep/source-google-play':
+        specifier: workspace:*
+        version: link:../../packages/sources/google-play
       '@searchkeep/source-gsc':
         specifier: workspace:*
         version: link:../../packages/sources/gsc
@@ -167,6 +176,32 @@ importers:
         specifier: ^4.1.0
         version: 4.1.12(@types/node@22.20.5)(vite@8.3.5(@types/node@22.20.5)(esbuild@0.28.2)(tsx@4.23.15))
 
+  packages/sources/app-store-connect:
+    dependencies:
+      '@searchkeep/core':
+        specifier: workspace:*
+        version: link:../../core
+    devDependencies:
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
+      vitest:
+        specifier: ^4.1.0
+        version: 4.1.12(@types/node@22.20.5)(vite@8.3.5(@types/node@22.20.5)(esbuild@0.28.2)(tsx@4.23.15))
+
+  packages/sources/app-store-public:
+    dependencies:
+      '@searchkeep/core':
+        specifier: workspace:*
+        version: link:../../core
+    devDependencies:
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
+      vitest:
+        specifier: ^4.1.0
+        version: 4.1.12(@types/node@22.20.5)(vite@8.3.5(@types/node@22.20.5)(esbuild@0.28.2)(tsx@4.23.15))
+
   packages/sources/bing:
     dependencies:
       '@searchkeep/core':
@@ -185,6 +220,22 @@ importers:
       '@searchkeep/core':
         specifier: workspace:*
         version: link:../../core
+    devDependencies:
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
+      vitest:
+        specifier: ^4.1.0
+        version: 4.1.12(@types/node@22.20.5)(vite@8.3.5(@types/node@22.20.5)(esbuild@0.28.2)(tsx@4.23.15))
+
+  packages/sources/google-play:
+    dependencies:
+      '@searchkeep/core':
+        specifier: workspace:*
+        version: link:../../core
+      '@searchkeep/source-gsc':
+        specifier: workspace:*
+        version: link:../gsc
     devDependencies:
       typescript:
         specifier: ^5.9.3

@@ -3,6 +3,7 @@
  * Adapters are thin API clients built on `fetch`; all scheduling, budgeting and
  * normalization lives in core.
  */
+import type { DelimitedRow } from './delimited.js';
 import type { DateRange, GscSearchType, IsoDate, RichResultIssue, SitemapRecord } from './types.js';
 
 /**
@@ -163,9 +164,123 @@ export interface SitemapReader {
   read(url: string): Promise<SitemapContents>;
 }
 
+// ----------------------------------------------------------------- apps (ADR 0009)
+
+export type AscAccessType = 'ONGOING' | 'ONE_TIME_SNAPSHOT';
+
+/** An App Store Connect analytics report request: Apple generates reports only while one exists. */
+export interface AscReportRequest {
+  id: string;
+  accessType: AscAccessType;
+  /** Apple stopped generating reports because none were downloaded for a long time. */
+  stoppedDueToInactivity: boolean;
+}
+
+export interface AscReport {
+  id: string;
+  /** E.g. `App Store Discovery and Engagement Standard`. */
+  name: string;
+  category: string;
+}
+
+export interface AscReportInstance {
+  id: string;
+  granularity: string;
+  processingDate: IsoDate;
+}
+
+/** One file of a report instance. Its URL is valid for a few minutes only. */
+export interface AscSegment {
+  id: string;
+  url: string;
+  sizeInBytes: number | null;
+}
+
+export interface AscReview {
+  id: string;
+  rating: number;
+  title: string | null;
+  body: string | null;
+  /** ISO timestamp. */
+  createdDate: string;
+  /** App Store territory code (three letters, e.g. `USA`). */
+  territory: string | null;
+}
+
+export interface AscClient {
+  /** Apps the key can see (for suggestions in the dashboard). */
+  listApps(): Promise<Array<{ id: string; name: string; bundleId: string }>>;
+  listReportRequests(appleId: string): Promise<AscReportRequest[]>;
+  /** Needs an Admin key: used only by the one-time "start reports" action, never by the sync. */
+  createReportRequest(appleId: string, accessType: AscAccessType): Promise<AscReportRequest>;
+  /** Needs an Admin key: removes a request Apple stopped, so a new one can be made. */
+  deleteReportRequest(requestId: string): Promise<void>;
+  getReportRequest(requestId: string): Promise<AscReportRequest>;
+  listReports(requestId: string): Promise<AscReport[]>;
+  listInstances(reportId: string, granularity: 'DAILY' | 'WEEKLY' | 'MONTHLY'): Promise<AscReportInstance[]>;
+  listSegments(instanceId: string): Promise<AscSegment[]>;
+  /** Downloads one segment (gzip, tab separated) row by row; returns the number of rows. */
+  readSegment(segment: AscSegment, onRow: (row: DelimitedRow) => void): Promise<number>;
+  /** Newest reviews first. */
+  listReviews(appleId: string, opts: { limit: number; cursor?: string | null }): Promise<{ reviews: AscReview[]; next: string | null }>;
+}
+
+/** A Cloud Storage object of the Play Console reports bucket. */
+export interface PlayObject {
+  name: string;
+  /** Changes whenever the Play Console rewrites the file. */
+  generation: string;
+  size: number;
+  updated: string;
+}
+
+export interface PlayVitalsRow {
+  date: IsoDate;
+  /** Version code, or empty for all versions. */
+  version: string;
+  rate: number | null;
+  userPerceivedRate: number | null;
+  distinctUsers: number | null;
+}
+
+export interface PlayClient {
+  /** Objects whose name starts with `prefix`. */
+  listObjects(bucket: string, prefix: string): Promise<PlayObject[]>;
+  /** Reads a report file (CSV, usually UTF-16) row by row; returns the number of rows. */
+  readCsv(bucket: string, name: string, onRow: (row: DelimitedRow) => void): Promise<number>;
+  /** Daily crash or ANR rates per version code from the Play Developer Reporting API. */
+  vitals(packageName: string, metric: 'crash' | 'anr', range: DateRange): Promise<PlayVitalsRow[]>;
+  /** Apps the service account can see (for suggestions in the dashboard). */
+  listApps(): Promise<Array<{ packageName: string; name: string }>>;
+}
+
+export interface AppStoreLookup {
+  appleId: string;
+  name: string | null;
+  averageUserRating: number | null;
+  userRatingCount: number | null;
+  version: string | null;
+  primaryGenreId: string | null;
+}
+
+export type AppStoreChart = 'top-free' | 'top-paid' | 'top-grossing';
+
+/** Apple's official public App Store feeds (opt-in plugin, APP_STORE_PUBLIC_DATA). */
+export interface AppStorePublicClient {
+  lookup(appleId: string, country: string): Promise<AppStoreLookup | null>;
+  /** Apple IDs of a top chart in rank order (at most 100), optionally for one genre. */
+  topChart(country: string, chart: AppStoreChart, genreId?: string | null): Promise<string[]>;
+}
+
 export interface SourceClients {
   gsc?: GscClient;
   bing?: BingClient;
   cloudflare?: CloudflareAnalyticsClient;
   sitemaps?: SitemapReader;
+  /** App Store Connect (Sales and Reports key). */
+  asc?: AscClient;
+  /** Google Play Console reports and the Play Developer Reporting API. */
+  play?: PlayClient;
+  /** Apple's public App Store feeds, only when APP_STORE_PUBLIC_DATA is true. */
+  appStore?: AppStorePublicClient;
 }
