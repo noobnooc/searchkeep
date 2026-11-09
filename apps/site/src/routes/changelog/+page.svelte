@@ -1,6 +1,9 @@
 <script lang="ts">
   import Seo from '#lib/components/Seo.svelte';
   import { READ_ONLY_TOOLS } from '#lib/content.ts';
+
+  // The app tools (ADR 0009) came after v0.1.0.
+  const v010Tools = READ_ONLY_TOOLS.filter((t) => t.name !== 'list_apps' && !t.name.startsWith('app_'));
   import { GITHUB, SITE } from '#lib/site.ts';
   import { breadcrumbs } from '#lib/schema.ts';
 </script>
@@ -38,7 +41,7 @@
         <ul>
           <li><strong>GEO funnel per page</strong>: AI crawler requests (Cloudflare), AI citations (imported from Bing AI Performance CSV exports) and AI referral visits (Web Analytics), next to GSC and Bing clicks.</li>
           <li><strong>Long-term history</strong>: a sync every 15 minutes in small batches, with daily increments first and a 16-month Search Console backfill paced to D1’s free write quota, and nothing ever deleted.</li>
-          <li><strong>MCP server</strong> at <code>/mcp</code> (Streamable HTTP, stateless) with {READ_ONLY_TOOLS.length} read-only tools: {READ_ONLY_TOOLS.map((t) => t.name).join(', ')}; plus <code>submit_sitemap</code>, registered only with <code>ENABLE_WRITES=true</code>.</li>
+          <li><strong>MCP server</strong> at <code>/mcp</code> (Streamable HTTP, stateless) with {v010Tools.length} read-only tools: {v010Tools.map((t) => t.name).join(', ')}; plus <code>submit_sitemap</code>, registered only with <code>ENABLE_WRITES=true</code>.</li>
           <li><strong>Dashboard</strong> served from the same Worker, using the same analysis functions as the MCP tools, with <strong>Sync now</strong> and an AI citation CSV import.</li>
           <li><strong>Brand vs non-brand</strong> filtering on every query-level view via <code>BRAND_REGEX</code> or a per-site <code>brandRegex</code>.</li>
         </ul>

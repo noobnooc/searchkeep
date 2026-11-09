@@ -105,6 +105,14 @@ are never shown, which is expected.
 | `GSC_SEARCH_APPEARANCE`   | optional | 14          | `false` to stop syncing search appearance (rich results, videos, ...). Default `true`                                  |
 | `GSC_SEGMENT_SITES`       | optional | 14          | Site ids (comma-separated) or `all` whose queries and pages are also synced per country and device. Default none       |
 | `GSC_INSPECTIONS_PER_DAY` | optional | 14          | URL inspections per site and day for index coverage, 0–2000. Default `200`; `0` turns index coverage off               |
+| `APPS`                    | no       | 14a         | JSON array describing your apps; optional, apps can be added in the dashboard instead                                  |
+| `ASC_KEY_ID`              | for apps | 14a         | Key ID of an App Store Connect API key with the **Sales and Reports** role (never an Admin key)                        |
+| `ASC_ISSUER_ID`           | for apps | 14a         | Issuer ID shown above the App Store Connect API keys                                                                   |
+| `ASC_PRIVATE_KEY`         | for apps | 14a         | Contents of that key's `AuthKey_<KEY ID>.p8` file                                                                      |
+| `PLAY_REPORTS_BUCKET`     | for apps | 14a         | Cloud Storage bucket of your Play Console reports, `pubsite_prod_rev_…` (the full `gs://` URI is accepted)             |
+| `PLAY_CLIENT_EMAIL`       | optional | 14a         | Service account for Google Play, when it is not the Search Console one (`GSC_CLIENT_EMAIL`)                            |
+| `PLAY_PRIVATE_KEY`        | optional | 14a         | Its private key, when `PLAY_CLIENT_EMAIL` is set                                                                       |
+| `APP_STORE_PUBLIC_DATA`   | optional | 14a         | `true` to turn on the opt-in plugin that reads Apple's public App Store feeds (your app's rating and chart position)   |
 
 `CLOUDFLARE_ACCOUNT_ID` and `CLOUDFLARE_API_TOKEN` are required even if you use no Cloudflare data:
 they are how Searchkeep checks your Access setup. Values that do not parse (invalid JSON in `SITES`,
@@ -697,6 +705,64 @@ The output lists your sites, including each `bingSiteUrl` from `SITES`.
 **Verify:** `wrangler secret list` shows the names you set. `setup_status` reports whether writes are
 enabled.
 
+## 14a. Apps: App Store and Google Play (optional)
+
+**Who:** **[Human]** creates the keys and permissions in App Store Connect and the Play Console, and
+starts App Store reports. Agent or human sets the secrets. Skip this step if you have no apps.
+
+Apps are kept apart from your sites ([ADR 0009](adr/0009-apps-as-a-second-kind-of-property.md)).
+Each app has a name, its App Store Apple ID, its Google Play package name, or both, and optionally
+one of your sites (referrals from it are marked as your own).
+
+1. **Add the app.** Dashboard → **Settings** → **Apps** → **Add app**. Or set the `APPS` secret, for
+   example `[{"id":"acme","name":"Acme","appleId":"1476097583","playPackage":"com.acme.app","siteId":"acme"}]`
+   (`appleId`: App Store Connect → your app → **App Information** → **Apple ID**).
+2. **App Store Connect key (read-only).** **[Human]** App Store Connect → **Users and Access** →
+   **Integrations** → **App Store Connect API** → **Team Keys** → **Generate API Key**. Name it
+   `Searchkeep`, choose the **Sales and Reports** role, and download the `.p8` file (Apple offers it
+   only once). Set `ASC_KEY_ID` to the key ID, `ASC_ISSUER_ID` to the Issuer ID above the table, and
+   `ASC_PRIVATE_KEY` to the file's contents:
+
+   ```sh
+   npx wrangler secret put ASC_PRIVATE_KEY < AuthKey_ABC123DEF4.p8
+   ```
+
+3. **Start App Store reports, once per app.** **[Human]** Apple generates analytics reports only
+   after a request made with an **Admin** key, and Searchkeep never stores one. Generate a second,
+   temporary Team Key with the **Admin** role. In the dashboard: **Settings** → **Apps** → **Start
+   App Store reports** → choose its `.p8` file, enter its key ID and the Issuer ID → **Start
+   reports**. Keep **Also request history** checked to get data back to January 2024. Then revoke the
+   Admin key right away (**Team Keys** → the key → **Revoke**). The key is sent only to Apple, for
+   that one request; only the request ids are saved. Apple delivers the first reports within 24-48
+   hours, and the sync picks them up on its own. If Apple ever stops the reports (when nothing
+   downloaded them for a long time), the dashboard and `setup_status` say so: do this step again.
+4. **Google Play reports.** **[Human]** Play Console → **Users and permissions** → **Invite new
+   users** → the service account email (`GSC_CLIENT_EMAIL`, or another one set as
+   `PLAY_CLIENT_EMAIL` and `PLAY_PRIVATE_KEY`) → **Account permissions** → **View app information
+   and download bulk reports (read-only)** → **Invite user**. Google can take up to 24 hours to
+   grant the access. Then: Play Console → **Download reports** → **Statistics** → **Copy Cloud
+   Storage URI**, and set `PLAY_REPORTS_BUCKET` to it (for example
+   `gs://pubsite_prod_rev_01234567890123456789/stats/installs/`; only the bucket name is used).
+5. **Google Play crash and ANR rates.** **[Human]** In the Google Cloud project of the service
+   account: **APIs & Services** → **Library** → **Google Play Developer Reporting API** → **Enable**.
+6. **Optional plugin, off by default.** `APP_STORE_PUBLIC_DATA=true` reads Apple's official public
+   App Store feeds once a day (the iTunes lookup and the top charts) for the storefronts set on
+   each app (default `us`, up to 5), and keeps only your own app's average rating, rating count and
+   chart position. Google Play has no such feed.
+
+What arrives: App Store impressions, product page views, first-time downloads, redownloads,
+installs and deletions by territory and source (search, browse, websites, other apps), referring
+websites and apps, crash counts and customer reviews; Google Play store listing visitors and
+acquisitions by country and by traffic source with **search terms**, installs, uninstalls and
+active devices, ratings, reviews, and crash and ANR rates. App Store data is complete 2-5 days after
+a day ends, Google Play's 3-7 days. Numbers are not guaranteed to match the App Store Connect
+website exactly, and Apple does not promise that either.
+
+**Verify:** `setup_status` reports `config.asc` and `config.play` as `ok`, `probe.asc` ("App Store
+Connect key can see each app") as `ok`, and `probe.play` as `ok` (or `warn` while the Play Console
+has not written the first files yet). `list_apps` shows `appStoreReports.started: true`. Within 2 days,
+the **Apps** area shows data and the sync progress lists the app.
+
 ## 15. Connect an MCP client
 
 **Who:** **[Human]** completes the Access sign-in in a browser; the rest can be done by an agent.
@@ -993,6 +1059,26 @@ and `totals.inspected` grows each day.
 
 **Verify:** `cloudflared access curl "https://<your-domain>/api/site-icon?site=<id>" -o icon` saves
 an image (HTTP 200); a 404 means no icon was found.
+
+### App Store data stays empty
+
+- `list_apps` shows `appStoreReports.started: false`: do step 14a.3 (start App Store reports).
+- `probe.asc` fails with `NOT_AUTHORIZED` or a key import error: check the three `ASC_*` secrets;
+  `ASC_PRIVATE_KEY` must be the whole `.p8` file, including its `BEGIN` and `END` lines.
+- Right after starting reports: Apple needs 24-48 hours for the first ones. The sync checks once a
+  day and needs no action.
+- `asc.*` units are skipped after interruptions on large apps: reading a report file can exceed the
+  10 ms CPU limit of Workers Free. Move to Workers Paid.
+
+### Google Play data stays empty
+
+- `probe.play` says there are no report files yet: the Play Console writes its monthly files a day or
+  two after an app gets its first installs, and a newly invited service account can take up to 24
+  hours to get access.
+- `probe.play` fails with HTTP 403: the service account is not invited in the Play Console, or lacks
+  **View app information and download bulk reports**; or `PLAY_REPORTS_BUCKET` is another
+  developer account's bucket (copy it again from **Download reports**).
+- Crash and ANR rates are missing: enable the Google Play Developer Reporting API (step 14a.5).
 
 ### Sync is slow or units are skipped
 

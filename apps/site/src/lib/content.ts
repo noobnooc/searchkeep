@@ -25,6 +25,16 @@ const site: ToolParam = {
   type: 'string',
   description: 'Site `id` or domain (see `list_sites`). Optional when only one site is configured.',
 };
+const app: ToolParam = {
+  name: 'app',
+  type: 'string',
+  description: 'App `id`, App Store Apple ID or Google Play package (see `list_apps`). Optional when only one app is configured.',
+};
+const appStore: ToolParam = {
+  name: 'store',
+  type: '"apple" | "play"',
+  description: '`apple` (App Store) or `play` (Google Play). Both when omitted.',
+};
 const start: ToolParam = {
   name: 'start',
   type: 'YYYY-MM-DD',
@@ -366,6 +376,97 @@ export const TOOLS: Tool[] = [
     params: [{ name: 'probe', type: 'boolean', description: 'Call the source APIs to verify credentials. Defaults to `true`.' }],
     example: 'Run setup_status and tell me what is still missing.',
   },
+  {
+    name: 'list_apps',
+    summary: 'Configured apps, their stores and stored date ranges.',
+    description:
+      'Lists every configured app (added in the dashboard or the `APPS` secret) with the stores connected for it (App Store Connect, Google Play, the opt-in App Store public feeds), whether App Store reports are started, and for each dataset the first and last date stored in D1. Start here for app questions.',
+    readOnly: true,
+    params: [],
+  },
+  {
+    name: 'app_performance',
+    summary: 'The store funnel of an app, per store, against the previous period.',
+    description:
+      'Impressions (App Store), page views (App Store product page views, Google Play store listing visitors), downloads (first-time downloads, store listing acquisitions), redownloads, installs, deletions, active devices and conversion rates per store, compared with the previous period of the same length. `groupBy` adds rows by date, week, month, store, territory, source (search, browse, app_referrer, web_referrer, referral, ...) or referrer: the websites, apps and UTM sources that sent people to the store page, with your own site marked. With the opt-in public feeds, it also returns your app’s App Store chart positions.',
+    readOnly: true,
+    params: [
+      app,
+      appStore,
+      start,
+      end,
+      days(28),
+      {
+        name: 'groupBy',
+        type: 'string[]',
+        description: 'Up to two of `date`, `week`, `month`, `store`, `territory`, `source`, `referrer`. Default: totals per store only.',
+      },
+      { name: 'territory', type: 'string', description: 'Only this territory, as the store reports it (e.g. `US`).' },
+      {
+        name: 'source',
+        type: 'string',
+        description: 'Only this source: `search`, `browse`, `app_referrer`, `web_referrer`, `referral`, ...',
+      },
+      { name: 'referrerKind', type: '"web" | "app" | "utm"', description: 'With `groupBy` referrer: only websites, apps or UTM sources.' },
+      limit(50),
+    ],
+    example: 'How did App Store search conversion change this month, by territory?',
+  },
+  {
+    name: 'app_search_terms',
+    summary: 'Google Play search terms with visitors, acquisitions and conversion.',
+    description:
+      'The Google Play search terms that brought store listing visitors, with acquisitions, conversion and the change in visitors against the previous period, plus `lowConverting`: well-visited terms that convert well below the app’s average. The App Store reports no search terms.',
+    readOnly: true,
+    params: [
+      app,
+      start,
+      end,
+      days(28),
+      { name: 'termContains', type: 'string', description: 'Case-insensitive substring of the term.' },
+      { name: 'sortBy', type: '"visitors" | "acquisitions" | "conversion" | "change"', description: 'Defaults to `visitors`.' },
+      { name: 'minVisitors', type: 'number', description: 'Minimum visitors for `lowConverting`. Defaults to `20`.' },
+      limit(50),
+    ],
+    example: 'Which Google Play searches bring visitors who rarely install?',
+  },
+  {
+    name: 'app_reviews',
+    summary: 'Ratings over time, star distribution and reviews.',
+    description:
+      'Per store: the average rating over time (Google Play from the Play Console; the App Store from the opt-in public feeds), the star distribution and average of the reviews written in the range, and the reviews themselves, newest first and without reviewer names. Filter by stars, territory, app version or text.',
+    readOnly: true,
+    params: [
+      app,
+      appStore,
+      start,
+      end,
+      days(90),
+      { name: 'ratings', type: 'number[]', description: 'Only these star ratings, e.g. `[1, 2]`.' },
+      { name: 'territory', type: 'string', description: 'Only reviews from this territory.' },
+      { name: 'version', type: 'string', description: 'Only reviews of this app version.' },
+      { name: 'contains', type: 'string', description: 'Text in the title or body.' },
+      limit(30),
+    ],
+    example: 'What do 1- and 2-star reviews of the latest version complain about?',
+  },
+  {
+    name: 'app_stability',
+    summary: 'Crash and ANR rates per day or app version.',
+    description:
+      'Google Play crash and ANR rates (shares of daily users, including the user-perceived rates behind Google’s bad-behavior thresholds of 1.09% and 0.47%) from the Play Developer Reporting API, and App Store crash counts from the App Crashes report, per day or per app version.',
+    readOnly: true,
+    params: [
+      app,
+      appStore,
+      start,
+      end,
+      days(28),
+      { name: 'groupBy', type: '"date" | "version"', description: 'Defaults to `date`.' },
+      limit(100),
+    ],
+    example: 'Did the last Android release raise the crash rate?',
+  },
 ];
 
 /** Tools registered by default; `submit_sitemap` appears only with `ENABLE_WRITES=true`. */
@@ -373,7 +474,7 @@ export const READ_ONLY_TOOLS = TOOLS.filter((t) => t.readOnly);
 
 export interface Secret {
   name: string;
-  required: 'yes' | 'for GSC' | 'for Bing' | 'optional';
+  required: 'yes' | 'for GSC' | 'for Bing' | 'for apps' | 'optional';
   description: string;
   example?: string;
 }
@@ -493,6 +594,47 @@ export const SECRETS: Secret[] = [
   },
 ];
 
+// Apps (ADR 0009): appended to SECRETS below.
+const APP_SECRETS: Secret[] = [
+  {
+    name: 'APPS',
+    required: 'optional',
+    description:
+      'Optional JSON array of your apps: `id`, `name`, `appleId` (App Store Apple ID), `playPackage`, `siteId`, `territories`. Easier: add apps in the dashboard (Settings → Apps).',
+  },
+  {
+    name: 'ASC_KEY_ID',
+    required: 'for apps',
+    description:
+      'Key ID of an App Store Connect API key with the Sales and Reports role. Never an Admin key: Admin keys are used once, from the dashboard, and never stored.',
+    example: '2X9R4HXF34',
+  },
+  { name: 'ASC_ISSUER_ID', required: 'for apps', description: 'The Issuer ID shown above the App Store Connect API keys.' },
+  { name: 'ASC_PRIVATE_KEY', required: 'for apps', description: 'Contents of the key’s `AuthKey_<KEY ID>.p8` file.' },
+  {
+    name: 'PLAY_REPORTS_BUCKET',
+    required: 'for apps',
+    description:
+      'Cloud Storage bucket of your Play Console reports (Download reports → Copy Cloud Storage URI). The full `gs://` URI is accepted.',
+    example: 'pubsite_prod_rev_01234567890123456789',
+  },
+  {
+    name: 'PLAY_CLIENT_EMAIL',
+    required: 'optional',
+    description:
+      'Service account for Google Play when it is not the Search Console one; with `PLAY_PRIVATE_KEY`. Defaults to `GSC_CLIENT_EMAIL`.',
+  },
+  { name: 'PLAY_PRIVATE_KEY', required: 'optional', description: 'Private key of `PLAY_CLIENT_EMAIL`. Defaults to `GSC_PRIVATE_KEY`.' },
+  {
+    name: 'APP_STORE_PUBLIC_DATA',
+    required: 'optional',
+    description:
+      'Set to `true` to turn on the opt-in plugin that reads Apple’s public App Store feeds once a day and keeps only your own app’s rating and chart position. Off by default.',
+    example: 'true',
+  },
+];
+SECRETS.push(...APP_SECRETS);
+
 export const SITE_FIELDS: { name: string; required: boolean; description: string }[] = [
   {
     name: 'id',
@@ -603,6 +745,10 @@ export interface Faq {
 }
 
 export const FAQS: Faq[] = [
+  {
+    q: 'Does Searchkeep work for apps?',
+    a: 'Yes. Besides sites, you can add your own iOS and Android apps. Searchkeep keeps their store data from App Store Connect (analytics reports and reviews) and the Google Play Console (bulk reports, search terms and crash rates) apart from your sites, and shows where people find each app, how the store page converts and which websites, including your own, send them. It reads with read-only keys; App Store reports are started once from the dashboard with a temporary Admin key that is never stored.',
+  },
   {
     q: 'What is Searchkeep?',
     a: 'Searchkeep is open-source SEO and GEO (generative engine optimization) analytics that you deploy to your own Cloudflare account. It keeps syncing Google Search Console, Bing Webmaster Tools and Cloudflare data into a D1 database, then lets you explore it in a dashboard or ask about it from any MCP client such as Claude, Cursor or ChatGPT.',
