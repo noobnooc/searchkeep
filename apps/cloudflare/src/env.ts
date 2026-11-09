@@ -18,6 +18,18 @@ export interface Env {
   GSC_BACKFILL_MONTHS?: string;
   SYNC_DAILY_WRITE_BUDGET?: string;
   SYNC_MAX_CALLS_PER_RUN?: string;
+  /** Apps (ADR 0009): optional JSON array; apps can also be added in the dashboard. */
+  APPS?: string;
+  /** App Store Connect API key with the Sales and Reports role. */
+  ASC_KEY_ID?: string;
+  ASC_ISSUER_ID?: string;
+  ASC_PRIVATE_KEY?: string;
+  /** Google Play: Cloud Storage bucket of the Play Console reports; the service account defaults to GSC's. */
+  PLAY_REPORTS_BUCKET?: string;
+  PLAY_CLIENT_EMAIL?: string;
+  PLAY_PRIVATE_KEY?: string;
+  /** Opt-in plugin: Apple's public App Store feeds (own app's rating and chart position). */
+  APP_STORE_PUBLIC_DATA?: string;
   /** Local development only: honoured exclusively for requests to localhost. */
   SEARCHKEEP_DEV?: string;
 }

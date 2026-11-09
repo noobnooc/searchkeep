@@ -1,7 +1,22 @@
 /** Minimal hash router: `#/view/sub?key=value`. */
 
 export type ViewId =
-  'overview' | 'geo' | 'performance' | 'compare' | 'opportunities' | 'ai-crawlers' | 'ai-referrals' | 'technical' | 'settings';
+  | 'overview'
+  | 'geo'
+  | 'performance'
+  | 'compare'
+  | 'opportunities'
+  | 'ai-crawlers'
+  | 'ai-referrals'
+  | 'technical'
+  | 'settings'
+  | 'app-overview'
+  | 'app-acquisition'
+  | 'app-reviews'
+  | 'app-stability';
+
+/** Views of the Apps area (ADR 0009). */
+export const APP_VIEWS: ViewId[] = ['app-overview', 'app-acquisition', 'app-reviews', 'app-stability'];
 
 const VIEWS: ViewId[] = [
   'overview',
@@ -13,6 +28,10 @@ const VIEWS: ViewId[] = [
   'ai-referrals',
   'technical',
   'settings',
+  'app-overview',
+  'app-acquisition',
+  'app-reviews',
+  'app-stability',
 ];
 
 interface Route {

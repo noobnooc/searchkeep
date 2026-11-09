@@ -8,7 +8,13 @@ import {
   normalizePage,
   SEARCH_CRAWLERS,
   toIsoDate,
+  type AppConfig,
   type AppearanceInput,
+  type AppReferrerInput,
+  type AppReviewInput,
+  type AppSearchTermInput,
+  type AppStoreDailyInput,
+  type AppVitalsInput,
   type SearchFactInput,
   type Store,
   type UrlInspectionInput,
@@ -238,4 +244,211 @@ export async function seedDemo(store: Store, siteId: string, domain: string, tod
     { url: `https://${domain}/old-page`, issue: 'Code4xx', httpCode: 404, detectedAt: today },
   ]);
   return n;
+}
+
+const APP_TERRITORIES: Array<[string, number]> = [
+  ['US', 1],
+  ['GB', 0.35],
+  ['DE', 0.3],
+  ['JP', 0.2],
+];
+const APP_SOURCES: Array<[string, number]> = [
+  ['search', 1],
+  ['browse', 0.45],
+  ['web_referrer', 0.25],
+  ['app_referrer', 0.12],
+];
+const PLAY_TERMS: Array<[string, number, number]> = [
+  ['acme', 140, 0.42],
+  ['analytics app', 90, 0.08],
+  ['seo tracker', 70, 0.12],
+  ['website stats', 45, 0.21],
+  ['acme analytics', 30, 0.5],
+];
+const REVIEWS: Array<[number, string, string]> = [
+  [5, 'Exactly what I needed', 'Clean, fast and the widgets are great.'],
+  [4, 'Very good', 'Would love a dark mode for the charts.'],
+  [2, 'Crashes on launch', 'Since the last update it crashes when I open it.'],
+  [5, 'Love it', 'Simple and private. Thanks!'],
+  [1, 'Sync broken', 'Data stopped syncing after the update.'],
+  [3, 'OK', 'Does the job, a bit slow on older phones.'],
+];
+
+/** Demo data for one app (both stores, as configured), for local development only. */
+export async function seedAppDemo(store: Store, app: AppConfig, siteDomain = 'acme.com', today = toIsoDate(new Date())): Promise<number> {
+  const r = rng(7);
+  const days = 120;
+  const end = addDays(today, -2);
+  const dates = Array.from({ length: days }, (_, i) => addDays(end, -(days - 1 - i)));
+  const trend = (i: number) => (0.7 + (0.5 * i) / days) * (1 + 0.25 * Math.sin(i / 5));
+  let n = 0;
+  const domain = siteDomain.replace(/^www\./, '');
+  if (app.appleId) {
+    const rows: AppStoreDailyInput[] = [];
+    const referrers: AppReferrerInput[] = [];
+    const vitals: AppVitalsInput[] = [];
+    dates.forEach((date, i) => {
+      for (const [territory, tw] of APP_TERRITORIES)
+        for (const [source, sw] of APP_SOURCES) {
+          const impressions = Math.round(900 * tw * sw * trend(i) * (0.85 + 0.3 * r()));
+          const pageViews = Math.round(impressions * (source === 'search' ? 0.18 : 0.5));
+          rows.push({
+            date,
+            territory,
+            source,
+            impressions,
+            impressionsUnique: Math.round(impressions * 0.8),
+            pageViews,
+            pageViewsUnique: Math.round(pageViews * 0.85),
+            downloads: Math.round(pageViews * 0.35 + (source === 'search' ? impressions * 0.03 : 0)),
+            redownloads: Math.round(pageViews * 0.05),
+            installs: Math.round(pageViews * 0.25),
+            deletions: Math.round(pageViews * 0.04),
+          });
+        }
+      referrers.push(
+        { date, kind: 'web', referrer: domain, pageViews: Math.round(60 * trend(i)), downloads: Math.round(18 * trend(i)) },
+        { date, kind: 'web', referrer: 'news.ycombinator.com', pageViews: Math.round(25 * r()), downloads: Math.round(6 * r()) },
+        { date, kind: 'app', referrer: 'Messages', pageViews: Math.round(12 * r()), downloads: Math.round(4 * r()) },
+      );
+      for (const version of ['', '2.3', '2.4']) {
+        const crashes = Math.round((version === '2.4' && i > days - 20 ? 9 : 3) * r() + 1);
+        vitals.push({
+          date,
+          version,
+          crashes: version === '' ? crashes * 2 : crashes,
+          crashDevices: Math.max(1, Math.round(crashes * 0.7)),
+        });
+      }
+    });
+    const metrics = [
+      'impressions',
+      'impressionsUnique',
+      'pageViews',
+      'pageViewsUnique',
+      'downloads',
+      'redownloads',
+      'installs',
+      'deletions',
+    ] as const;
+    n += await store.writeAppStoreDaily(app.id, 'apple', { metrics: [...metrics], shape: 'cross', dates, rows });
+    n += await store.writeAppReferrers(app.id, 'apple', { metrics: ['pageViews', 'downloads'], dates, rows: referrers });
+    n += await store.writeAppVitals(app.id, 'apple', { metrics: ['crashes', 'crashDevices'], rows: vitals });
+    n += await store.writeAppRatings(
+      app.id,
+      'apple',
+      dates.filter((_, i) => i % 7 === 0).map((date, i) => ({ date, territory: 'US', average: 4.4 + 0.02 * i, count: 800 + 40 * i })),
+    );
+    n += await store.writeAppReviews(app.id, 'apple', reviewsFor('a', dates, r, 'USA'));
+  }
+  if (app.playPackage) {
+    const byTerritory: AppStoreDailyInput[] = [];
+    const bySource: AppStoreDailyInput[] = [];
+    const terms: AppSearchTermInput[] = [];
+    const vitals: AppVitalsInput[] = [];
+    let active = 4200;
+    dates.forEach((date, i) => {
+      for (const [territory, tw] of APP_TERRITORIES) {
+        const visitors = Math.round(320 * tw * trend(i) * (0.85 + 0.3 * r()));
+        const installs = Math.round(visitors * 0.3);
+        byTerritory.push({
+          date,
+          territory,
+          source: '*',
+          pageViewsUnique: visitors,
+          downloads: Math.round(visitors * 0.28),
+          installs,
+          deletions: Math.round(installs * 0.2),
+          activeDevices: Math.round(active * tw),
+        });
+      }
+      active += Math.round(20 * r());
+      const total = byTerritory.slice(-APP_TERRITORIES.length).reduce((t, x) => t + (x.pageViewsUnique ?? 0), 0);
+      for (const [source, share] of [
+        ['search', 0.62],
+        ['browse', 0.25],
+        ['referral', 0.09],
+        ['other', 0.04],
+      ] as const) {
+        const visitors = Math.round(total * share);
+        bySource.push({
+          date,
+          territory: '*',
+          source,
+          pageViewsUnique: visitors,
+          downloads: Math.round(visitors * (source === 'search' ? 0.3 : 0.24)),
+        });
+      }
+      for (const [term, v, conv] of PLAY_TERMS) {
+        const visitors = Math.round(v * trend(i) * (0.8 + 0.4 * r()));
+        terms.push({ date, term, visitors, acquisitions: Math.round(visitors * conv) });
+      }
+      for (const version of ['', '41', '42']) {
+        const rate = version === '42' && i > days - 20 ? 0.016 : 0.006;
+        vitals.push({
+          date,
+          version,
+          crashRate: rate * (0.8 + 0.4 * r()),
+          userPerceivedCrashRate: rate * 0.7,
+          anrRate: 0.003 * (0.8 + 0.4 * r()),
+          userPerceivedAnrRate: 0.002,
+          distinctUsers: version === '' ? 3000 : 1500,
+        });
+      }
+    });
+    n += await store.writeAppStoreDaily(app.id, 'play', {
+      metrics: ['pageViewsUnique', 'downloads', 'installs', 'deletions', 'activeDevices'],
+      shape: 'territory',
+      dates,
+      rows: byTerritory,
+    });
+    n += await store.writeAppStoreDaily(app.id, 'play', {
+      metrics: ['pageViewsUnique', 'downloads'],
+      shape: 'source',
+      dates,
+      rows: bySource,
+    });
+    n += await store.writeAppSearchTerms(app.id, terms, dates);
+    n += await store.writeAppReferrers(app.id, 'play', {
+      metrics: ['pageViews', 'downloads'],
+      dates,
+      rows: dates.map((date) => ({
+        date,
+        kind: 'utm' as const,
+        referrer: domain,
+        pageViews: Math.round(30 * r()),
+        downloads: Math.round(9 * r()),
+      })),
+    });
+    n += await store.writeAppVitals(app.id, 'play', {
+      metrics: ['crashRate', 'userPerceivedCrashRate', 'anrRate', 'userPerceivedAnrRate', 'distinctUsers'],
+      rows: vitals,
+    });
+    n += await store.writeAppRatings(
+      app.id,
+      'play',
+      dates.map((date, i) => ({ date, territory: '*', average: 4.2 + 0.001 * i, dailyAverage: 3.8 + r() })),
+    );
+    n += await store.writeAppReviews(app.id, 'play', reviewsFor('p', dates, r, null));
+  }
+  return n;
+}
+
+function reviewsFor(prefix: string, dates: string[], r: () => number, territory: string | null): AppReviewInput[] {
+  return dates
+    .filter((_, i) => i % 3 === 0)
+    .map((date, i) => {
+      const [rating, title, body] = REVIEWS[i % REVIEWS.length]!;
+      return {
+        id: `${prefix}-${date}`,
+        createdAt: `${date}T${String(8 + Math.floor(r() * 10)).padStart(2, '0')}:00:00.000Z`,
+        rating,
+        title,
+        body,
+        territory,
+        language: territory ? null : 'en',
+        version: territory ? null : i % 2 ? '4.1' : '4.2',
+        replied: rating <= 2 && i % 2 === 0,
+      };
+    });
 }

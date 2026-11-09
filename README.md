@@ -10,7 +10,8 @@
 Searchkeep is a self-hosted analytics tool for site owners. It runs as a single Cloudflare Worker
 with a D1 database in _your_ account, analyzes only _your_ sites, and uses only first-party data you
 already have access to: Google Search Console, Bing Webmaster Tools, and Cloudflare (AI and search
-engine crawler traffic and Web Analytics).
+engine crawler traffic and Web Analytics). If you also ship iOS or Android apps, it keeps their store
+data too, from App Store Connect and the Google Play Console, apart from the sites.
 
 You use it in two ways over one data layer:
 
@@ -55,6 +56,11 @@ _Screenshots use the built-in demo data (`pnpm dev`, then `POST /api/dev/seed`).
   what changed.
 - **Crawl stats**: Googlebot, Bingbot and other search engine crawlers from Cloudflare, by crawler,
   page, response status and day.
+- **Apps (ASO)**: the store funnel of your own apps (App Store impressions, product page views and
+  downloads; Google Play store listing visitors and acquisitions) by store, source and territory,
+  Google Play search terms, the websites and apps that send people to your store page (your own site
+  marked), ratings, reviews and crash rates. App Store reports are started once from the dashboard
+  with a temporary Admin key that is never stored; the sync reads them with a Sales and Reports key.
 - **Your data stays in your account**: no telemetry, no vendor server, no third party in the path.
   It runs on the Cloudflare free tier.
 - **Read-only by default**: the only write to an external system (`submit_sitemap`) is off until
@@ -67,7 +73,9 @@ _Screenshots use the built-in demo data (`pnpm dev`, then `POST /api/dev/seed`).
 - **Agent-friendly**: the deploy guide is an idempotent runbook with a verification for every step,
   so an AI agent can deploy Searchkeep for you.
 
-Not included, by design: backlink data, competitor data, rank tracking and SERP scraping.
+Not included, by design: backlink data, competitor data, rank tracking, SERP scraping and app store
+keyword rankings. Apple's public App Store feeds (your own app's rating and chart position) are an
+opt-in plugin, off by default.
 
 ## Install with an AI agent
 
@@ -175,6 +183,9 @@ packages/
   sources/gsc/         Google Search Console adapter
   sources/bing/        Bing Webmaster Tools adapter
   sources/cloudflare/  Cloudflare GraphQL Analytics adapter
+  sources/app-store-connect/  App Store Connect adapter (analytics reports, reviews)
+  sources/google-play/        Google Play adapter (Console bulk reports, Developer Reporting API)
+  sources/app-store-public/   Opt-in plugin: Apple's public App Store feeds
 docs/
   charter.md           Mission and principles (maintainers only)
   adr/                 Architecture decision records
@@ -204,13 +215,19 @@ AGENTS.md              Instructions for AI agents working on this repository
 | `list_sitemaps`        | Lists the sitemaps Search Console knows and their status.                                       |
 | `submit_sitemap`       | Submits a sitemap to GSC. **Only registered with `ENABLE_WRITES=true`**; needs GSC Full access. |
 | `setup_status`         | Reports configuration, readiness and the last sync, so you (or an agent) can verify a deploy.   |
+| `list_apps`            | Lists configured apps, their connected stores, App Store report status and stored data.         |
+| `app_performance`      | Store funnel per store and period; by date, territory, source or referrer; chart positions.     |
+| `app_search_terms`     | Google Play search terms: visitors, acquisitions, conversion, change and low converters.        |
+| `app_reviews`          | Ratings over time, star distribution and reviews, filtered by stars, territory, version, text.  |
+| `app_stability`        | Crash and ANR rates (Google Play) and crash counts (App Store) per day or app version.          |
 
 All tools are read-only except `submit_sitemap`. Common parameters: `site`, `start` and `end`
 (`YYYY-MM-DD`), `days` (default 28), `source` (`gsc` or `bing`, default `gsc`), `searchType` (`web`,
 `image`, `video`, `news`, `discover` or `googleNews`, default `web`), `brand` (`all`, `brand` or
 `non_brand`) and `limit` (at most 500). `query_performance` also groups by search `appearance`, and
 by country or device together with query or page for sites in `GSC_SEGMENT_SITES`. Results are aggregated on the server and capped,
-so they stay small in your context window. The full parameter reference is at
+so they stay small in your context window. The app tools take `app` instead of `site`, and an
+optional `store` (`apple` or `play`). The full parameter reference is at
 <https://searchkeep.dev/docs/mcp>.
 
 The "Cited" step comes from Bing AI Performance, which has no API: export its CSV in Bing

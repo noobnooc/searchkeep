@@ -12,7 +12,7 @@
   import GeoFunnelFlow from '#lib/components/visuals/GeoFunnelFlow.svelte';
   import AgentPrompt from '#lib/components/AgentPrompt.svelte';
   import { SITE, GITHUB } from '#lib/site.ts';
-  import { TOOLS, FAQS } from '#lib/content.ts';
+  import { TOOLS, READ_ONLY_TOOLS, FAQS } from '#lib/content.ts';
   import { organization, website, softwareApplication, faqPage } from '#lib/schema.ts';
 
   // Monochrome marks; each takes its brand color on hover.
@@ -45,6 +45,7 @@
     { icon: 'zap', label: 'Opportunities', names: ['find_quick_wins', 'find_cannibalization', 'find_ctr_anomalies', 'find_content_decay'] },
     { icon: 'bot', label: 'AI & GEO', names: ['geo_funnel', 'ai_crawlers'] },
     { icon: 'globe', label: 'Site', names: ['inspect_url', 'list_sitemaps', 'submit_sitemap'] },
+    { icon: 'sparkle', label: 'Apps', names: ['list_apps', 'app_performance', 'app_search_terms', 'app_reviews', 'app_stability'] },
     { icon: 'plug', label: 'Setup', names: ['list_sites', 'setup_status'] },
   ];
   const grouped = new Set(toolGroups.flatMap((g) => g.names));
@@ -60,7 +61,7 @@
     { row: 'Price', sk: { v: 'Free, MIT licensed', good: true }, saas: { v: 'Monthly subscription' } },
     { row: 'History past GSC’s 16 months', sk: { v: 'Kept in D1, forever', good: true }, saas: { v: 'Varies; often only while subscribed' } },
     { row: 'AI crawled → cited → clicked, per page', sk: { v: 'Built in', good: true }, saas: { v: 'Rare' } },
-    { row: 'Ask from Claude, Cursor, ChatGPT', sk: { v: '14 read-only MCP tools', good: true }, saas: { v: 'Sometimes' } },
+    { row: 'Ask from Claude, Cursor, ChatGPT', sk: { v: `${READ_ONLY_TOOLS.length} read-only MCP tools`, good: true }, saas: { v: 'Sometimes' } },
     { row: 'Telemetry', sk: { v: 'None', good: true }, saas: { v: 'Usually' } },
     { row: 'Backlink index', sk: { v: 'No, by design', no: true }, saas: { v: 'Yes', good: true } },
     { row: 'Competitor research', sk: { v: 'No, by design', no: true }, saas: { v: 'Yes', good: true } },
@@ -153,15 +154,15 @@
     <div class="section-head">
       <span class="eyebrow">MCP server</span>
       <h2 id="mcp-title">Ask, don’t dig.</h2>
-      <p class="lead">Twelve read-only MCP tools answer from your own data, so your assistant does the digging.</p>
+      <p class="lead">{READ_ONLY_TOOLS.length} read-only MCP tools answer from your own data, so your assistant does the digging.</p>
       <p class="endpoint"><code>https://your-domain/mcp</code><span>Claude · Claude Code · Cursor · ChatGPT</span></p>
     </div>
     <div class="mcp-grid">
       <ChatMock />
       <div class="tools card">
         <div class="tools-head">
-          <span>15 tools</span>
-          <span class="muted">14 read-only · 1 opt-in write</span>
+          <span>{TOOLS.length} tools</span>
+          <span class="muted">{READ_ONLY_TOOLS.length} read-only · 1 opt-in write</span>
         </div>
         <div class="groups">
           {#each groups as g (g.label)}

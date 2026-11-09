@@ -22,6 +22,13 @@
       "when": 1793897292623,
       "tag": "0002_coverage_crawlers_search_types",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1794223788682,
+      "tag": "0003_apps",
+      "breakpoints": true
     }
   ]
 }

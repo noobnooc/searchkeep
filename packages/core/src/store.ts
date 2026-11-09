@@ -1,5 +1,28 @@
 import type {
   AiCitationInput,
+  AppChartRankInput,
+  AppConfig,
+  AppDataCoverage,
+  AppRatingInput,
+  AppRatingQuery,
+  AppRatingRow,
+  AppReferrerQuery,
+  AppReferrerRow,
+  AppReferrerWrite,
+  AppReviewInput,
+  AppReviewQuery,
+  AppReviewRow,
+  AppReviewStat,
+  AppSearchTermInput,
+  AppSearchTermQuery,
+  AppSearchTermRow,
+  AppStore,
+  AppStoreQuery,
+  AppStoreRow,
+  AppStoreWrite,
+  AppVitalsQuery,
+  AppVitalsRow,
+  AppVitalsWrite,
   AppearanceInput,
   BreakdownInput,
   CrawlerKind,
@@ -118,4 +141,47 @@ export interface Store {
   coverage(siteId?: string): Promise<DataCoverage[]>;
   /** Latest date with search data for a site and source. */
   latestDate(siteId: string, source: SearchSource): Promise<IsoDate | null>;
+
+  // ---- apps (ADR 0009) ----------------------------------------------------
+  /** Apps managed in the dashboard (the APPS secret is not stored). */
+  listAppConfigs(): Promise<AppConfig[]>;
+  saveAppConfig(app: AppConfig): Promise<void>;
+  /** Removes a dashboard-managed app's configuration; its data is kept. */
+  deleteAppConfig(id: string): Promise<boolean>;
+
+  /**
+   * Sets `w.metrics` of the given rows. For the days in `w.dates`, rows of the same shape that the
+   * write does not mention get 0 for those metrics (a newer report replaces a day as a whole).
+   */
+  writeAppStoreDaily(appId: string, store: AppStore, w: AppStoreWrite): Promise<number>;
+  /** Replaces the search terms of the days in `dates` (Google Play). */
+  writeAppSearchTerms(appId: string, rows: AppSearchTermInput[], dates: IsoDate[]): Promise<number>;
+  /** Sets `w.metrics` of the referrers; for the days in `w.dates`, referrers not mentioned get 0. */
+  writeAppReferrers(appId: string, store: AppStore, w: AppReferrerWrite): Promise<number>;
+  writeAppRatings(appId: string, store: AppStore, rows: AppRatingInput[]): Promise<number>;
+  /** Upserts reviews by id (an edited review replaces the earlier text). */
+  writeAppReviews(appId: string, store: AppStore, rows: AppReviewInput[]): Promise<number>;
+  writeAppVitals(appId: string, store: AppStore, w: AppVitalsWrite): Promise<number>;
+  writeAppChartRanks(appId: string, rows: AppChartRankInput[]): Promise<number>;
+
+  /**
+   * Store funnel metrics grouped by the dimensions. Rows are chosen so nothing is counted twice:
+   * with `source` (dimension or filter) the per-source rows, otherwise the per-territory rows.
+   */
+  queryAppStore(q: AppStoreQuery): Promise<AppStoreRow[]>;
+  queryAppSearchTerms(q: AppSearchTermQuery): Promise<AppSearchTermRow[]>;
+  queryAppReferrers(q: AppReferrerQuery): Promise<AppReferrerRow[]>;
+  /** Rating rows per store, day and territory, oldest first. */
+  queryAppRatings(q: AppRatingQuery): Promise<AppRatingRow[]>;
+  /** Reviews written in the range, newest first. */
+  listAppReviews(q: AppReviewQuery): Promise<AppReviewRow[]>;
+  /** Reviews per store and star rating in the range. */
+  appReviewStats(appId: string, range: DateRange, store?: AppStore): Promise<AppReviewStat[]>;
+  /** Rates are weighted by distinct users when versions or days are combined. */
+  queryAppVitals(q: AppVitalsQuery): Promise<AppVitalsRow[]>;
+  queryAppChartRanks(appId: string, range: DateRange): Promise<AppChartRankInput[]>;
+  /** Per app, store and dataset: first and last date. */
+  appCoverage(appId?: string): Promise<AppDataCoverage[]>;
+  /** Latest day with store funnel data for an app (and store). */
+  latestAppDate(appId: string, store?: AppStore): Promise<IsoDate | null>;
 }

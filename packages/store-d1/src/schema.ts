@@ -297,3 +297,140 @@ export const siteConfigs = sqliteTable('site_configs', {
   createdAt: text('created_at').notNull().default(now),
   updatedAt: text('updated_at').notNull().default(now),
 });
+
+// ------------------------------------------------------------------ apps (ADR 0009)
+
+/** Apps managed in the dashboard. Apps from the APPS secret are not stored here. */
+export const appConfigs = sqliteTable('app_configs', {
+  id: text('id').primaryKey(),
+  name: text('name').notNull(),
+  appleId: text('apple_id'),
+  playPackage: text('play_package'),
+  siteId: text('site_id'),
+  /** Storefronts for the opt-in public feeds, comma-separated. */
+  territories: text('territories'),
+  createdAt: text('created_at').notNull().default(now),
+  updatedAt: text('updated_at').notNull().default(now),
+});
+
+/**
+ * Store funnel per app, store (`apple`, `play`), day, territory and source. Google Play reports
+ * territories and sources separately: its rows have source `*` (per territory) or territory `*`
+ * (per source); App Store rows have both. `active_devices` is a level, not a daily count.
+ */
+export const appStoreDaily = sqliteTable(
+  'app_store_daily',
+  {
+    appId: text('app_id').notNull(),
+    store: text('store').notNull(),
+    date: text('date').notNull(),
+    territory: text('territory').notNull(),
+    source: text('source').notNull(),
+    impressions: integer('impressions').notNull().default(0),
+    impressionsUnique: integer('impressions_unique').notNull().default(0),
+    pageViews: integer('page_views').notNull().default(0),
+    pageViewsUnique: integer('page_views_unique').notNull().default(0),
+    downloads: integer('downloads').notNull().default(0),
+    redownloads: integer('redownloads').notNull().default(0),
+    installs: integer('installs').notNull().default(0),
+    deletions: integer('deletions').notNull().default(0),
+    activeDevices: integer('active_devices').notNull().default(0),
+  },
+  (t) => [primaryKey({ columns: [t.appId, t.store, t.date, t.territory, t.source] }), index('app_store_daily_date').on(t.appId, t.date)],
+);
+
+/** Google Play search terms that brought store listing visitors. */
+export const appSearchTerms = sqliteTable(
+  'app_search_terms',
+  {
+    appId: text('app_id').notNull(),
+    date: text('date').notNull(),
+    term: text('term').notNull(),
+    visitors: integer('visitors').notNull().default(0),
+    acquisitions: integer('acquisitions').notNull().default(0),
+  },
+  (t) => [primaryKey({ columns: [t.appId, t.date, t.term] })],
+);
+
+/** Websites and apps (App Store Detailed reports) and UTM sources (Google Play) that sent people to the store page. */
+export const appReferrers = sqliteTable(
+  'app_referrers',
+  {
+    appId: text('app_id').notNull(),
+    store: text('store').notNull(),
+    date: text('date').notNull(),
+    kind: text('kind').notNull(),
+    referrer: text('referrer').notNull(),
+    pageViews: integer('page_views').notNull().default(0),
+    downloads: integer('downloads').notNull().default(0),
+  },
+  (t) => [primaryKey({ columns: [t.appId, t.store, t.date, t.kind, t.referrer] })],
+);
+
+/** Average ratings per day and territory (`*` = all territories). */
+export const appRatings = sqliteTable(
+  'app_ratings',
+  {
+    appId: text('app_id').notNull(),
+    store: text('store').notNull(),
+    date: text('date').notNull(),
+    territory: text('territory').notNull(),
+    average: real('average'),
+    count: integer('count'),
+    dailyAverage: real('daily_average'),
+  },
+  (t) => [primaryKey({ columns: [t.appId, t.store, t.date, t.territory] })],
+);
+
+/** Store reviews, without reviewer names. `date` is the day of `created_at`. */
+export const appReviews = sqliteTable(
+  'app_reviews',
+  {
+    appId: text('app_id').notNull(),
+    store: text('store').notNull(),
+    id: text('id').notNull(),
+    createdAt: text('created_at').notNull(),
+    date: text('date').notNull(),
+    rating: integer('rating').notNull(),
+    title: text('title'),
+    body: text('body'),
+    territory: text('territory'),
+    language: text('language'),
+    version: text('version'),
+    replied: integer('replied').notNull().default(0),
+  },
+  (t) => [primaryKey({ columns: [t.appId, t.store, t.id] }), index('app_reviews_date').on(t.appId, t.date)],
+);
+
+/** Stability per day and app version (empty version = all versions). */
+export const appVitals = sqliteTable(
+  'app_vitals',
+  {
+    appId: text('app_id').notNull(),
+    store: text('store').notNull(),
+    date: text('date').notNull(),
+    version: text('version').notNull(),
+    crashRate: real('crash_rate'),
+    userPerceivedCrashRate: real('user_perceived_crash_rate'),
+    anrRate: real('anr_rate'),
+    userPerceivedAnrRate: real('user_perceived_anr_rate'),
+    distinctUsers: integer('distinct_users'),
+    crashes: integer('crashes'),
+    crashDevices: integer('crash_devices'),
+  },
+  (t) => [primaryKey({ columns: [t.appId, t.store, t.date, t.version] })],
+);
+
+/** The user's own app's App Store chart position (opt-in public feeds); null = not in the chart. */
+export const appChartRanks = sqliteTable(
+  'app_chart_ranks',
+  {
+    appId: text('app_id').notNull(),
+    date: text('date').notNull(),
+    territory: text('territory').notNull(),
+    chart: text('chart').notNull(),
+    genre: text('genre').notNull(),
+    rank: integer('rank'),
+  },
+  (t) => [primaryKey({ columns: [t.appId, t.date, t.territory, t.chart, t.genre] })],
+);

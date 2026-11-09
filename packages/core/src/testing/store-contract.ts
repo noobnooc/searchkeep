@@ -25,6 +25,7 @@ import {
 import { aiCrawlers, geoFunnel, searchCrawlers } from '../analysis/geo.js';
 import { indexCoverage, listSites, setupStatus } from '../analysis/ops.js';
 import { evaluateReadiness } from '../auth/readiness.js';
+import { appContract } from './app-contract.js';
 
 const SITE = {
   id: 'acme',
@@ -916,7 +917,14 @@ export function storeContract(name: string, makeStore: () => Promise<Store>): vo
         // Everything is in: the progress report says so.
         const progress = await syncProgress({ store, config: cfg, clients: clients(), now: () => NOW });
         expect(progress.phase).toBe('done');
-        expect(progress.summary).toEqual({ sites: 1, sitesWithRecentData: 1, historyPercent: 100, issues: 0 });
+        expect(progress.summary).toEqual({
+          sites: 1,
+          sitesWithRecentData: 1,
+          apps: 0,
+          appsWithRecentData: 0,
+          historyPercent: 100,
+          issues: 0,
+        });
         const byDataset = Object.fromEntries(progress.sites[0]!.datasets.map((d) => [d.dataset, d]));
         expect(byDataset.gsc).toMatchObject({ state: 'done', from: '2026-09-20', target: '2026-09-20' });
         expect(byDataset.bing).toMatchObject({ state: 'done', percent: 100 });
@@ -1582,7 +1590,7 @@ export function storeContract(name: string, makeStore: () => Promise<Store>): vo
         const at = () => NOW;
         const before = await syncProgress({ store, config: cfg, clients: clients(), now: at });
         expect(before.phase).toBe('waiting');
-        expect(before.summary).toEqual({ sites: 2, sitesWithRecentData: 0, historyPercent: 0, issues: 0 });
+        expect(before.summary).toEqual({ sites: 2, sitesWithRecentData: 0, apps: 0, appsWithRecentData: 0, historyPercent: 0, issues: 0 });
         expect(before.sites[0]!.datasets.map((d) => [d.dataset, d.state])).toEqual([
           ['gsc', 'waiting'],
           ['bing', 'waiting'],
@@ -1672,4 +1680,5 @@ export function storeContract(name: string, makeStore: () => Promise<Store>): vo
       });
     });
   });
+  appContract(name, makeStore);
 }

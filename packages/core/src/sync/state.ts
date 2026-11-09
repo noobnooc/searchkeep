@@ -40,7 +40,17 @@ export const shrinkChunk = (days: number) => Math.max(1, Math.floor(days / 3));
 /** Bing datasets; each is one call that returns everything Bing holds. */
 export const BING_DATASETS = ['bing.traffic', 'bing.queries', 'bing.pages', 'bing.crawl_issues'] as const;
 
-export const SOURCE_NAMES: Record<SourceId, string> = { gsc: 'Search Console', bing: 'Bing', cloudflare: 'Cloudflare' };
+export const SOURCE_NAMES: Record<SourceId, string> = {
+  gsc: 'Search Console',
+  bing: 'Bing',
+  cloudflare: 'Cloudflare',
+  asc: 'App Store Connect',
+  play: 'Google Play',
+  appstore: 'App Store public feeds',
+};
+
+/** Sync results and backoff entries of an app use this in place of a site id. */
+export const appTaskId = (appId: string) => `app:${appId}`;
 
 export const syncKeys = {
   /** Today's GSC increment: days still to pull. */
@@ -73,6 +83,29 @@ export const syncKeys = {
   cfCrawlersChunk: (site: string) => `cf:crawlers:chunk:${site}`,
   cfRumChunk: (site: string) => `cf:rum:chunk:${site}`,
   writes: (day: IsoDate) => `sync:writes:${day}`,
+  // ---- apps (ADR 0009); every key starts with `app:` so one range read loads them all.
+  /** App Store report requests of an app (`AscRequestState`). */
+  ascRequests: (app: string) => `app:asc:req:${app}`,
+  /** Report ids of the ongoing or snapshot request by report key, refreshed weekly (`AscReportIds`). */
+  ascReports: (app: string, kind: AscRequestKind) => `app:asc:reports:${kind}:${app}`,
+  /** Instances listed today and not read yet, oldest first (`AscPending`). */
+  ascPending: (app: string, kind: AscRequestKind, report: string) => `app:asc:pending:${kind}:${app}:${report}`,
+  /** Newest processing date of an ongoing report whose instance was read. */
+  ascInstance: (app: string, report: string) => `app:asc:inst:${app}:${report}`,
+  /** Oldest day an ongoing report wrote; the snapshot fills only older days. */
+  ascFrom: (app: string, report: string) => `app:asc:from:${app}:${report}`,
+  /** Snapshot instances of a report already read (`string[]` of instance ids). */
+  ascSnapshot: (app: string, report: string) => `app:asc:snap:${app}:${report}`,
+  /** Customer reviews: newest review synced and how far the history went (`ReviewCursor`). */
+  ascReviews: (app: string) => `app:asc:reviews:${app}`,
+  /** The Play Console report files of an app, listed once a day (`PlayListing`). */
+  playListing: (app: string) => `app:play:list:${app}`,
+  /** Generation of a Play report file that was read. */
+  playObject: (app: string, name: string) => `app:play:obj:${app}:${name}`,
+  /** Newest day of Play crash and ANR rates synced. */
+  playVitals: (app: string) => `app:play:vitals:${app}`,
+  /** Day Apple's public feeds were last read for an app. */
+  appStorePublic: (app: string) => `app:pub:${app}`,
   backoff: 'sync:backoff',
   lastRun: 'sync:last_run',
 } as const;
@@ -128,9 +161,9 @@ export function activeBackoff(entry: Backoff | undefined, nowMs: number): Backof
   return entry && Date.parse(entry.until) > nowMs ? entry : null;
 }
 
-/** Drops task entries of sites that are no longer configured. */
+/** Drops task entries of sites and apps that are no longer configured. */
 export function pruneBackoff(map: BackoffMap, config: SearchkeepConfig): BackoffMap {
-  const ids = new Set(config.sites.map((s) => s.id));
+  const ids = new Set([...config.sites.map((s) => s.id), ...config.apps.map((a) => appTaskId(a.id))]);
   return Object.fromEntries(
     Object.entries(map).filter(([k]) => {
       if (!k.startsWith('task:')) return true;
@@ -149,9 +182,9 @@ export function parseJson<T>(value: string | null | undefined): T | null {
   }
 }
 
-/** Every cursor the sync keeps, in three range reads instead of a few reads per site. */
+/** Every cursor the sync keeps, in four range reads instead of a few reads per site. */
 export async function loadSyncMeta(store: Store): Promise<Record<string, string>> {
-  const parts = await Promise.all([store.listMeta('gsc:'), store.listMeta('bing.'), store.listMeta('cf:')]);
+  const parts = await Promise.all([store.listMeta('gsc:'), store.listMeta('bing.'), store.listMeta('cf:'), store.listMeta('app:')]);
   return Object.assign({}, ...parts) as Record<string, string>;
 }
 
@@ -163,4 +196,46 @@ export function formatUntil(iso: string, today: IsoDate): string {
   if (iso.slice(0, 10) === today) return time;
   const month = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][d.getUTCMonth()];
   return `${month} ${d.getUTCDate()}, ${time}`;
+}
+
+/** App Store report requests of one app (ADR 0009). */
+export interface AscRequestState {
+  ongoing?: string;
+  snapshot?: string;
+  /** Apple stopped the ongoing request (no downloads for a long time); start it again. */
+  stopped?: boolean;
+  /** Day the requests were last checked with the Sales and Reports key. */
+  checkedOn?: IsoDate;
+  /** Why the requests could not be found or read, for setup_status. */
+  problem?: string;
+  /** Day a snapshot was last requested (Apple allows one a month). */
+  snapshotRequestedOn?: IsoDate;
+}
+
+export type AscRequestKind = 'ongoing' | 'snapshot';
+
+export interface AscPending {
+  listedOn: IsoDate;
+  instances: Array<{ id: string; processingDate: IsoDate }>;
+}
+
+export interface AscReportIds {
+  requestId: string;
+  checkedOn: IsoDate;
+  /** Report key → report id. */
+  reports: Record<string, string>;
+}
+
+export interface ReviewCursor {
+  /** createdAt of the newest review synced. */
+  newest?: string;
+  /** Pages of history read on the first sync. */
+  historyPages?: number;
+  /** The first sync reached the oldest review (or the history limit). */
+  historyDone?: boolean;
+}
+
+export interface PlayListing {
+  day: IsoDate;
+  objects: Array<{ name: string; generation: string }>;
 }

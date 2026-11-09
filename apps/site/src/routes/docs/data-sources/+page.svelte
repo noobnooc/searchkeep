@@ -10,7 +10,7 @@ cloudflared access curl "https://searchkeep.example.com/api/import/ai-citations?
 
 <h2 id="overview">Overview</h2>
 <p>
-  Searchkeep reads three first-party sources through their official APIs. Each is optional and configured per site in
+  Searchkeep reads three first-party sources for sites, and two for apps, through their official APIs. Each is optional and configured per site in
   <a href="/docs/configuration#sites"><code>SITES</code></a>. AI citations, which have no API yet, are imported from a
   CSV export.
 </p>
@@ -41,6 +41,18 @@ cloudflared access curl "https://searchkeep.example.com/api/import/ai-citations?
         <td>None (CSV import)</td>
         <td>Citations of your pages in AI answers</td>
         <td>Per import</td>
+      </tr>
+      <tr>
+        <td>App Store Connect</td>
+        <td>API key (Sales and Reports role)</td>
+        <td>Analytics reports (impressions, product page views, downloads, installs, referrers, crashes), customer reviews</td>
+        <td>Daily</td>
+      </tr>
+      <tr>
+        <td>Google Play Console</td>
+        <td>Service account (read-only), invited in the Play Console</td>
+        <td>Store performance with search terms, installs, ratings and reviews (bulk reports); crash and ANR rates</td>
+        <td>Daily</td>
       </tr>
     </tbody>
   </table>
@@ -271,6 +283,36 @@ cloudflared access curl "https://searchkeep.example.com/api/import/ai-citations?
     and the other sources are not affected.
   </p>
 </Callout>
+
+<h2 id="apps">App stores</h2>
+<p>
+  Apps are a separate kind of property, kept apart from sites. Each app has an App Store Apple ID, a Google Play package
+  name, or both, and can be linked to one of your sites so that referrals from it are marked as your own. See
+  <a href="/docs/deploy">the deploy runbook</a> (step 14a) for the keys and permissions.
+</p>
+<h3 id="asc">App Store Connect</h3>
+<p>
+  Apple delivers analytics as report files, and generates them only after a one-time request made with an
+  <strong>Admin</strong> key. Searchkeep never stores an Admin key: you start the reports once in
+  <strong>Settings → Apps</strong> with a temporary one, which the Worker sends only to Apple for that request; then you
+  revoke it. The daily sync reads the reports with a <strong>Sales and Reports</strong> key: App Store Discovery and
+  Engagement, App Downloads and App Store Installation and Deletion (Standard, for counts), their Detailed versions (only
+  for the referring websites and apps) and App Crashes, plus customer reviews. A one-time snapshot fills history back to
+  January 2024. Data is complete 2-5 days after a day ends; the App Store reports no search terms.
+</p>
+<h3 id="google-play">Google Play</h3>
+<p>
+  Google Play has no statistics API: the Play Console writes monthly CSV files to a Cloud Storage bucket, which the service
+  account reads (store performance by country and by traffic source with <strong>search terms</strong>, installs, ratings
+  and reviews; files are read again only when they change). Crash and ANR rates come from the Play Developer Reporting
+  API. Data arrives 3-7 days late.
+</p>
+<h3 id="app-store-public">App Store public feeds (opt-in)</h3>
+<p>
+  With <code>APP_STORE_PUBLIC_DATA=true</code>, a plugin reads Apple’s official public feeds once a day (the iTunes lookup
+  and the top charts) and keeps only your own app’s average rating, rating count and chart position. It is off by
+  default, and there is no Google Play counterpart. Searchkeep never tracks keyword rankings or scrapes store pages.
+</p>
 
 <h2 id="ai-citations">Importing AI citations</h2>
 <p>

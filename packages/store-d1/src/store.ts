@@ -1,6 +1,35 @@
 import {
+  ALL_KEY,
+  APP_STORE_METRICS,
+  APP_STORES,
   GSC_SEARCH_TYPES,
   type AiCitationInput,
+  type AppChartRankInput,
+  type AppConfig,
+  type AppDataCoverage,
+  type AppDimension,
+  type AppRatingInput,
+  type AppRatingQuery,
+  type AppRatingRow,
+  type AppReferrerQuery,
+  type AppReferrerRow,
+  type AppReferrerWrite,
+  type AppReviewInput,
+  type AppReviewQuery,
+  type AppReviewRow,
+  type AppReviewStat,
+  type AppSearchTermInput,
+  type AppSearchTermQuery,
+  type AppSearchTermRow,
+  type AppStore,
+  type AppStoreMetric,
+  type AppStoreQuery,
+  type AppStoreRow,
+  type AppStoreWrite,
+  type AppVitalsMetric,
+  type AppVitalsQuery,
+  type AppVitalsRow,
+  type AppVitalsWrite,
   type AppearanceInput,
   type BreakdownInput,
   type CrawlerKind,
@@ -55,6 +84,36 @@ function allow<T extends string>(values: readonly string[], allowed: readonly T[
 const PERF_DIMS = ['date', 'week', 'month', 'query', 'page', 'country', 'device', 'appearance'] as const;
 const PERF_ORDER = ['clicks', 'impressions', 'ctr', 'position', 'date'] as const;
 const CRAWLER_GROUPS = ['crawler', 'operator', 'purpose', 'path', 'status', 'date'] as const;
+const APP_DIMS = ['date', 'week', 'month', 'store', 'territory', 'source'] as const;
+const APP_ORDER = [...APP_STORE_METRICS, 'date'] as const;
+/** Store funnel metric → column. */
+const APP_COLUMNS: Record<AppStoreMetric, string> = {
+  impressions: 'impressions',
+  impressionsUnique: 'impressions_unique',
+  pageViews: 'page_views',
+  pageViewsUnique: 'page_views_unique',
+  downloads: 'downloads',
+  redownloads: 'redownloads',
+  installs: 'installs',
+  deletions: 'deletions',
+  activeDevices: 'active_devices',
+};
+const VITALS_COLUMNS: Record<AppVitalsMetric, string> = {
+  crashRate: 'crash_rate',
+  userPerceivedCrashRate: 'user_perceived_crash_rate',
+  anrRate: 'anr_rate',
+  userPerceivedAnrRate: 'user_perceived_anr_rate',
+  distinctUsers: 'distinct_users',
+  crashes: 'crashes',
+  crashDevices: 'crash_devices',
+};
+/** Rows a write of each shape replaces. */
+const SHAPE_WHERE = {
+  cross: `territory != '${ALL_KEY}' AND source != '${ALL_KEY}'`,
+  territory: `source = '${ALL_KEY}' AND territory != '${ALL_KEY}'`,
+  source: `territory = '${ALL_KEY}' AND source != '${ALL_KEY}'`,
+} as const;
+const appStore = (store: string): AppStore => allow([store], APP_STORES, 'store')[0]!;
 const REFERRAL_GROUPS = ['path', 'refererHost', 'date'] as const;
 
 function round6(n: number): number {
@@ -1164,6 +1223,522 @@ export class D1Store implements Store {
       siteId,
       source,
     );
+    return row?.d ?? null;
+  }
+
+  // ------------------------------------------------------------- apps (ADR 0009)
+
+  async listAppConfigs(): Promise<AppConfig[]> {
+    const rows = await this.orm.select().from(schema.appConfigs).orderBy(schema.appConfigs.id).all();
+    return rows.map((r) => {
+      const app: AppConfig = { id: r.id, name: r.name };
+      if (r.appleId) app.appleId = r.appleId;
+      if (r.playPackage) app.playPackage = r.playPackage;
+      if (r.siteId) app.siteId = r.siteId;
+      if (r.territories) app.territories = r.territories.split(',').filter(Boolean);
+      return app;
+    });
+  }
+
+  async saveAppConfig(app: AppConfig): Promise<void> {
+    const values = {
+      name: app.name,
+      appleId: app.appleId ?? null,
+      playPackage: app.playPackage ?? null,
+      siteId: app.siteId ?? null,
+      territories: app.territories?.length ? app.territories.join(',') : null,
+    };
+    await this.orm
+      .insert(schema.appConfigs)
+      .values({ id: app.id, ...values })
+      .onConflictDoUpdate({ target: schema.appConfigs.id, set: { ...values, updatedAt: new Date().toISOString() } })
+      .run();
+  }
+
+  async deleteAppConfig(id: string): Promise<boolean> {
+    const res = await this.db.prepare('DELETE FROM app_configs WHERE id = ?1').bind(id).run();
+    return (res.meta?.changes ?? 0) > 0;
+  }
+
+  async writeAppStoreDaily(appId: string, store: AppStore, w: AppStoreWrite): Promise<number> {
+    appStore(store);
+    const metrics = allow([...new Set(w.metrics)], APP_STORE_METRICS, 'metric');
+    if (metrics.length === 0) return 0;
+    const shape = SHAPE_WHERE[w.shape];
+    if (!shape) throw new Error(`Unknown row shape "${String(w.shape).slice(0, 20)}"`);
+    const cols = metrics.map((m) => APP_COLUMNS[m]);
+    // Aggregate duplicate keys.
+    const agg = new Map<string, Record<string, string | number>>();
+    for (const r of w.rows) {
+      const key = `${r.date}|${r.territory}|${r.source}`;
+      const e = agg.get(key) ?? { d: r.date, t: r.territory, s: r.source, k: key };
+      metrics.forEach((m, i) => {
+        e[`m${i}`] = (Number(e[`m${i}`]) || 0) + Math.round(r[m] ?? 0);
+      });
+      agg.set(key, e);
+    }
+    const items = [...agg.values()];
+    const upserts = chunks(items).map((group) =>
+      this.db
+        .prepare(
+          `INSERT INTO app_store_daily (app_id, store, date, territory, source, ${cols.join(', ')})
+           SELECT ?1, ?2, j.value->>'d', j.value->>'t', j.value->>'s', ${cols.map((_c, i) => `COALESCE(j.value->>'m${i}', 0)`).join(', ')}
+           FROM json_each(?3) j WHERE true
+           ON CONFLICT (app_id, store, date, territory, source) DO UPDATE SET ${cols.map((c) => `${c} = excluded.${c}`).join(', ')}
+           WHERE ${cols.map((c) => `app_store_daily.${c} != excluded.${c}`).join(' OR ')}`,
+        )
+        .bind(appId, store, JSON.stringify(group)),
+    );
+    let changes = await this.batch(upserts);
+    if (w.dates.length) {
+      // Rows of the replaced days that the write no longer mentions: their metrics drop to 0.
+      const res = await this.db
+        .prepare(
+          `UPDATE app_store_daily SET ${cols.map((c) => `${c} = 0`).join(', ')}
+           WHERE app_id = ?1 AND store = ?2 AND date IN (SELECT value FROM json_each(?3)) AND ${shape}
+             AND (${cols.map((c) => `${c} != 0`).join(' OR ')})
+             AND (date || '|' || territory || '|' || source) NOT IN (SELECT value FROM json_each(?4))`,
+        )
+        .bind(appId, store, JSON.stringify([...new Set(w.dates)]), JSON.stringify(items.map((x) => x.k)))
+        .run();
+      changes += res.meta?.changes ?? 0;
+    }
+    return changes;
+  }
+
+  async writeAppSearchTerms(appId: string, rows: AppSearchTermInput[], dates: IsoDate[]): Promise<number> {
+    const agg = new Map<string, { d: string; t: string; v: number; a: number; k: string }>();
+    for (const r of rows) {
+      const term = r.term.trim();
+      if (!term) continue;
+      const key = `${r.date}|${term.toLowerCase()}`;
+      const e = agg.get(key) ?? { d: r.date, t: term, v: 0, a: 0, k: `${r.date}|${term}` };
+      e.v += Math.round(r.visitors);
+      e.a += Math.round(r.acquisitions);
+      agg.set(key, e);
+    }
+    const items = [...agg.values()];
+    let changes = await this.batch(
+      chunks(items).map((group) =>
+        this.db
+          .prepare(
+            `INSERT INTO app_search_terms (app_id, date, term, visitors, acquisitions)
+             SELECT ?1, j.value->>'d', j.value->>'t', j.value->>'v', j.value->>'a' FROM json_each(?2) j WHERE true
+             ON CONFLICT (app_id, date, term) DO UPDATE SET visitors = excluded.visitors, acquisitions = excluded.acquisitions
+             WHERE app_search_terms.visitors != excluded.visitors OR app_search_terms.acquisitions != excluded.acquisitions`,
+          )
+          .bind(appId, JSON.stringify(group)),
+      ),
+    );
+    if (dates.length) {
+      const res = await this.db
+        .prepare(
+          `DELETE FROM app_search_terms WHERE app_id = ?1 AND date IN (SELECT value FROM json_each(?2))
+             AND (date || '|' || term) NOT IN (SELECT value FROM json_each(?3))`,
+        )
+        .bind(appId, JSON.stringify([...new Set(dates)]), JSON.stringify(items.map((x) => x.k)))
+        .run();
+      changes += res.meta?.changes ?? 0;
+    }
+    return changes;
+  }
+
+  async writeAppReferrers(appId: string, store: AppStore, w: AppReferrerWrite): Promise<number> {
+    appStore(store);
+    const metrics = allow([...new Set(w.metrics)], ['pageViews', 'downloads'] as const, 'metric');
+    if (metrics.length === 0) return 0;
+    const cols = metrics.map((m) => (m === 'pageViews' ? 'page_views' : 'downloads'));
+    const agg = new Map<string, Record<string, string | number>>();
+    for (const r of w.rows) {
+      allow([r.kind], ['web', 'app', 'utm'] as const, 'referrer kind');
+      const key = `${r.date}|${r.kind}|${r.referrer}`;
+      const e = agg.get(key) ?? { d: r.date, n: r.kind, r: r.referrer, k: key };
+      metrics.forEach((m, i) => {
+        e[`m${i}`] = (Number(e[`m${i}`]) || 0) + Math.round(r[m] ?? 0);
+      });
+      agg.set(key, e);
+    }
+    const items = [...agg.values()];
+    let changes = await this.batch(
+      chunks(items).map((group) =>
+        this.db
+          .prepare(
+            `INSERT INTO app_referrers (app_id, store, date, kind, referrer, ${cols.join(', ')})
+             SELECT ?1, ?2, j.value->>'d', j.value->>'n', j.value->>'r', ${cols.map((_c, i) => `COALESCE(j.value->>'m${i}', 0)`).join(', ')}
+             FROM json_each(?3) j WHERE true
+             ON CONFLICT (app_id, store, date, kind, referrer) DO UPDATE SET ${cols.map((c) => `${c} = excluded.${c}`).join(', ')}
+             WHERE ${cols.map((c) => `app_referrers.${c} != excluded.${c}`).join(' OR ')}`,
+          )
+          .bind(appId, store, JSON.stringify(group)),
+      ),
+    );
+    if (w.dates.length) {
+      const dates = JSON.stringify([...new Set(w.dates)]);
+      const keys = JSON.stringify(items.map((x) => x.k));
+      const stale = `app_id = ?1 AND store = ?2 AND date IN (SELECT value FROM json_each(?3))
+        AND (date || '|' || kind || '|' || referrer) NOT IN (SELECT value FROM json_each(?4))`;
+      const [zeroed, removed] = await this.db.batch([
+        this.db
+          .prepare(
+            `UPDATE app_referrers SET ${cols.map((c) => `${c} = 0`).join(', ')} WHERE ${stale} AND (${cols.map((c) => `${c} != 0`).join(' OR ')})`,
+          )
+          .bind(appId, store, dates, keys),
+        this.db.prepare(`DELETE FROM app_referrers WHERE ${stale} AND page_views = 0 AND downloads = 0`).bind(appId, store, dates, keys),
+      ]);
+      changes += (zeroed?.meta?.changes ?? 0) + (removed?.meta?.changes ?? 0);
+    }
+    return changes;
+  }
+
+  async writeAppRatings(appId: string, store: AppStore, rows: AppRatingInput[]): Promise<number> {
+    appStore(store);
+    const items = rows.map((r) => ({
+      d: r.date,
+      t: r.territory,
+      a: r.average === null || !Number.isFinite(r.average) ? null : round6(r.average),
+      c: r.count ?? null,
+      x: r.dailyAverage === undefined || r.dailyAverage === null || !Number.isFinite(r.dailyAverage) ? null : round6(r.dailyAverage),
+    }));
+    return this.batch(
+      chunks(items).map((group) =>
+        this.db
+          .prepare(
+            `INSERT INTO app_ratings (app_id, store, date, territory, average, count, daily_average)
+             SELECT ?1, ?2, j.value->>'d', j.value->>'t', j.value->>'a', j.value->>'c', j.value->>'x' FROM json_each(?3) j WHERE true
+             ON CONFLICT (app_id, store, date, territory) DO UPDATE SET
+               average = excluded.average, count = excluded.count, daily_average = excluded.daily_average
+             WHERE app_ratings.average IS NOT excluded.average OR app_ratings.count IS NOT excluded.count
+               OR app_ratings.daily_average IS NOT excluded.daily_average`,
+          )
+          .bind(appId, store, JSON.stringify(group)),
+      ),
+    );
+  }
+
+  async writeAppReviews(appId: string, store: AppStore, rows: AppReviewInput[]): Promise<number> {
+    appStore(store);
+    const items = rows.map((r) => ({
+      i: r.id,
+      c: r.createdAt,
+      d: r.createdAt.slice(0, 10),
+      r: r.rating,
+      ti: r.title,
+      b: r.body,
+      te: r.territory,
+      l: r.language,
+      v: r.version,
+      rp: r.replied ? 1 : 0,
+    }));
+    const cols = ['created_at', 'date', 'rating', 'title', 'body', 'territory', 'language', 'version', 'replied'];
+    // Review text can be long: smaller statements stay well under D1's statement size limit.
+    return this.batch(
+      chunks(items, 50).map((group) =>
+        this.db
+          .prepare(
+            `INSERT INTO app_reviews (app_id, store, id, ${cols.join(', ')})
+             SELECT ?1, ?2, j.value->>'i', j.value->>'c', j.value->>'d', j.value->>'r', j.value->>'ti', j.value->>'b',
+               j.value->>'te', j.value->>'l', j.value->>'v', j.value->>'rp'
+             FROM json_each(?3) j WHERE true
+             ON CONFLICT (app_id, store, id) DO UPDATE SET ${cols.map((c) => `${c} = excluded.${c}`).join(', ')}
+             WHERE ${cols.map((c) => `app_reviews.${c} IS NOT excluded.${c}`).join(' OR ')}`,
+          )
+          .bind(appId, store, JSON.stringify(group)),
+      ),
+    );
+  }
+
+  async writeAppVitals(appId: string, store: AppStore, w: AppVitalsWrite): Promise<number> {
+    appStore(store);
+    const metrics = allow([...new Set(w.metrics)], Object.keys(VITALS_COLUMNS) as AppVitalsMetric[], 'metric');
+    if (metrics.length === 0 || w.rows.length === 0) return 0;
+    const cols = metrics.map((m) => VITALS_COLUMNS[m]);
+    const items = w.rows.map((r) => {
+      const e: Record<string, string | number | null> = { d: r.date, v: r.version };
+      metrics.forEach((m, i) => {
+        const v = r[m];
+        e[`m${i}`] = v === undefined || v === null || !Number.isFinite(v) ? null : round6(v);
+      });
+      return e;
+    });
+    return this.batch(
+      chunks(items).map((group) =>
+        this.db
+          .prepare(
+            `INSERT INTO app_vitals (app_id, store, date, version, ${cols.join(', ')})
+             SELECT ?1, ?2, j.value->>'d', j.value->>'v', ${cols.map((_c, i) => `j.value->>'m${i}'`).join(', ')}
+             FROM json_each(?3) j WHERE true
+             ON CONFLICT (app_id, store, date, version) DO UPDATE SET ${cols.map((c) => `${c} = excluded.${c}`).join(', ')}
+             WHERE ${cols.map((c) => `app_vitals.${c} IS NOT excluded.${c}`).join(' OR ')}`,
+          )
+          .bind(appId, store, JSON.stringify(group)),
+      ),
+    );
+  }
+
+  async writeAppChartRanks(appId: string, rows: AppChartRankInput[]): Promise<number> {
+    const items = rows.map((r) => ({ d: r.date, t: r.territory, c: r.chart, g: r.genre, r: r.rank }));
+    return this.batch(
+      chunks(items).map((group) =>
+        this.db
+          .prepare(
+            `INSERT INTO app_chart_ranks (app_id, date, territory, chart, genre, rank)
+             SELECT ?1, j.value->>'d', j.value->>'t', j.value->>'c', j.value->>'g', j.value->>'r' FROM json_each(?2) j WHERE true
+             ON CONFLICT (app_id, date, territory, chart, genre) DO UPDATE SET rank = excluded.rank
+             WHERE app_chart_ranks.rank IS NOT excluded.rank`,
+          )
+          .bind(appId, JSON.stringify(group)),
+      ),
+    );
+  }
+
+  async queryAppStore(q: AppStoreQuery): Promise<AppStoreRow[]> {
+    const dims = allow(q.dimensions, APP_DIMS, 'dimension') as AppDimension[];
+    if (q.orderBy !== undefined) allow([q.orderBy], APP_ORDER, 'orderBy');
+    const binds: Bind[] = [q.appId, q.range.start, q.range.end];
+    const arg = (v: Bind) => {
+      binds.push(v);
+      return `?${binds.length}`;
+    };
+    const where = ['app_id = ?1', 'date >= ?2', 'date <= ?3'];
+    if (q.store) where.push(`store = ${arg(appStore(q.store))}`);
+    const bySource = dims.includes('source') || q.source !== undefined;
+    const byTerritory = dims.includes('territory') || q.territory !== undefined;
+    // Each store's rows counted once: per source, per territory, or (both) the cross rows only.
+    if (bySource && byTerritory) where.push(`territory != '${ALL_KEY}' AND source != '${ALL_KEY}'`);
+    else if (bySource) where.push(`source != '${ALL_KEY}'`);
+    else where.push(`territory != '${ALL_KEY}'`);
+    if (q.territory !== undefined) where.push(`territory = ${arg(q.territory)}`);
+    if (q.source !== undefined) where.push(`source = ${arg(q.source)}`);
+    const dimExpr: Record<AppDimension, string> = {
+      date: 'date',
+      week: "date(date, '-6 days', 'weekday 1')",
+      month: 'substr(date, 1, 7)',
+      store: 'store',
+      territory: 'territory',
+      source: 'source',
+    };
+    const select = dims.map((d) => `${dimExpr[d]} AS ${d}`);
+    const group = dims.map((d) => dimExpr[d]);
+    for (const m of APP_STORE_METRICS) select.push(`COALESCE(SUM(${APP_COLUMNS[m]}), 0) AS ${m}`);
+    const orderBy = q.orderBy === 'date' ? (dims.find((d) => d === 'date' || d === 'week' || d === 'month') ?? null) : (q.orderBy ?? null);
+    const order = q.order === 'asc' ? 'ASC' : 'DESC';
+    const sql = `SELECT ${select.join(', ')} FROM app_store_daily WHERE ${where.join(' AND ')}
+      ${group.length ? `GROUP BY ${group.join(', ')}` : 'HAVING COUNT(*) > 0'}
+      ${orderBy ? `ORDER BY ${orderBy} ${order}` : group.length ? `ORDER BY pageViewsUnique DESC` : ''}
+      LIMIT ${Math.max(1, Math.min(q.limit ?? 1000, 10_000))}`;
+    const rows = await this.all<Record<string, string | number>>(sql, ...binds);
+    return rows.map((r) => {
+      const out = Object.fromEntries(APP_STORE_METRICS.map((m) => [m, Number(r[m]) || 0])) as unknown as AppStoreRow;
+      for (const d of dims) (out as unknown as Record<string, unknown>)[d] = r[d];
+      return out;
+    });
+  }
+
+  async queryAppSearchTerms(q: AppSearchTermQuery): Promise<AppSearchTermRow[]> {
+    const binds: Bind[] = [q.appId, q.range.start, q.range.end];
+    let filter = '';
+    if (q.termContains) {
+      binds.push(q.termContains);
+      filter = ' AND instr(lower(term), lower(?4)) > 0';
+    }
+    const order = q.orderBy === 'acquisitions' ? 'acquisitions DESC, visitors DESC' : 'visitors DESC, acquisitions DESC';
+    const rows = await this.all<{ term: string; visitors: number; acquisitions: number }>(
+      `SELECT MIN(term) AS term, SUM(visitors) AS visitors, SUM(acquisitions) AS acquisitions FROM app_search_terms
+       WHERE app_id = ?1 AND date >= ?2 AND date <= ?3${filter} GROUP BY lower(term) ORDER BY ${order}
+       LIMIT ${Math.max(1, Math.min(q.limit ?? 500, 5_000))}`,
+      ...binds,
+    );
+    return rows.map((r) => ({ term: r.term, visitors: Number(r.visitors) || 0, acquisitions: Number(r.acquisitions) || 0 }));
+  }
+
+  async queryAppReferrers(q: AppReferrerQuery): Promise<AppReferrerRow[]> {
+    const binds: Bind[] = [q.appId, q.range.start, q.range.end];
+    const where = ['app_id = ?1', 'date >= ?2', 'date <= ?3'];
+    if (q.store) {
+      binds.push(appStore(q.store));
+      where.push(`store = ?${binds.length}`);
+    }
+    if (q.kind) {
+      binds.push(allow([q.kind], ['web', 'app', 'utm'] as const, 'kind')[0]!);
+      where.push(`kind = ?${binds.length}`);
+    }
+    const rows = await this.all<AppReferrerRow>(
+      `SELECT store, kind, referrer, SUM(page_views) AS pageViews, SUM(downloads) AS downloads FROM app_referrers
+       WHERE ${where.join(' AND ')} GROUP BY store, kind, referrer ORDER BY downloads DESC, pageViews DESC
+       LIMIT ${Math.max(1, Math.min(q.limit ?? 100, 1_000))}`,
+      ...binds,
+    );
+    return rows.map((r) => ({ ...r, pageViews: Number(r.pageViews) || 0, downloads: Number(r.downloads) || 0 }));
+  }
+
+  async queryAppRatings(q: AppRatingQuery): Promise<AppRatingRow[]> {
+    const binds: Bind[] = [q.appId, q.range.start, q.range.end];
+    const where = ['app_id = ?1', 'date >= ?2', 'date <= ?3'];
+    if (q.store) {
+      binds.push(appStore(q.store));
+      where.push(`store = ?${binds.length}`);
+    }
+    if (q.territory) {
+      binds.push(q.territory);
+      where.push(`territory = ?${binds.length}`);
+    }
+    const rows = await this.all<{
+      store: AppStore;
+      date: string;
+      territory: string;
+      average: number | null;
+      count: number | null;
+      daily_average: number | null;
+    }>(
+      `SELECT store, date, territory, average, count, daily_average FROM app_ratings WHERE ${where.join(' AND ')}
+       ORDER BY date ASC, store, territory LIMIT 10000`,
+      ...binds,
+    );
+    return rows.map((r) => ({
+      store: r.store,
+      date: r.date,
+      territory: r.territory,
+      average: r.average,
+      count: r.count,
+      dailyAverage: r.daily_average,
+    }));
+  }
+
+  async listAppReviews(q: AppReviewQuery): Promise<AppReviewRow[]> {
+    const binds: Bind[] = [q.appId, q.range.start, q.range.end];
+    const arg = (v: Bind) => {
+      binds.push(v);
+      return `?${binds.length}`;
+    };
+    const where = ['app_id = ?1', 'date >= ?2', 'date <= ?3'];
+    if (q.store) where.push(`store = ${arg(appStore(q.store))}`);
+    if (q.ratings?.length)
+      where.push(`rating IN (SELECT value FROM json_each(${arg(JSON.stringify(q.ratings.map((r) => Math.round(r))))}))`);
+    if (q.territory) where.push(`territory = ${arg(q.territory)}`);
+    if (q.version) where.push(`version = ${arg(q.version)}`);
+    if (q.contains) where.push(`instr(lower(COALESCE(title, '') || ' ' || COALESCE(body, '')), lower(${arg(q.contains)})) > 0`);
+    const rows = await this.all<Record<string, string | number | null>>(
+      `SELECT store, id, created_at, rating, title, body, territory, language, version, replied FROM app_reviews
+       WHERE ${where.join(' AND ')} ORDER BY created_at DESC LIMIT ${Math.max(1, Math.min(q.limit ?? 50, 500))}`,
+      ...binds,
+    );
+    return rows.map((r) => ({
+      store: r.store as AppStore,
+      id: String(r.id),
+      createdAt: String(r.created_at),
+      rating: Number(r.rating),
+      title: (r.title as string | null) ?? null,
+      body: (r.body as string | null) ?? null,
+      territory: (r.territory as string | null) ?? null,
+      language: (r.language as string | null) ?? null,
+      version: (r.version as string | null) ?? null,
+      replied: Number(r.replied) === 1,
+    }));
+  }
+
+  async appReviewStats(appId: string, range: DateRange, store?: AppStore): Promise<AppReviewStat[]> {
+    const binds: Bind[] = [appId, range.start, range.end];
+    if (store) binds.push(appStore(store));
+    const rows = await this.all<AppReviewStat>(
+      `SELECT store, rating, COUNT(*) AS reviews FROM app_reviews WHERE app_id = ?1 AND date >= ?2 AND date <= ?3
+       ${store ? 'AND store = ?4' : ''} GROUP BY store, rating ORDER BY store, rating`,
+      ...binds,
+    );
+    return rows.map((r) => ({ store: r.store, rating: Number(r.rating), reviews: Number(r.reviews) }));
+  }
+
+  async queryAppVitals(q: AppVitalsQuery): Promise<AppVitalsRow[]> {
+    const binds: Bind[] = [q.appId, q.range.start, q.range.end];
+    const where = ['app_id = ?1', 'date >= ?2', 'date <= ?3'];
+    if (q.store) {
+      binds.push(appStore(q.store));
+      where.push(`store = ?${binds.length}`);
+    }
+    const limit = Math.max(1, Math.min(q.limit ?? 500, 5_000));
+    // Rates of several days or versions: weighted by each row's distinct users.
+    const rate = (c: string) =>
+      `SUM(CASE WHEN ${c} IS NOT NULL THEN ${c} * COALESCE(distinct_users, 1) END) / NULLIF(SUM(CASE WHEN ${c} IS NOT NULL THEN COALESCE(distinct_users, 1) END), 0)`;
+    const metrics = `${rate('crash_rate')} AS crashRate, ${rate('user_perceived_crash_rate')} AS userPerceivedCrashRate,
+      ${rate('anr_rate')} AS anrRate, ${rate('user_perceived_anr_rate')} AS userPerceivedAnrRate,
+      SUM(distinct_users) AS distinctUsers, SUM(crashes) AS crashes, SUM(crash_devices) AS crashDevices`;
+    const sql =
+      q.groupBy === 'version'
+        ? `SELECT store, version, ${metrics} FROM app_vitals WHERE ${where.join(' AND ')} GROUP BY store, version
+           ORDER BY store, distinctUsers DESC, crashes DESC LIMIT ${limit}`
+        : `SELECT store, date, ${metrics} FROM app_vitals WHERE ${where.join(' AND ')} AND version = '' GROUP BY store, date
+           ORDER BY date ASC, store LIMIT ${limit}`;
+    const rows = await this.all<Record<string, string | number | null>>(sql, ...binds);
+    const n = (v: unknown) => (v === null || v === undefined ? null : Number(v));
+    return rows.map((r) => ({
+      store: r.store as AppStore,
+      ...(q.groupBy === 'version' ? { version: String(r.version ?? '') } : { date: String(r.date) }),
+      crashRate: n(r.crashRate),
+      userPerceivedCrashRate: n(r.userPerceivedCrashRate),
+      anrRate: n(r.anrRate),
+      userPerceivedAnrRate: n(r.userPerceivedAnrRate),
+      distinctUsers: n(r.distinctUsers),
+      crashes: n(r.crashes),
+      crashDevices: n(r.crashDevices),
+    }));
+  }
+
+  async queryAppChartRanks(appId: string, range: DateRange): Promise<AppChartRankInput[]> {
+    const rows = await this.all<AppChartRankInput>(
+      `SELECT date, territory, chart, genre, rank FROM app_chart_ranks WHERE app_id = ?1 AND date >= ?2 AND date <= ?3
+       ORDER BY date ASC, territory, chart, genre LIMIT 5000`,
+      appId,
+      range.start,
+      range.end,
+    );
+    return rows.map((r) => ({ ...r, rank: r.rank === null ? null : Number(r.rank) }));
+  }
+
+  async appCoverage(appId?: string): Promise<AppDataCoverage[]> {
+    const ids = appId
+      ? [appId]
+      : (
+          await this.all<{ id: string }>(
+            'SELECT DISTINCT app_id AS id FROM app_store_daily UNION SELECT DISTINCT app_id FROM app_reviews UNION SELECT DISTINCT app_id FROM app_vitals UNION SELECT DISTINCT app_id FROM app_ratings',
+          )
+        ).map((r) => r.id);
+    const out: AppDataCoverage[] = [];
+    const datasets: Array<[string, string, boolean]> = [
+      ['store', 'app_store_daily', true],
+      ['search_terms', 'app_search_terms', false],
+      ['referrers', 'app_referrers', true],
+      ['ratings', 'app_ratings', true],
+      ['reviews', 'app_reviews', true],
+      ['vitals', 'app_vitals', true],
+    ];
+    for (const id of ids) {
+      const results = await this.db.batch(
+        datasets.map(([, table, hasStore]) =>
+          this.db
+            .prepare(
+              hasStore
+                ? `SELECT store, MIN(date) AS first, MAX(date) AS last FROM ${table} WHERE app_id = ?1 GROUP BY store`
+                : `SELECT 'play' AS store, MIN(date) AS first, MAX(date) AS last FROM ${table} WHERE app_id = ?1 HAVING COUNT(*) > 0`,
+            )
+            .bind(id),
+        ),
+      );
+      datasets.forEach(([dataset], i) => {
+        for (const r of (results[i]?.results ?? []) as Array<{ store: AppStore; first: string | null; last: string | null }>) {
+          out.push({ appId: id, store: r.store, dataset, firstDate: r.first ?? null, lastDate: r.last ?? null });
+        }
+      });
+    }
+    return out;
+  }
+
+  async latestAppDate(appId: string, store?: AppStore): Promise<IsoDate | null> {
+    const row = store
+      ? await this.first<{ d: string | null }>(
+          'SELECT MAX(date) AS d FROM app_store_daily WHERE app_id = ?1 AND store = ?2',
+          appId,
+          appStore(store),
+        )
+      : await this.first<{ d: string | null }>('SELECT MAX(date) AS d FROM app_store_daily WHERE app_id = ?1', appId);
     return row?.d ?? null;
   }
 }

@@ -24,7 +24,7 @@ export function llmsTxt(): string {
 
 > ${SITE.description}
 
-Searchkeep is open source (MIT) and self-hosted: one Cloudflare Worker plus one D1 database in the user's own Cloudflare account. It analyzes only the user's own sites using first-party data (Google Search Console, Bing Webmaster Tools, Cloudflare AI and search engine crawler traffic and Web Analytics). It exposes an MCP server at \`https://<your-domain>/mcp\` with ${READ_ONLY_TOOLS.length} read-only tools (plus \`submit_sitemap\`, registered only when writes are enabled) and a dashboard. It does not do backlinks, competitor research or rank tracking, by design. There is no hosted version and no telemetry.
+Searchkeep is open source (MIT) and self-hosted: one Cloudflare Worker plus one D1 database in the user's own Cloudflare account. It analyzes only the user's own sites using first-party data (Google Search Console, Bing Webmaster Tools, Cloudflare AI and search engine crawler traffic and Web Analytics), and optionally the user's own iOS and Android apps, kept apart from the sites (App Store Connect analytics reports and reviews, Google Play Console bulk reports, search terms and crash rates). It exposes an MCP server at \`https://<your-domain>/mcp\` with ${READ_ONLY_TOOLS.length} read-only tools (plus \`submit_sitemap\`, registered only when writes are enabled) and a dashboard. It does not do backlinks, competitor research or rank tracking, by design. There is no hosted version and no telemetry.
 
 - Website: ${SITE.origin}/
 - Source code: ${GITHUB.repo}

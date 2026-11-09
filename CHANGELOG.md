@@ -26,6 +26,38 @@ Because users sync `main` at any time, the `Unreleased` section is always accura
 
 ### Added
 
+- Apps, kept apart from sites ([ADR 0009](docs/adr/0009-apps-as-a-second-kind-of-property.md)).
+  Add your iOS and Android apps in the dashboard (**Settings** → **Apps**) or the new `APPS` secret,
+  with the App Store Apple ID, the Google Play package name, or both, and optionally one of your
+  sites. The sync reads, on the same budgets as the sites:
+  - **App Store Connect** (`ASC_KEY_ID`, `ASC_ISSUER_ID`, `ASC_PRIVATE_KEY`, a key with the **Sales
+    and Reports** role): the App Store Discovery and Engagement, App Downloads and App Store
+    Installation and Deletion reports (Standard for counts, Detailed only for referring websites and
+    apps), App Crashes, and customer reviews (stored without reviewer names). Report instances are
+    read oldest first so the newest always wins for a day; a one-time snapshot fills history back to
+    January 2024, only for the days before the ongoing reports.
+  - **Google Play** (`PLAY_REPORTS_BUCKET`, and the Search Console service account or
+    `PLAY_CLIENT_EMAIL` / `PLAY_PRIVATE_KEY`): the Play Console's monthly report files in Cloud
+    Storage (store performance by country and by traffic source with search terms, installs,
+    ratings, reviews), read again only when they change, and crash and ANR rates from the Play
+    Developer Reporting API.
+  - **App Store public feeds**, an opt-in plugin that is off by default (`APP_STORE_PUBLIC_DATA=true`):
+    your own app's average rating and top chart position from Apple's official feeds, nothing about
+    other apps.
+
+  App Store reports are started once per app from **Settings** → **Apps** → **Start App Store
+  reports** with a temporary **Admin** key, which the Worker sends only to Apple for that request
+  and never stores, logs or returns (`POST /api/app-configs/<id>/enable-app-store`). New MCP tools
+  `list_apps`, `app_performance` (store funnel per store against the previous period, by date,
+  territory, source or referrer, with your own site marked), `app_search_terms`, `app_reviews` and
+  `app_stability`, with `GET /api/apps`, `/api/app-performance`, `/api/app-search-terms`,
+  `/api/app-reviews` and `/api/app-stability`. The dashboard gets an **Apps** area (a Sites | Apps
+  switch in the sidebar): Overview, Acquisition, Ratings & reviews and Stability. `setup_status`
+  checks the app credentials and probes both stores, and the sync progress lists apps. New tables
+  `app_configs`, `app_store_daily`, `app_search_terms`, `app_referrers`, `app_ratings`,
+  `app_reviews`, `app_vitals` and `app_chart_ranks` (migration `0003_apps`). The charter and roadmap
+  now include apps.
+
 - Site icons in the site switcher. Each site now shows its own icon instead of the first letter of
   its domain. The new `GET /api/site-icon?site=<id>` reads it from the site itself, as
   `Searchkeep icon reader`: the `apple-touch-icon` links on the home page, then
@@ -207,7 +239,15 @@ Because users sync `main` at any time, the `Unreleased` section is always accura
 
 ### Upgrade notes
 
-- Nothing is required. The new table is created automatically on the first request after syncing.
+- Nothing is required. The new tables are created automatically on the first request after syncing.
+  A deployment without app secrets keeps working as before and syncs no app data.
+- Optional, to add apps: follow [docs/deploy.md step 14a](docs/deploy.md#14a-apps-app-store-and-google-play-optional)
+  after syncing. In short: set `ASC_KEY_ID`, `ASC_ISSUER_ID` and `ASC_PRIVATE_KEY` (a **Sales and
+  Reports** key), invite the service account in the Play Console with **View app information and
+  download bulk reports**, set `PLAY_REPORTS_BUCKET`, enable the Google Play Developer Reporting API,
+  add the app in **Settings** → **Apps**, and start App Store reports there with a temporary Admin key
+  (then revoke it). Skipping any of these only leaves that store's data empty; `setup_status` says
+  which step is missing.
 - Optional: to pick Cloudflare zones and Web Analytics sites from a list when adding a site, edit the
   API token in `CLOUDFLARE_API_TOKEN` (Cloudflare dashboard → **My Profile** or **Account** →
   **API Tokens** → your token → **Edit**) and add **Zone: Read** and **Account Settings: Read**.

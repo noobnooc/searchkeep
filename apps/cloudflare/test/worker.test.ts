@@ -208,6 +208,77 @@ describe('sites managed in the dashboard', () => {
     expect((await call(env, '/api/site-configs/blog-acme-com', { method: 'DELETE', headers })).status).toBe(404);
   });
 
+  it('manages apps, and starts App Store reports with an Admin key it never stores or returns', async () => {
+    const env = await makeEnv({ ASC_KEY_ID: 'SALES1', ASC_ISSUER_ID: 'issuer', ASC_PRIVATE_KEY: 'not-used-here' });
+    const headers = { 'cf-access-jwt-assertion': await jwt(), 'content-type': 'application/json' };
+    const post = (path: string, body: unknown) => call(env, path, { method: 'POST', headers, body: JSON.stringify(body) });
+
+    expect((await post('/api/app-configs', { name: 'Acme' })).status).toBe(400);
+    expect((await post('/api/app-configs', { name: 'Acme', appleId: '1234567', siteId: 'nope' })).status).toBe(400);
+    const created = await post('/api/app-configs', { mode: 'create', name: 'Acme App', appleId: 'id1234567', siteId: 'acme' });
+    expect(await created.json()).toMatchObject({
+      app: { id: 'acme-app', appleId: '1234567', siteId: 'acme', origin: 'dashboard' },
+      created: true,
+    });
+    const apps = (await (await call(env, '/api/apps', { headers })).json()) as { apps: Array<Record<string, unknown>> };
+    expect(apps.apps).toEqual([
+      expect.objectContaining({
+        id: 'acme-app',
+        stores: { appStore: true, googlePlay: false, appStorePublic: false },
+        appStoreReports: { started: false, stopped: false, snapshot: false },
+      }),
+    ]);
+
+    // A temporary Admin key: the Worker calls App Store Connect with it once.
+    const pair = (await crypto.subtle.generateKey({ name: 'ECDSA', namedCurve: 'P-256' }, true, ['sign'])) as CryptoKeyPair;
+    const der = new Uint8Array((await crypto.subtle.exportKey('pkcs8', pair.privateKey)) as ArrayBuffer);
+    let bin = '';
+    for (const b of der) bin += String.fromCharCode(b);
+    const pem = `-----BEGIN PRIVATE KEY-----\n${btoa(bin)}\n-----END PRIVATE KEY-----`;
+    const ascCalls: string[] = [];
+    const base = globalThis.fetch;
+    vi.stubGlobal('fetch', async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input instanceof Request ? input.url : input);
+      if (url.startsWith('https://api.appstoreconnect.apple.com/')) {
+        ascCalls.push(`${init?.method ?? 'GET'} ${url.replace('https://api.appstoreconnect.apple.com', '')}`);
+        if (init?.method === 'POST') {
+          const accessType = JSON.parse(String(init.body)).data.attributes.accessType;
+          return Response.json(
+            { data: { id: `req-${accessType}`, attributes: { accessType, stoppedDueToInactivity: false } } },
+            { status: 201 },
+          );
+        }
+        return Response.json({ data: [] });
+      }
+      return base(input, init);
+    });
+    const missing = await post('/api/app-configs/acme-app/enable-app-store', { keyId: 'ADMIN1' });
+    expect(missing.status).toBe(400);
+    const res = await post('/api/app-configs/acme-app/enable-app-store', { keyId: 'ADMIN1', issuerId: 'issuer', privateKey: pem });
+    expect(res.status).toBe(200);
+    const text = await res.text();
+    expect(text).not.toContain('PRIVATE KEY');
+    expect(text).not.toContain(btoa(bin).slice(0, 40));
+    expect(JSON.parse(text)).toMatchObject({
+      ongoing: { id: 'req-ONGOING', created: true },
+      snapshot: { id: 'req-ONE_TIME_SNAPSHOT', created: true },
+    });
+    expect(ascCalls).toEqual([
+      'GET /v1/apps/1234567/analyticsReportRequests?limit=200',
+      'POST /v1/analyticsReportRequests',
+      'POST /v1/analyticsReportRequests',
+    ]);
+    // Only the request ids are kept.
+    const meta = await new D1Store(env.DB).listMeta('');
+    expect(JSON.stringify(meta)).not.toContain('ADMIN1');
+    expect(JSON.stringify(meta)).not.toContain('PRIVATE');
+    expect(JSON.parse(meta['app:asc:req:acme-app']!)).toMatchObject({ ongoing: 'req-ONGOING', snapshot: 'req-ONE_TIME_SNAPSHOT' });
+
+    const del = await call(env, '/api/app-configs/acme-app', { method: 'DELETE', headers });
+    expect(await del.json()).toMatchObject({ deleted: 'acme-app' });
+    expect((await call(env, '/api/apps', { headers }).then((r) => r.json())) as unknown).toEqual({ apps: [] });
+  });
+
   it('stays locked without an API token, even when no sites are configured', async () => {
     const env = await makeEnv({ SITES: undefined, CLOUDFLARE_API_TOKEN: undefined });
     const headers = { 'cf-access-jwt-assertion': await jwt(), 'content-type': 'application/json' };

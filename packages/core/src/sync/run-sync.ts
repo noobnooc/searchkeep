@@ -24,6 +24,8 @@ import {
   type UrlInspectionInput,
 } from '../types.js';
 import { normalizePage, onSiteDomain } from '../url.js';
+import { planAppUnits } from '../apps/sync.js';
+import type { Budget, Unit } from './unit.js';
 import {
   activeBackoff,
   BING_DATASETS,
@@ -79,48 +81,6 @@ export const SOURCE_CALLS_PER_RUN: Partial<Record<SourceId, number>> = { bing: 8
 
 /** GSC history requests planned per site and run (more than one run can take; the rest is planned next run). */
 const GSC_HISTORY_UNITS_PER_RUN = 60;
-
-interface Unit {
-  task: string;
-  siteId: string;
-  source: SourceId;
-  /** History work (GSC backfill, Cloudflare lookback): runs after every increment and stops at the daily write budget. */
-  backfill: boolean;
-  /** The newest day a history unit pulls; history runs newest first across all sites. */
-  date?: IsoDate;
-  /** API calls reserved before the unit runs; extra pages take more from the budget as they go. */
-  calls: number;
-  /** Stable id used to detect invocations killed mid-unit (e.g. CPU limit). */
-  key: string;
-  /** Rows written; null when there turned out to be nothing to do (the unit is then not reported). */
-  run: () => Promise<number | null>;
-  /**
-   * Gives up on this unit after repeated interruptions: a range is split for the next run
-   * (returning what was done), a single day is passed over.
-   */
-  skip: () => Promise<string | void>;
-  /** Splits a multi-day range after an error; false for a single day. */
-  shrink?: () => Promise<boolean>;
-  /** Also split the range when it needed more calls than one run allows (default true; false when calls do not depend on days). */
-  splitOnBudget?: boolean;
-  /**
-   * Spare-capacity work (index coverage): runs only with calls and time left over after
-   * everything else, and never makes a run partial when it stops for lack of either.
-   */
-  idle?: boolean;
-}
-
-/** The call budget shared by every unit of a run. */
-interface Budget {
-  /** Takes one more call, or stops the unit (BudgetExceeded) when none is left. */
-  spend(source: SourceId): void;
-  /** Hands back reserved calls a unit did not need. */
-  refund(source: SourceId, calls: number): void;
-  /** Calls still left in this run. */
-  left(): number;
-  /** True once the run's time budget is spent. */
-  expired(): boolean;
-}
 
 /** The range had too many rows for one request: it was split, and the next run continues with smaller ranges. */
 class Replan extends Error {}
@@ -1132,9 +1092,15 @@ async function planUnits(ctx: SyncContext, today: IsoDate, nowMs: number, budget
     }
   }
 
+  // Apps (ADR 0009): their latest data takes turns with the sites'; their history joins the sites'.
+  // Steps an app unit discovers while running (App Store report files) are added at the end.
+  const out: Unit[] = [];
+  const apps = planAppUnits({ ctx, today, get, budget, enqueue: (u) => out.push(u) });
+  history.push(...apps.history);
   // Stable sort: on the same day, sites keep their order and each site keeps GSC before Cloudflare.
   history.sort((a, b) => (a.date! < b.date! ? 1 : a.date! > b.date! ? -1 : 0));
-  return [...interleave(increments), ...interleave(extraIncrements), ...history, ...interleave(spareWork)];
+  out.push(...interleave([...increments, ...apps.daily]), ...interleave(extraIncrements), ...history, ...interleave(spareWork));
+  return out;
 }
 
 /** User agent patterns for the Cloudflare query: a pattern that contains another one adds nothing. */

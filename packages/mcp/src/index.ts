@@ -9,6 +9,11 @@ import { CfWorkerJsonSchemaValidator } from '@modelcontextprotocol/sdk/validatio
 import {
   GEO_SORT_KEYS,
   aiCrawlers,
+  appPerformance,
+  appReviews,
+  appSearchTerms,
+  appStability,
+  listApps,
   comparePeriods,
   findCannibalization,
   findContentDecay,
@@ -116,7 +121,25 @@ export const TOOL_NAMES = [
   'list_sitemaps',
   'submit_sitemap',
   'setup_status',
+  'list_apps',
+  'app_performance',
+  'app_search_terms',
+  'app_reviews',
+  'app_stability',
 ] as const;
+
+/** Parameters shared by the app tools (ADR 0009). */
+const appCommon = {
+  app: z
+    .string()
+    .optional()
+    .describe('App id, App Store Apple ID or Google Play package. Optional when only one app is configured; see list_apps.'),
+  start: common.start,
+  end: date.optional().describe('End date (YYYY-MM-DD). Defaults to the latest date with store data.'),
+  days: common.days,
+  limit: common.limit,
+};
+const appStore = z.enum(['apple', 'play']).optional().describe('apple = App Store, play = Google Play. Both when omitted.');
 
 export function createSearchkeepMcpServer(deps: McpDeps): McpServer {
   const { ctx } = deps;
@@ -125,7 +148,7 @@ export function createSearchkeepMcpServer(deps: McpDeps): McpServer {
     {
       jsonSchemaValidator: new CfWorkerJsonSchemaValidator(),
       instructions:
-        "Searchkeep answers SEO and GEO questions about the owner's own sites from first-party data (Google Search Console, Bing Webmaster Tools, Cloudflare AI and search engine crawler traffic and Web Analytics) kept in their own Cloudflare D1. Start with list_sites. Data is synced daily; GSC lags 2-3 days and Bing is weekly. index_coverage answers indexing questions from a stored snapshot; use inspect_url only for spot checks. Right after deploying, history is still being backfilled: if data looks incomplete, setup_status reports the sync progress. Results are aggregated and capped; use filters and limit to narrow down.",
+        "Searchkeep answers SEO and GEO questions about the owner's own sites from first-party data (Google Search Console, Bing Webmaster Tools, Cloudflare AI and search engine crawler traffic and Web Analytics) kept in their own Cloudflare D1. Start with list_sites. Data is synced daily; GSC lags 2-3 days and Bing is weekly. index_coverage answers indexing questions from a stored snapshot; use inspect_url only for spot checks. It also answers app store (ASO) questions about the owner's own apps from App Store Connect and Google Play Console data: start with list_apps, then app_performance (store funnel), app_search_terms (Google Play search terms), app_reviews and app_stability; App Store data lags 2-5 days and Google Play 3-7 days. Right after deploying, history is still being backfilled: if data looks incomplete, setup_status reports the sync progress. Results are aggregated and capped; use filters and limit to narrow down.",
     },
   );
 
@@ -391,6 +414,99 @@ export function createSearchkeepMcpServer(deps: McpDeps): McpServer {
     },
     async (args) =>
       run(async () => setupStatus(ctx, { readiness: await deps.readiness(), ...(args.probe === undefined ? {} : { probe: args.probe }) })),
+  );
+
+  // ---- apps (ADR 0009) --------------------------------------------------------
+
+  server.registerTool(
+    'list_apps',
+    {
+      title: 'List apps',
+      description:
+        'Configured apps, which stores are connected (App Store Connect, Google Play, opt-in App Store public feeds), whether App Store reports are started, and the date range of stored data.',
+      inputSchema: {},
+      annotations: READ_ONLY,
+    },
+    async () => run(() => listApps(ctx)),
+  );
+
+  server.registerTool(
+    'app_performance',
+    {
+      title: 'App store performance',
+      description:
+        "An app's store funnel per store: impressions (App Store), page views (App Store product page views, Google Play store listing visitors), downloads (first-time downloads, store listing acquisitions), redownloads, installs, deletions, active devices and conversion rates, compared with the previous period. groupBy adds rows by date, week, month, store, territory, source (search, browse, app_referrer, web_referrer, referral, ...) or referrer (websites, apps and UTM sources that sent people to the store page; ownSite marks the owner's own site). Includes the App Store chart position when the opt-in public feeds are on.",
+      inputSchema: {
+        ...appCommon,
+        store: appStore,
+        groupBy: z
+          .array(z.enum(['date', 'week', 'month', 'store', 'territory', 'source', 'referrer']))
+          .max(2)
+          .optional()
+          .describe('Default: totals per store only.'),
+        territory: z.string().optional().describe('Only this territory, as the store reports it (e.g. US).'),
+        source: z
+          .string()
+          .optional()
+          .describe('Only this source: search, browse, app_referrer, web_referrer, referral, app_clip, notification, other.'),
+        referrerKind: z.enum(['web', 'app', 'utm']).optional().describe('With groupBy referrer: only websites, apps or UTM sources.'),
+      },
+      annotations: READ_ONLY,
+    },
+    async (args) => run(() => appPerformance(ctx, clean(args))),
+  );
+
+  server.registerTool(
+    'app_search_terms',
+    {
+      title: 'App search terms (Google Play)',
+      description:
+        'Google Play search terms that brought store listing visitors: visitors, acquisitions, conversion and change against the previous period, plus well-visited terms that convert poorly (lowConverting). The App Store reports no search terms.',
+      inputSchema: {
+        ...appCommon,
+        termContains: z.string().optional(),
+        sortBy: z.enum(['visitors', 'acquisitions', 'conversion', 'change']).optional().describe('Default visitors.'),
+        minVisitors: z.number().int().min(1).optional().describe('Minimum visitors for lowConverting. Default 20.'),
+      },
+      annotations: READ_ONLY,
+    },
+    async (args) => run(() => appSearchTerms(ctx, clean(args))),
+  );
+
+  server.registerTool(
+    'app_reviews',
+    {
+      title: 'App ratings and reviews',
+      description:
+        "Ratings and reviews of an app per store: star distribution and average of the reviews in the range, the store's average rating over time, and the reviews themselves (newest first, without reviewer names). Filter by stars, territory, app version or text.",
+      inputSchema: {
+        ...appCommon,
+        days: common.days.describe('Window length in days. Default 90.'),
+        store: appStore,
+        ratings: z.array(z.number().int().min(1).max(5)).max(5).optional().describe('Only these star ratings, e.g. [1, 2].'),
+        territory: z.string().optional(),
+        version: z.string().optional(),
+        contains: z.string().optional().describe('Text in the title or body.'),
+      },
+      annotations: READ_ONLY,
+    },
+    async (args) => run(() => appReviews(ctx, clean(args))),
+  );
+
+  server.registerTool(
+    'app_stability',
+    {
+      title: 'App stability',
+      description:
+        'Crash and ANR rates (Google Play, shares of daily users, with the user-perceived rates Google uses for its bad-behavior thresholds) and crash counts (App Store), per day or per app version.',
+      inputSchema: {
+        ...appCommon,
+        store: appStore,
+        groupBy: z.enum(['date', 'version']).optional().describe('Default date.'),
+      },
+      annotations: READ_ONLY,
+    },
+    async (args) => run(() => appStability(ctx, clean(args))),
   );
 
   return server;

@@ -1,10 +1,13 @@
-import { GSC_SEARCH_TYPES, type GscSearchType, type SiteConfig } from './types.js';
+import { parseApps } from './apps/config.js';
+import { GSC_SEARCH_TYPES, type AppConfig, type GscSearchType, type SiteConfig } from './types.js';
 
 /** Raw environment: Worker Secrets, process.env, etc. */
 export type RawEnv = Record<string, unknown>;
 
 export interface SearchkeepConfig {
   sites: SiteConfig[];
+  /** Apps (ADR 0009): from the APPS secret, plus those added in the dashboard (`withStoredApps`). */
+  apps: AppConfig[];
   access: {
     teamDomain: string | null;
     aud: string | null;
@@ -30,6 +33,21 @@ export interface SearchkeepConfig {
   bing: {
     apiKey: string | null;
   };
+  /** App Store Connect API key with the Sales and Reports role (never an Admin key). */
+  asc: {
+    keyId: string | null;
+    issuerId: string | null;
+    privateKey: string | null;
+  };
+  /** Google Play: the Search Console service account unless PLAY_CLIENT_EMAIL/PLAY_PRIVATE_KEY are set. */
+  play: {
+    clientEmail: string | null;
+    privateKey: string | null;
+    /** Cloud Storage bucket of the Play Console reports (`pubsite_prod_…`). */
+    bucket: string | null;
+  };
+  /** Opt-in plugin: Apple's public App Store feeds (own app's rating and chart position only). */
+  appStorePublic: boolean;
   brandRegex: string | null;
   enableWrites: boolean;
   sync: {
@@ -200,6 +218,17 @@ export function withStoredSites(config: SearchkeepConfig, stored: SiteConfig[]):
   return { ...config, sites: [...config.sites, ...extra] };
 }
 
+/**
+ * Adds the apps managed in the dashboard to the configuration. Apps from the APPS secret win on
+ * id conflicts.
+ */
+export function withStoredApps(config: SearchkeepConfig, stored: AppConfig[]): SearchkeepConfig {
+  const ids = new Set(config.apps.map((a) => a.id));
+  const extra = stored.filter((a) => !ids.has(a.id)).map((a) => ({ ...a, origin: 'dashboard' as const }));
+  if (extra.length === 0) return config;
+  return { ...config, apps: [...config.apps, ...extra] };
+}
+
 export function compileBrandRegex(source: string | null | undefined): RegExp | null {
   if (!source) return null;
   try {
@@ -215,14 +244,30 @@ function normalizePem(key: string | null): string | null {
   return key.includes('\\n') ? key.replace(/\\n/g, '\n') : key;
 }
 
+/** `gs://pubsite_prod_rev_123/stats/` or `pubsite_prod_rev_123` → `pubsite_prod_rev_123`. */
+export function normalizeBucket(raw: string | null, errors: string[]): string | null {
+  if (!raw) return null;
+  const name = raw
+    .trim()
+    .replace(/^gs:\/\//i, '')
+    .split('/')[0]!;
+  if (!/^[a-z0-9][a-z0-9._-]{1,220}[a-z0-9]$/.test(name)) {
+    errors.push('PLAY_REPORTS_BUCKET must be the Cloud Storage bucket of your Play Console reports, like pubsite_prod_rev_0123456789.');
+    return null;
+  }
+  return name;
+}
+
 export function loadConfig(env: RawEnv): SearchkeepConfig {
   const errors: string[] = [];
   const sites = parseSites(str(env, 'SITES'), errors);
+  const apps = parseApps(str(env, 'APPS'), errors);
   const brandRegex = str(env, 'BRAND_REGEX');
   if (brandRegex && !compileBrandRegex(brandRegex)) errors.push('BRAND_REGEX is not a valid regular expression.');
   const teamDomain = str(env, 'ACCESS_TEAM_DOMAIN');
   return {
     sites,
+    apps,
     access: {
       teamDomain: teamDomain ? teamDomain.replace(/^https?:\/\//, '').replace(/\/+$/, '') : null,
       aud: str(env, 'ACCESS_AUD'),
@@ -242,6 +287,17 @@ export function loadConfig(env: RawEnv): SearchkeepConfig {
       inspectionsPerDay: int(env, 'GSC_INSPECTIONS_PER_DAY', 200, 0, 2_000),
     },
     bing: { apiKey: str(env, 'BING_API_KEY') },
+    asc: {
+      keyId: str(env, 'ASC_KEY_ID'),
+      issuerId: str(env, 'ASC_ISSUER_ID'),
+      privateKey: normalizePem(str(env, 'ASC_PRIVATE_KEY')),
+    },
+    play: {
+      clientEmail: str(env, 'PLAY_CLIENT_EMAIL') ?? str(env, 'GSC_CLIENT_EMAIL'),
+      privateKey: normalizePem(str(env, 'PLAY_PRIVATE_KEY') ?? str(env, 'GSC_PRIVATE_KEY')),
+      bucket: normalizeBucket(str(env, 'PLAY_REPORTS_BUCKET'), errors),
+    },
+    appStorePublic: str(env, 'APP_STORE_PUBLIC_DATA')?.toLowerCase() === 'true',
     brandRegex: brandRegex && compileBrandRegex(brandRegex) ? brandRegex : null,
     enableWrites: str(env, 'ENABLE_WRITES')?.toLowerCase() === 'true',
     sync: {
@@ -275,6 +331,25 @@ export function findSite(config: SearchkeepConfig, siteId?: string): SiteConfig 
   const site = config.sites.find((s) => s.id === siteId || s.domain === siteId.toLowerCase());
   if (!site) throw new SearchkeepError('not_found', `Unknown site "${siteId}". Known: ${config.sites.map((s) => s.id).join(', ')}.`);
   return site;
+}
+
+export function findApp(config: SearchkeepConfig, appId?: string): AppConfig {
+  if (config.apps.length === 0)
+    throw new SearchkeepError(
+      'not_configured',
+      'No apps configured yet. Add one in the dashboard (Settings → Apps) or set the APPS secret.',
+    );
+  if (!appId) {
+    if (config.apps.length === 1) return config.apps[0]!;
+    throw new SearchkeepError(
+      'bad_request',
+      `Several apps are configured; pass "app" (one of: ${config.apps.map((a) => a.id).join(', ')}).`,
+    );
+  }
+  const key = appId.trim();
+  const app = config.apps.find((a) => a.id === key || a.appleId === key || a.playPackage === key);
+  if (!app) throw new SearchkeepError('not_found', `Unknown app "${key.slice(0, 80)}". Known: ${config.apps.map((a) => a.id).join(', ')}.`);
+  return app;
 }
 
 export type ErrorCode = 'bad_request' | 'not_found' | 'not_configured' | 'forbidden' | 'upstream' | 'writes_disabled';

@@ -7,12 +7,14 @@
 
 ## Mission
 
-Give every site owner a durable, private record of how their own sites perform in search and in AI
-answers, running entirely inside infrastructure they already own.
+Give every site and app owner a durable, private record of how their own sites perform in search
+and in AI answers, and how their own apps are found in the app stores, running entirely inside
+infrastructure they already own.
 
 ## Target users
 
 - Independent site owners, indie hackers and small teams who run their own sites on Cloudflare.
+- The same people when they also ship iOS or Android apps: an app is the store-side twin of a site.
 - Developers and technical marketers who want to ask questions about their search data from an AI
   assistant (through MCP) instead of exporting spreadsheets.
 - People who want long-term history beyond Google Search Console's 16 months without handing their
@@ -24,6 +26,10 @@ Searchkeep is not built for agencies tracking competitors or for enterprise SEO 
 
 - Sync first-party data from Google Search Console, Bing Webmaster Tools and Cloudflare (AI crawler
   traffic and Web Analytics) into a database in the user's own Cloudflare account, every day.
+- Sync first-party app data the same way: App Store Connect (analytics reports and customer
+  reviews) and Google Play Console (bulk reports and the Play Developer Reporting API). Apps are kept
+  apart from sites, and linked to them only through the user's own data (for example the web
+  referrers that send people from the user's site to the app's store page).
 - Connect the GEO funnel per page: crawled by AI crawlers, cited in AI answers, clicked by visitors.
 - Provide task-shaped analysis (quick wins, cannibalization, CTR anomalies, content decay, period
   comparisons, brand vs. non-brand) through MCP tools and a dashboard that share the same functions.
@@ -35,6 +41,10 @@ Searchkeep is not built for agencies tracking competitors or for enterprise SEO 
 - No backlink data, no competitor data, no rank tracking, no SERP or AI-answer scraping.
   Competitor and AI-answer monitoring may only ever exist as optional plugins that are off by
   default (see [roadmap](roadmap.md)).
+- No app store keyword rankings and no scraping of App Store or Google Play pages. The one
+  exception is an optional plugin, off by default, that reads Apple's official public App Store
+  feeds (top charts and ratings) and keeps only the user's own app's chart position and rating,
+  never other apps.
 - No telemetry, analytics beacons, "phone home" checks or project-operated servers in the data path.
 - No hosted or multi-tenant version run by the project.
 - No writes to external systems unless the user explicitly enables them.
@@ -46,12 +56,14 @@ When principles conflict, **the one listed first wins**.
 
 1. **User data stays in the user's own account.** Nothing is sent back to the project or to any
    third party: no telemetry, no tracking, no dependency on a server run by the project.
-2. **First-party data only.** Use only data the site owner already has rights to through their own
-   accounts. No backlinks, no competitor data, no rank scraping.
+2. **First-party data only.** Use only data the site or app owner already has rights to through
+   their own accounts. No backlinks, no competitor data, no rank scraping. Apple's official public
+   feeds about the owner's own app are allowed only in the opt-in plugin above.
 3. **Self-hosted with zero operations.** It must run on the Cloudflare free tier, and upgrading must
    only require "Sync fork". Any change that needs manual user action must ship with upgrade notes.
 4. **Read-only by default.** Any operation that writes to an external system (for example submitting
-   a sitemap) must be explicitly enabled by the user.
+   a sitemap, or asking App Store Connect to start generating reports) must be explicitly enabled or
+   started by the user. Stored credentials are read-only wherever the source allows it.
 5. **The core does not depend on any platform.** Platform capabilities live behind interfaces
    (Store, Auth, Source, scheduler, runtime entry). Platform-specific code lives only in
    `apps/cloudflare` and `packages/store-d1`.

@@ -23,19 +23,22 @@ Everything in this repository is in English: code, comments, docs, issues, PRs a
 
 ## Repository map
 
-| Path                           | Package                         | What                                                           |
-| ------------------------------ | ------------------------------- | -------------------------------------------------------------- |
-| `apps/cloudflare/`             | `@searchkeep/cloudflare`        | The Worker: Hono entry, cron handler, `wrangler.jsonc`         |
-| `apps/site/`                   | `@searchkeep/site`              | Website searchkeep.dev (SvelteKit); not deployed by users      |
-| `packages/core/`               | `@searchkeep/core`              | Domain model, analysis logic, Store / Auth / Source interfaces |
-| `packages/store-d1/`           | `@searchkeep/store-d1`          | Drizzle schema, D1 migrations (`migrations/`), Store on D1     |
-| `packages/mcp/`                | `@searchkeep/mcp`               | MCP tool definitions; call core only                           |
-| `packages/dashboard/`          | `@searchkeep/dashboard`         | Dashboard SPA (Svelte + Vite), built into the Worker's assets  |
-| `packages/sources/gsc/`        | `@searchkeep/source-gsc`        | Google Search Console adapter                                  |
-| `packages/sources/bing/`       | `@searchkeep/source-bing`       | Bing Webmaster Tools adapter                                   |
-| `packages/sources/cloudflare/` | `@searchkeep/source-cloudflare` | Cloudflare GraphQL Analytics adapter                           |
-| `docs/`                        |                                 | Charter, ADRs, roadmap, deploy runbook, maintainer guide       |
-| `.github/`                     |                                 | CI, issue and PR templates, labels, CODEOWNERS                 |
+| Path                                  | Package                                | What                                                           |
+| ------------------------------------- | -------------------------------------- | -------------------------------------------------------------- |
+| `apps/cloudflare/`                    | `@searchkeep/cloudflare`               | The Worker: Hono entry, cron handler, `wrangler.jsonc`         |
+| `apps/site/`                          | `@searchkeep/site`                     | Website searchkeep.dev (SvelteKit); not deployed by users      |
+| `packages/core/`                      | `@searchkeep/core`                     | Domain model, analysis logic, Store / Auth / Source interfaces |
+| `packages/store-d1/`                  | `@searchkeep/store-d1`                 | Drizzle schema, D1 migrations (`migrations/`), Store on D1     |
+| `packages/mcp/`                       | `@searchkeep/mcp`                      | MCP tool definitions; call core only                           |
+| `packages/dashboard/`                 | `@searchkeep/dashboard`                | Dashboard SPA (Svelte + Vite), built into the Worker's assets  |
+| `packages/sources/gsc/`               | `@searchkeep/source-gsc`               | Google Search Console adapter                                  |
+| `packages/sources/bing/`              | `@searchkeep/source-bing`              | Bing Webmaster Tools adapter                                   |
+| `packages/sources/cloudflare/`        | `@searchkeep/source-cloudflare`        | Cloudflare GraphQL Analytics adapter                           |
+| `packages/sources/app-store-connect/` | `@searchkeep/source-app-store-connect` | App Store Connect adapter (analytics reports, reviews)         |
+| `packages/sources/google-play/`       | `@searchkeep/source-google-play`       | Google Play adapter (Console bulk reports, Reporting API)      |
+| `packages/sources/app-store-public/`  | `@searchkeep/source-app-store-public`  | Opt-in plugin: Apple's public App Store feeds                  |
+| `docs/`                               |                                        | Charter, ADRs, roadmap, deploy runbook, maintainer guide       |
+| `.github/`                            |                                        | CI, issue and PR templates, labels, CODEOWNERS                 |
 
 Dependencies point from `apps/` to `packages/`, never the other way. `packages/core` depends on no
 platform. `pnpm lint` enforces this with dependency-cruiser.
@@ -87,6 +90,9 @@ curl -X POST localhost:8787/api/dev/seed                          # in another t
 - **Analysis SQL lives only in `packages/store-*`.** Core calls Store methods; it never builds SQL.
 - **MCP tools call only core**, never the database or external APIs directly. Every tool declares
   whether it is read-only; only `submit_sitemap` writes, and only when `ENABLE_WRITES` is `true`.
+- **No stored Admin keys.** Starting App Store reports takes a temporary App Store Connect Admin key
+  that is used for that one request and never stored, logged or returned (ADR 0009). Stored app
+  credentials are read-only (Sales and Reports role, Play read-only scopes).
 - **Minimal dependencies.** Prefer a few lines over a library when a Web standard API does the job.
   Adding a runtime dependency needs a maintainer decision.
 - **Configuration only from Worker Secrets** (see the table in [docs/deploy.md](docs/deploy.md)). No

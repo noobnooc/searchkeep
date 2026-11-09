@@ -9,12 +9,24 @@
 import {
   aiCrawlers,
   aiReferrals,
+  appPerformance,
+  appReviews,
+  appSearchTerms,
+  appStability,
+  listApps,
+  startAppStoreReports,
+  validateApp,
+  withStoredApps,
+  type AppDimension,
+  type AppReferrerKind,
+  type AppStore,
   comparePeriods,
   discoverSources,
   findCannibalization,
   findContentDecay,
   findCtrAnomalies,
   findQuickWins,
+  findApp,
   findSite,
   findSiteIcon,
   geoFunnel,
@@ -48,14 +60,17 @@ import {
   type SourceClients,
 } from '@searchkeep/core';
 import { handleMcpRequest, mcpLockedResponse } from '@searchkeep/mcp';
+import { createAscClient } from '@searchkeep/source-app-store-connect';
+import { createAppStorePublicClient } from '@searchkeep/source-app-store-public';
 import { createBingClient } from '@searchkeep/source-bing';
+import { createPlayClient } from '@searchkeep/source-google-play';
 import { createCloudflareClient } from '@searchkeep/source-cloudflare';
 import { createGscClient, createSitemapReader } from '@searchkeep/source-gsc';
 import { D1Store, ensureMigrated } from '@searchkeep/store-d1';
 import { Hono, type Context } from 'hono';
 import { authenticate, inspectAccess, readinessFor } from './auth/access.js';
 import { createBrowserFetch, type BrowserFetch } from './browser-fetch.js';
-import { seedDemo } from './dev-seed.js';
+import { seedAppDemo, seedDemo } from './dev-seed.js';
 import type { Env } from './env.js';
 import { setupPage } from './setup-page.js';
 
@@ -102,6 +117,12 @@ export function buildClients(config: SearchkeepConfig, browser: BrowserFetch | n
     });
   if (config.cloudflare.apiToken)
     clients.cloudflare = createCloudflareClient({ apiToken: config.cloudflare.apiToken, accountId: config.cloudflare.accountId });
+  // Apps (ADR 0009). The App Store Connect key is the Sales and Reports key; never an Admin key.
+  if (config.asc.keyId && config.asc.issuerId && config.asc.privateKey)
+    clients.asc = createAscClient({ keyId: config.asc.keyId, issuerId: config.asc.issuerId, privateKey: config.asc.privateKey });
+  if (config.play.clientEmail && config.play.privateKey && config.play.bucket)
+    clients.play = createPlayClient({ clientEmail: config.play.clientEmail, privateKey: config.play.privateKey });
+  if (config.appStorePublic) clients.appStore = createAppStorePublicClient();
   return clients;
 }
 
@@ -234,12 +255,13 @@ app.use('*', async (c, next) => {
   }
 });
 
-/** Migrates on first use, attaches the store and adds dashboard-managed sites to the config. */
+/** Migrates on first use, attaches the store and adds dashboard-managed sites and apps to the config. */
 async function attachStore(c: C): Promise<void> {
   await ensureMigrated(c.env.DB);
   const store = new D1Store(c.env.DB);
   c.set('store', store);
-  c.set('config', withStoredSites(c.get('config'), await store.listSiteConfigs()));
+  const [sites, apps] = await Promise.all([store.listSiteConfigs(), store.listAppConfigs()]);
+  c.set('config', withStoredApps(withStoredSites(c.get('config'), sites), apps));
 }
 
 // MCP ------------------------------------------------------------------------
@@ -556,9 +578,20 @@ app.post(
   handle(async (c) => {
     if (!c.get('dev')) throw new SearchkeepError('forbidden', 'Only available in local development.');
     const ctx = opsContext(c);
-    const site = findSite(ctx.config, q(c).get('site'));
-    await ctx.store.syncSites(ctx.config.sites);
-    return { seeded: await seedDemo(ctx.store, site.id, site.domain) };
+    const x = q(c);
+    // `?app=<id>` seeds one app; otherwise the site (`?site=`) and every configured app.
+    const appId = x.get('app');
+    let seeded = 0;
+    if (!appId && ctx.config.sites.length) {
+      const site = findSite(ctx.config, x.get('site'));
+      await ctx.store.syncSites(ctx.config.sites);
+      seeded += await seedDemo(ctx.store, site.id, site.domain);
+    }
+    for (const a of appId ? [findApp(ctx.config, appId)] : ctx.config.apps) {
+      const site = ctx.config.sites.find((s) => s.id === a.siteId);
+      seeded += await seedAppDemo(ctx.store, a, site?.domain);
+    }
+    return { seeded };
   }),
 );
 // Sites managed in the dashboard -------------------------------------------
@@ -602,6 +635,168 @@ app.get(
   handle((c) => discoverSources(opsContext(c))),
 );
 
+// Apps (ADR 0009) --------------------------------------------------------------
+
+/** Query parameters shared by the app endpoints. */
+function appParams(c: C) {
+  const x = q(c);
+  const store = x.get('store');
+  if (store !== undefined && store !== 'apple' && store !== 'play')
+    throw new SearchkeepError('bad_request', 'store must be "apple" or "play".');
+  return {
+    x,
+    common: x.strip({
+      app: x.get('app'),
+      store: store as AppStore | undefined,
+      start: x.get('start'),
+      end: x.get('end'),
+      days: x.num('days'),
+      limit: x.num('limit'),
+    }),
+  };
+}
+
+app.get(
+  '/api/apps',
+  handle((c) => listApps(opsContext(c))),
+);
+app.get(
+  '/api/app-performance',
+  handle((c) => {
+    const { x, common } = appParams(c);
+    return appPerformance(
+      opsContext(c),
+      x.strip({
+        ...common,
+        groupBy: x.list<AppDimension | 'referrer'>('groupBy'),
+        territory: x.get('territory'),
+        source: x.get('source'),
+        referrerKind: x.get('referrerKind') as AppReferrerKind | undefined,
+      }),
+    );
+  }),
+);
+app.get(
+  '/api/app-search-terms',
+  handle((c) => {
+    const { x, common } = appParams(c);
+    return appSearchTerms(
+      opsContext(c),
+      x.strip({
+        ...common,
+        termContains: x.get('termContains'),
+        sortBy: x.get('sortBy') as 'visitors' | undefined,
+        minVisitors: x.num('minVisitors'),
+      }),
+    );
+  }),
+);
+app.get(
+  '/api/app-reviews',
+  handle((c) => {
+    const { x, common } = appParams(c);
+    return appReviews(
+      opsContext(c),
+      x.strip({
+        ...common,
+        ratings: x.list<string>('ratings')?.map(Number),
+        territory: x.get('territory'),
+        version: x.get('version'),
+        contains: x.get('contains'),
+      }),
+    );
+  }),
+);
+app.get(
+  '/api/app-stability',
+  handle((c) => {
+    const { x, common } = appParams(c);
+    return appStability(opsContext(c), x.strip({ ...common, groupBy: x.get('groupBy') as 'date' | 'version' | undefined }));
+  }),
+);
+app.get(
+  '/api/app-configs',
+  handle(async (c) => ({ apps: c.get('config').apps.map((a) => ({ ...a, origin: a.origin ?? 'secret' })) })),
+);
+app.post(
+  '/api/app-configs',
+  handle(async (c) => {
+    const body = (await c.req.json().catch(() => null)) as (Record<string, unknown> & { mode?: string }) | null;
+    if (!body) throw new SearchkeepError('bad_request', 'Send the app as a JSON object.');
+    const res = validateApp(body);
+    if ('error' in res) throw new SearchkeepError('bad_request', res.error.replace(/^app\./, ''));
+    const config = c.get('config');
+    if (res.app.siteId && !config.sites.some((s) => s.id === res.app.siteId))
+      throw new SearchkeepError('bad_request', `Unknown site "${res.app.siteId}". Link the app to one of your sites, or leave it empty.`);
+    const existing = config.apps.find((a) => a.id === res.app.id);
+    if (existing?.origin === 'secret' || (existing && !existing.origin)) {
+      throw new SearchkeepError('forbidden', `App "${res.app.id}" is defined in the APPS secret; change it there.`);
+    }
+    if (existing && body.mode === 'create') throw new SearchkeepError('bad_request', `An app with id "${res.app.id}" already exists.`);
+    await c.get('store').saveAppConfig(res.app);
+    return { app: { ...res.app, origin: 'dashboard' }, created: !existing };
+  }),
+);
+app.delete(
+  '/api/app-configs/:id',
+  handle(async (c) => {
+    const id = c.req.param('id') ?? '';
+    const a = c.get('config').apps.find((x) => x.id === id);
+    if (!a) throw new SearchkeepError('not_found', `Unknown app "${id}".`);
+    if (a.origin !== 'dashboard') throw new SearchkeepError('forbidden', `App "${id}" is defined in the APPS secret; remove it there.`);
+    await c.get('store').deleteAppConfig(id);
+    return { deleted: id, note: 'The app configuration was removed. Data already synced for it stays in the database.' };
+  }),
+);
+/**
+ * The one-time action that starts App Store reports (ADR 0009). The body carries a temporary
+ * Admin key; it is used for this request only and never stored, logged or returned.
+ */
+app.post(
+  '/api/app-configs/:id/enable-app-store',
+  handle(async (c) => {
+    const body = (await c.req.json().catch(() => null)) as {
+      keyId?: unknown;
+      issuerId?: unknown;
+      privateKey?: unknown;
+      snapshot?: unknown;
+    } | null;
+    const str = (v: unknown) => (typeof v === 'string' && v.trim() !== '' ? v.trim() : null);
+    const keyId = str(body?.keyId);
+    const issuerId = str(body?.issuerId);
+    const privateKey = str(body?.privateKey);
+    if (!keyId || !issuerId || !privateKey)
+      throw new SearchkeepError(
+        'bad_request',
+        'Send keyId, issuerId and privateKey of a temporary App Store Connect key with the Admin role.',
+      );
+    if (privateKey.length > 10_000) throw new SearchkeepError('bad_request', 'privateKey is too long for a .p8 key.');
+    const admin = createAscClient({ keyId, issuerId, privateKey, cacheToken: false });
+    const snapshot = typeof body?.snapshot === 'boolean' ? body.snapshot : undefined;
+    return startAppStoreReports(opsContext(c), { app: c.req.param('id') ?? '', ...(snapshot === undefined ? {} : { snapshot }) }, admin);
+  }),
+);
+app.get(
+  '/api/app-discover',
+  handle(async (c) => {
+    const ctx = opsContext(c);
+    const { asc, play } = ctx.clients;
+    const discover = async <T>(enabled: boolean, reason: string, fn: () => Promise<T[]>) => {
+      if (!enabled) return { ok: false as const, reason };
+      try {
+        return { ok: true as const, items: await fn() };
+      } catch (err) {
+        return { ok: false as const, reason: safeMessage(err) };
+      }
+    };
+    const [appStore, googlePlay] = await Promise.all([
+      discover(Boolean(asc), 'App Store Connect is not set up (ASC_KEY_ID, ASC_ISSUER_ID, ASC_PRIVATE_KEY).', () => asc!.listApps()),
+      discover(Boolean(play), 'Google Play is not set up (PLAY_REPORTS_BUCKET and a service account).', () => play!.listApps()),
+    ]);
+    return { appStore, googlePlay, sites: ctx.config.sites.map((s) => ({ id: s.id, domain: s.domain })) };
+  }),
+);
+
 app.all('/api/*', (c) => c.json({ error: 'Not found', code: 'not_found' }, 404));
 
 // Dashboard ------------------------------------------------------------------
@@ -623,7 +818,10 @@ app.all('*', async (c) => {
 export async function scheduledSync(env: Env, now = new Date()): Promise<string> {
   await ensureMigrated(env.DB);
   const store = new D1Store(env.DB);
-  const config = withStoredSites(loadConfig(env as unknown as Record<string, unknown>), await store.listSiteConfigs());
+  const config = withStoredApps(
+    withStoredSites(loadConfig(env as unknown as Record<string, unknown>), await store.listSiteConfigs()),
+    await store.listAppConfigs(),
+  );
   if (!(await store.getMeta(READY_FLAG_KEY))) {
     return 'not ready: the deployment has not reached the ready state yet (open the dashboard through Access once)';
   }
