@@ -770,6 +770,30 @@ export function appContract(name: string, makeStore: () => Promise<Store>): void
         expect(reviews.summary[0]!.rating).toMatchObject({ territory: 'JP', average: 4.5, count: 20 });
       });
 
+      it('continues the public feeds storefront by storefront when a run has few calls', async () => {
+        const cfg = config({ SYNC_MAX_CALLS_PER_RUN: '5' });
+        const looked: string[] = [];
+        const pub: AppStorePublicClient = {
+          async lookup(_id, country) {
+            looked.push(country);
+            return { ...(await fakePublic().lookup(APP.appleId, country))!, price: 0 };
+          },
+          topChart: async () => [],
+        };
+        let runs = 0;
+        while ((await store.getMeta(syncKeys.appStorePublic(APP.id))) !== '2026-10-20' && runs < 10) {
+          await runSync({ store, config: cfg, clients: { appStore: pub }, trigger: 'manual', now: NOW, pacing: {} });
+          runs += 1;
+        }
+        // Five storefronts of three calls each do not fit one run of five calls, but every run saves its storefronts.
+        expect(runs).toBeGreaterThan(1);
+        expect(runs).toBeLessThan(10);
+        expect([...new Set(looked)]).toEqual(['us', 'cn', 'jp', 'gb', 'de']);
+        expect(looked.filter((c) => c === 'us')).toHaveLength(1);
+        const ranks = await store.queryAppChartRanks(APP.id, { start: '2026-10-20', end: '2026-10-20' });
+        expect(new Set(ranks.map((r) => r.territory)).size).toBe(5);
+      });
+
       it('continues across runs when the call budget runs out', async () => {
         const cfg = config({ SYNC_MAX_CALLS_PER_RUN: '5' });
         const c = clients();

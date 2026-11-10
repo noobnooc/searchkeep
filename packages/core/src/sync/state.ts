@@ -106,9 +106,17 @@ export const syncKeys = {
   playVitals: (app: string) => `app:play:vitals:${app}`,
   /** Day Apple's public feeds were last read for an app. */
   appStorePublic: (app: string) => `app:pub:${app}`,
+  /** Storefronts of today's public feed check already saved (`AppStorePublicPart`). */
+  appStorePublicPart: (app: string) => `app:pub-part:${app}`,
   backoff: 'sync:backoff',
   lastRun: 'sync:last_run',
 } as const;
+
+export interface AppStorePublicPart {
+  day: IsoDate;
+  /** Lower-case storefront codes. */
+  done: string[];
+}
 
 export interface GscDailyProgress {
   day: IsoDate;

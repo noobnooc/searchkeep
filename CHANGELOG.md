@@ -136,7 +136,8 @@ Because users sync `main` at any time, the `Unreleased` section is always accura
   the app, or else (new default, instead of only `us`) its own biggest App Store storefronts by
   downloads, filled up with the largest storefronts (US, China, Japan, UK, Germany), up to 5.
   Storefronts where the app is not sold are skipped, and a free app is checked only in the free
-  charts, a paid app only in the paid ones. The **App Store charts** card on an app's overview is
+  charts, a paid app only in the paid ones. Each storefront is saved as soon as it is read, so a run
+  that runs out of calls (`SYNC_MAX_CALLS_PER_RUN`) continues with the next one. The **App Store charts** card on an app's overview is
   now a table of storefronts (most important first) by chart, with the category's name and the
   change since the previous check; charts no longer checked drop out.
 
