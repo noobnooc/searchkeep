@@ -133,7 +133,7 @@ You need:
 - **Bing Webmaster Tools** with your sites verified (optional but recommended; its AI Performance
   CSV export provides the "Cited" stage of the GEO funnel, see
   [Troubleshooting](#the-cited-step-of-the-geo-funnel-is-empty)).
-- Optional, for agents or command-line use: `git`, Node.js 22, pnpm (the version in the root
+- Optional, for agents or command-line use: `git`, Node.js 22.12+, pnpm (the version in the root
   `package.json` `packageManager` field), the GitHub CLI `gh` or a GitHub MCP server, `curl`, `jq`,
   and `gcloud` for step 12. An agent working with Cloudflare needs either the Cloudflare MCP server
   (signed in as you) or a short-lived API token you create for the deployment with edit permissions
