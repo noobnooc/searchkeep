@@ -104,7 +104,7 @@ cloudflared access curl "https://searchkeep.example.com/api/import/ai-citations?
   </li>
   <li>
     <strong>Progress is visible.</strong> While a site’s latest days are still coming in, the dashboard shows a banner
-    with each source’s progress and fills in the views as data arrives. <strong>Settings → Sync progress</strong> lists
+    with each source’s progress and fills in the views as data arrives. <strong>Settings → Sync</strong> lists
     every site and dataset, and <code>setup_status</code> reports the same to an AI client.
   </li>
   <li>
@@ -122,7 +122,7 @@ cloudflared access curl "https://searchkeep.example.com/api/import/ai-citations?
   </li>
 </ul>
 <p>
-  To run a pass right away, use <strong>Sync now</strong> in the dashboard’s Settings, or <code>POST /api/sync</code>
+  To run a pass right away, use <strong>Settings → Sync → Sync now</strong> in the dashboard, or <code>POST /api/sync</code>
   from an authenticated session. The dashboard also lists recent sync runs and what each one did.
 </p>
 
@@ -321,7 +321,7 @@ cloudflared access curl "https://searchkeep.example.com/api/import/ai-citations?
 </p>
 <ul>
   <li>
-    In the dashboard: <strong>Settings → Import AI citations</strong>.
+    In the dashboard: <strong>Settings → Stored data → Import AI citations</strong>.
   </li>
   <li>
     Or from a terminal: <code>POST /api/import/ai-citations?site=&lt;id&gt;&amp;date=&lt;YYYY-MM-DD&gt;</code> with the CSV

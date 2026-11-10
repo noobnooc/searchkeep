@@ -14,6 +14,7 @@
   import ErrorBanner from './ErrorBanner.svelte';
   import Icon from './Icon.svelte';
   import Pill from './Pill.svelte';
+  import SiteIcon from './SiteIcon.svelte';
   import Skeleton from './Skeleton.svelte';
   import { request } from '../lib/api';
   import { refreshAll, resource } from '../lib/resource.svelte';
@@ -171,6 +172,72 @@
   ];
 </script>
 
+{#snippet siteForm(f: Form)}
+  <form class="site-form" onsubmit={save}>
+    <div class="row">
+      <label for="sf-domain">Domain <span class="req">required</span></label>
+      <div class="with-btn">
+        <input id="sf-domain" class="input" type="text" inputmode="url" placeholder="example.com" bind:value={f.domain} disabled={f.mode === 'edit'} autocomplete="off" spellcheck="false" required />
+        <button type="button" class="btn sm" onclick={autofill} disabled={!discovery || !f.domain.trim()} title="Find this domain in Search Console, Bing and Cloudflare">
+          <Icon name="sparkle" size={14} /> {discovering ? 'Looking…' : 'Auto-fill'}
+        </button>
+      </div>
+      <p class="hint">Without https://. Add each subdomain as its own site.</p>
+    </div>
+
+    <div class="grid">
+      <div class="row">
+        <label for="sf-gsc">Search Console property</label>
+        <input id="sf-gsc" class="input" list="sf-gsc-list" placeholder="sc-domain:example.com" bind:value={f.gscProperty} autocomplete="off" spellcheck="false" />
+        <datalist id="sf-gsc-list">
+          {#if discovery?.gscProperties.ok}{#each discovery.gscProperties.items as p (p.siteUrl)}<option value={p.siteUrl}>{p.permissionLevel}</option>{/each}{/if}
+        </datalist>
+        <p class="hint">{discovery && !discovery.gscProperties.ok ? discovery.gscProperties.reason : 'sc-domain:example.com or https://example.com/'}</p>
+      </div>
+      <div class="row">
+        <label for="sf-bing">Bing site URL</label>
+        <input id="sf-bing" class="input" list="sf-bing-list" placeholder="https://example.com/" bind:value={f.bingSiteUrl} autocomplete="off" spellcheck="false" />
+        <datalist id="sf-bing-list">
+          {#if discovery?.bingSites.ok}{#each discovery.bingSites.items as b (b.url)}<option value={b.url}>{b.verified ? 'verified' : 'not verified'}</option>{/each}{/if}
+        </datalist>
+        <p class="hint">{discovery && !discovery.bingSites.ok ? discovery.bingSites.reason : 'As listed in Bing Webmaster Tools.'}</p>
+      </div>
+      <div class="row">
+        <label for="sf-zone">Cloudflare zone (AI crawlers)</label>
+        <input id="sf-zone" class="input mono" list="sf-zone-list" placeholder="Zone ID" bind:value={f.cloudflareZoneId} autocomplete="off" spellcheck="false" />
+        <datalist id="sf-zone-list">
+          {#if discovery?.zones.ok}{#each discovery.zones.items as z (z.id)}<option value={z.id}>{z.name}</option>{/each}{/if}
+        </datalist>
+        <p class="hint">
+          {#if discovery && !discovery.zones.ok}To pick from a list, add <b>Zone: Read</b> to the API token.{/if}
+          The zone must be proxied through Cloudflare (orange cloud). Zone ID: Cloudflare dashboard → your domain → Overview.
+        </p>
+      </div>
+      <div class="row">
+        <label for="sf-rum">Web Analytics site tag</label>
+        <input id="sf-rum" class="input mono" list="sf-rum-list" placeholder="Site tag" bind:value={f.webAnalyticsSiteTag} autocomplete="off" spellcheck="false" />
+        <datalist id="sf-rum-list">
+          {#if discovery?.webAnalytics.ok}{#each discovery.webAnalytics.items as w (w.siteTag)}<option value={w.siteTag}>{w.host ?? 'Web Analytics site'}</option>{/each}{/if}
+        </datalist>
+        <p class="hint">{#if discovery && !discovery.webAnalytics.ok}To pick from a list, add <b>Account Settings: Read</b> to the API token.{/if}
+          For AI referral visits and Web Vitals.</p>
+      </div>
+      <div class="row">
+        <label for="sf-brand">Brand regex</label>
+        <input id="sf-brand" class="input mono" placeholder="acme|acme\s?corp" bind:value={f.brandRegex} autocomplete="off" spellcheck="false" />
+        <p class="hint">Optional. Matching queries count as brand.</p>
+      </div>
+    </div>
+
+    <div class="form-actions">
+      <button class="btn primary" type="submit" disabled={saving || !f.domain.trim()}>
+        <Icon name="check" size={14} /> {saving ? 'Saving…' : f.mode === 'create' ? 'Add site' : 'Save changes'}
+      </button>
+      <button class="btn ghost" type="button" onclick={() => (form = null)} disabled={saving}>Cancel</button>
+    </div>
+  </form>
+{/snippet}
+
 <Card title="Sites" subtitle="The sites Searchkeep analyses. Each source is optional; connect what you have." id="settings-sites">
   {#snippet actions()}
     {#if !form}
@@ -181,71 +248,7 @@
   {#if notice}<p class="notice" role="status"><Icon name="info" size={14} /> {notice}</p>{/if}
   {#if error}<div class="mb"><ErrorBanner {error} title="Could not save the site" /></div>{/if}
 
-  {#if form}
-    <form class="site-form" onsubmit={save}>
-      <div class="row">
-        <label for="sf-domain">Domain <span class="req">required</span></label>
-        <div class="with-btn">
-          <input id="sf-domain" class="input" type="text" inputmode="url" placeholder="example.com" bind:value={form.domain} disabled={form.mode === 'edit'} autocomplete="off" spellcheck="false" required />
-          <button type="button" class="btn sm" onclick={autofill} disabled={!discovery || !form.domain.trim()} title="Find this domain in Search Console, Bing and Cloudflare">
-            <Icon name="sparkle" size={14} /> {discovering ? 'Looking…' : 'Auto-fill'}
-          </button>
-        </div>
-        <p class="hint">Without https://. Add each subdomain as its own site.</p>
-      </div>
-
-      <div class="grid">
-        <div class="row">
-          <label for="sf-gsc">Search Console property</label>
-          <input id="sf-gsc" class="input" list="sf-gsc-list" placeholder="sc-domain:example.com" bind:value={form.gscProperty} autocomplete="off" spellcheck="false" />
-          <datalist id="sf-gsc-list">
-            {#if discovery?.gscProperties.ok}{#each discovery.gscProperties.items as p (p.siteUrl)}<option value={p.siteUrl}>{p.permissionLevel}</option>{/each}{/if}
-          </datalist>
-          <p class="hint">{discovery && !discovery.gscProperties.ok ? discovery.gscProperties.reason : 'sc-domain:example.com or https://example.com/'}</p>
-        </div>
-        <div class="row">
-          <label for="sf-bing">Bing site URL</label>
-          <input id="sf-bing" class="input" list="sf-bing-list" placeholder="https://example.com/" bind:value={form.bingSiteUrl} autocomplete="off" spellcheck="false" />
-          <datalist id="sf-bing-list">
-            {#if discovery?.bingSites.ok}{#each discovery.bingSites.items as b (b.url)}<option value={b.url}>{b.verified ? 'verified' : 'not verified'}</option>{/each}{/if}
-          </datalist>
-          <p class="hint">{discovery && !discovery.bingSites.ok ? discovery.bingSites.reason : 'As listed in Bing Webmaster Tools.'}</p>
-        </div>
-        <div class="row">
-          <label for="sf-zone">Cloudflare zone (AI crawlers)</label>
-          <input id="sf-zone" class="input mono" list="sf-zone-list" placeholder="Zone ID" bind:value={form.cloudflareZoneId} autocomplete="off" spellcheck="false" />
-          <datalist id="sf-zone-list">
-            {#if discovery?.zones.ok}{#each discovery.zones.items as z (z.id)}<option value={z.id}>{z.name}</option>{/each}{/if}
-          </datalist>
-          <p class="hint">
-            {#if discovery && !discovery.zones.ok}To pick from a list, add <b>Zone: Read</b> to the API token.{/if}
-            The zone must be proxied through Cloudflare (orange cloud). Zone ID: Cloudflare dashboard → your domain → Overview.
-          </p>
-        </div>
-        <div class="row">
-          <label for="sf-rum">Web Analytics site tag</label>
-          <input id="sf-rum" class="input mono" list="sf-rum-list" placeholder="Site tag" bind:value={form.webAnalyticsSiteTag} autocomplete="off" spellcheck="false" />
-          <datalist id="sf-rum-list">
-            {#if discovery?.webAnalytics.ok}{#each discovery.webAnalytics.items as w (w.siteTag)}<option value={w.siteTag}>{w.host ?? 'Web Analytics site'}</option>{/each}{/if}
-          </datalist>
-          <p class="hint">{#if discovery && !discovery.webAnalytics.ok}To pick from a list, add <b>Account Settings: Read</b> to the API token.{/if}
-            For AI referral visits and Web Vitals.</p>
-        </div>
-        <div class="row">
-          <label for="sf-brand">Brand regex</label>
-          <input id="sf-brand" class="input mono" placeholder="acme|acme\s?corp" bind:value={form.brandRegex} autocomplete="off" spellcheck="false" />
-          <p class="hint">Optional. Matching queries count as brand.</p>
-        </div>
-      </div>
-
-      <div class="form-actions">
-        <button class="btn primary" type="submit" disabled={saving || !form.domain.trim()}>
-          <Icon name="check" size={14} /> {saving ? 'Saving…' : form.mode === 'create' ? 'Add site' : 'Save changes'}
-        </button>
-        <button class="btn ghost" type="button" onclick={() => (form = null)} disabled={saving}>Cancel</button>
-      </div>
-    </form>
-  {/if}
+  {#if form?.mode === 'create'}{@render siteForm(form)}{/if}
 
   {#if configs.data}
     {#if configs.data.sites.length === 0}
@@ -258,10 +261,13 @@
     {:else}
       <ul class="sites">
         {#each configs.data.sites as s (s.id)}
-          <li>
+          <li class:editing={form?.mode === 'edit' && form.id === s.id}>
             <div class="who">
-              <span class="domain">{s.domain}</span>
-              <span class="id">{s.id}</span>
+              <SiteIcon site={s} size="lg" />
+              <div class="names">
+                <span class="domain">{s.domain}</span>
+                <span class="id">{s.id}</span>
+              </div>
             </div>
             <div class="srcs">
               {#each SOURCES as src (src.key)}
@@ -276,6 +282,7 @@
                 <span class="from-secret" title="Defined in the SITES Worker secret; change it there.">SITES secret</span>
               {/if}
             </div>
+            {#if form?.mode === 'edit' && form.id === s.id}<div class="inline-form">{@render siteForm(form)}</div>{/if}
           </li>
         {/each}
       </ul>
@@ -295,8 +302,8 @@
     margin: 0 0 14px;
     padding: 10px 12px;
     border-radius: 8px;
-    background: var(--accent-soft, color-mix(in srgb, var(--accent) 12%, transparent));
-    color: var(--text-2, inherit);
+    background: var(--accent-wash);
+    color: var(--text-2);
     font-size: 13px;
   }
   .mb {
@@ -309,7 +316,7 @@
     margin-bottom: 16px;
     border: 1px solid var(--border);
     border-radius: var(--radius);
-    background: var(--surface-2, transparent);
+    background: var(--surface-2);
   }
   .grid {
     display: grid;
@@ -329,7 +336,7 @@
   .req {
     font-weight: 400;
     font-size: 11px;
-    color: var(--text-3, var(--muted));
+    color: var(--text-3);
     margin-left: 6px;
   }
   .with-btn {
@@ -343,11 +350,11 @@
   .hint {
     margin: 0;
     font-size: 12px;
-    color: var(--text-3, var(--muted));
+    color: var(--text-3);
     line-height: 1.45;
   }
   .mono {
-    font-family: var(--font-mono, ui-monospace, monospace);
+    font-family: var(--mono);
   }
   .form-actions {
     display: flex;
@@ -372,8 +379,20 @@
     border-top: 0;
   }
   .who {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+  }
+  .names {
     display: grid;
     min-width: 0;
+  }
+  .inline-form {
+    grid-column: 1 / -1;
+  }
+  .inline-form .site-form {
+    margin: 4px 0 0;
   }
   .domain {
     font-weight: 550;
@@ -383,8 +402,8 @@
   }
   .id {
     font-size: 12px;
-    color: var(--text-3, var(--muted));
-    font-family: var(--font-mono, ui-monospace, monospace);
+    color: var(--text-3);
+    font-family: var(--mono);
   }
   .srcs {
     display: flex;
@@ -398,7 +417,7 @@
   }
   .from-secret {
     font-size: 12px;
-    color: var(--text-3, var(--muted));
+    color: var(--text-3);
     white-space: nowrap;
   }
   @media (max-width: 720px) {

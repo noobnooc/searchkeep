@@ -27,6 +27,7 @@ import {
   findCtrAnomalies,
   findQuickWins,
   findApp,
+  findAppIcon,
   findSite,
   findSiteIcon,
   geoFunnel,
@@ -57,6 +58,7 @@ import {
   type OpsContext,
   type ReadinessReport,
   type SearchkeepConfig,
+  type SiteIcon,
   type SourceClients,
 } from '@searchkeep/core';
 import { handleMcpRequest, mcpLockedResponse } from '@searchkeep/mcp';
@@ -338,21 +340,36 @@ app.get(
   '/api/sites',
   handle((c) => listSites(opsContext(c))),
 );
+/** An icon for the site or app switchers, or a 404 the browser may cache for an hour. */
+function iconResponse(c: C, icon: SiteIcon | null, missing: string) {
+  if (!icon) {
+    c.header('cache-control', 'private, max-age=3600');
+    return c.json({ error: missing, code: 'not_found' }, 404);
+  }
+  return c.body(icon.body as Uint8Array<ArrayBuffer>, 200, {
+    'content-type': icon.contentType,
+    'cache-control': 'private, max-age=86400',
+    // An SVG icon opened directly must not run scripts on the dashboard's origin.
+    'content-security-policy': "default-src 'none'; style-src 'unsafe-inline'; sandbox",
+  });
+}
 // The site's own icon for the site switcher, read from the site itself (never from a third-party icon service).
 app.get('/api/site-icon', async (c) => {
   try {
     const site = findSite(c.get('config'), q(c).get('site'));
-    const icon = await findSiteIcon(site.domain);
-    if (!icon) {
-      c.header('cache-control', 'private, max-age=3600');
-      return c.json({ error: `No icon found on ${site.domain}.`, code: 'not_found' }, 404);
-    }
-    return c.body(icon.body as Uint8Array<ArrayBuffer>, 200, {
-      'content-type': icon.contentType,
-      'cache-control': 'private, max-age=86400',
-      // An SVG icon opened directly must not run scripts on the dashboard's origin.
-      'content-security-policy': "default-src 'none'; style-src 'unsafe-inline'; sandbox",
-    });
+    return iconResponse(c, await findSiteIcon(site.domain), `No icon found on ${site.domain}.`);
+  } catch (err) {
+    return errorResponse(c, err);
+  }
+});
+// The app's icon for the app switcher: from App Store Connect (the newest build's icon), else from the linked site.
+app.get('/api/app-icon', async (c) => {
+  try {
+    const config = c.get('config');
+    const a = findApp(config, q(c).get('app'));
+    const siteDomain = a.siteId ? (config.sites.find((s) => s.id === a.siteId)?.domain ?? null) : null;
+    const icon = await findAppIcon(a, { asc: opsContext(c).clients.asc, siteDomain });
+    return iconResponse(c, icon, `No icon found for ${a.name}.`);
   } catch (err) {
     return errorResponse(c, err);
   }

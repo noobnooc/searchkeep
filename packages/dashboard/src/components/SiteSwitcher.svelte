@@ -29,7 +29,7 @@
               ui.setSite(s.id);
               open = false;
             }}>
-            <SiteIcon site={s} small />
+            <SiteIcon site={s} size="sm" />
             <span class="names">
               <span class="domain truncate">{s.domain}</span>
               <span class="id truncate">{s.id}</span>

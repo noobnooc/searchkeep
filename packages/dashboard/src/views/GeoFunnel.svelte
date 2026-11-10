@@ -91,7 +91,7 @@
         <EmptyState title="The funnel is empty for this range" icon="funnel">
           <p>Each step comes from a different source: AI crawler requests from Cloudflare (<code>cloudflareZoneId</code>), citations from the Bing AI Performance CSV import, AI visits from Cloudflare Web Analytics (<code>webAnalyticsSiteTag</code>) and clicks from Search Console and Bing.</p>
           {#snippet actions()}
-            <a class="btn" href={href('settings')}>Check setup</a>
+            <a class="btn" href={href('settings', 'checks')}>Check setup</a>
             <a class="btn primary" href={href('settings', 'sync')}><Icon name="sync" size={14} /> Sync now</a>
           {/snippet}
         </EmptyState>

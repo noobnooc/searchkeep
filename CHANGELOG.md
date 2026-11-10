@@ -58,6 +58,13 @@ Because users sync `main` at any time, the `Unreleased` section is always accura
   `app_reviews`, `app_vitals` and `app_chart_ranks` (migration `0003_apps`). The charter and roadmap
   now include apps.
 
+- App icons in the app switcher, like the site icons. The new `GET /api/app-icon?app=<id>` reads the
+  icon of the app's newest uploaded build from App Store Connect (`Build.iconAssetToken`, with the
+  stored read-only key) and downloads it only from Apple's image CDN (`*.mzstatic.com`); when that
+  gives nothing (a Google Play app, no build yet, or a key that cannot read builds), it uses the
+  icon of the app's linked site. Google Play has no read-only API for the icon and store pages are
+  never read, so such an app without a linked site keeps its first letter. The icons also show in
+  **Settings** → **Sites** and **Apps** and in the sync progress tables.
 - Site icons in the site switcher. Each site now shows its own icon instead of the first letter of
   its domain. The new `GET /api/site-icon?site=<id>` reads it from the site itself, as
   `Searchkeep icon reader`: the `apple-touch-icon` links on the home page, then
@@ -110,7 +117,7 @@ Because users sync `main` at any time, the `Unreleased` section is always accura
 - Sync progress you can see. While a site's latest days are still coming in, every dashboard page
   shows a banner with each source's progress (how far back the data goes, what is paused or
   failing, and when it is retried), the sidebar shows the overall progress, and the views refresh
-  on their own when a sync brings new rows. **Settings** → **Sync progress** lists every site and
+  on their own when a sync brings new rows. **Settings** → **Sync** lists every site and
   dataset. Overview shows no period-over-period deltas until the comparison period is synced. New
   API: `GET /api/sync-progress`; `setup_status` returns the same as `syncProgress` and adds a
   `sync.progress` check.
@@ -124,6 +131,16 @@ Because users sync `main` at any time, the `Unreleased` section is always accura
   `bad_request` error instead of an unsorted list.
 
 ### Changed
+
+- **Settings** is split into sections with their own addresses (`#/settings/<section>`), grouped
+  in a side menu (a scrolling row on phones): **Sites** and **Apps** (what Searchkeep tracks),
+  **Sync** (progress, **Sync now** and recent runs in one place), **Stored data** (data coverage per
+  site, now without empty rows, and **Import AI citations**), **Setup checks** (in columns, with a
+  "to fix or check" filter and the problem count in the menu), **AI clients** (the MCP endpoint and
+  each client's setup) and **Appearance** (theme, the signed-in account and **Sign out**). The
+  separate "Sites and data coverage" card, which repeated the site list, is gone. Old links such as
+  `#/settings/progress` and `#/settings/import` still open the right section. Editing a site or an
+  app opens the form under its row instead of at the top of the list.
 
 - Bing site totals have an average position (#24). Bing reports none for them, so they now take the
   impression-weighted position of Bing's query rows (by day, week and month too); query and page
@@ -225,6 +242,10 @@ Because users sync `main` at any time, the `Unreleased` section is always accura
   troubleshooting entry, "Asked to sign in again every day", points to it.
 
 ### Fixed
+
+- On phones, short dashboard pages no longer show a large empty space under the top bar.
+- Monospace identifiers in **Settings** → **Sites** and **Apps** use the dashboard's mono font
+  (undefined CSS variables made them fall back to the system font).
 
 - Apple's public App Store feeds (the opt-in `APP_STORE_PUBLIC_DATA` plugin) refuse the egress IP
   addresses of Workers with HTTP 403, so the plugin wrote nothing. When a direct call is refused,

@@ -153,4 +153,30 @@ describe('app store connect', () => {
       /unexpected pagination link/,
     );
   });
+
+  it('reads the icon of the newest build that has one', async () => {
+    const { pem } = await p8();
+    const urls: string[] = [];
+    const fetchMock = (async (url: string) => {
+      urls.push(url);
+      if (url.includes('filter%5Bapp%5D=999')) return Response.json({ data: [] });
+      return Response.json({
+        data: [
+          { id: 'b3', attributes: { iconAssetToken: null } },
+          {
+            id: 'b2',
+            attributes: { iconAssetToken: { templateUrl: 'https://is1-ssl.mzstatic.com/a/{w}x{h}bb.{f}', width: 1024, height: 1024 } },
+          },
+        ],
+      });
+    }) as typeof fetch;
+    const asc = createAscClient({ keyId: 'K', issuerId: 'I', privateKey: pem, fetch: fetchMock });
+    expect(await asc.latestBuildIcon('123')).toEqual({
+      templateUrl: 'https://is1-ssl.mzstatic.com/a/{w}x{h}bb.{f}',
+      width: 1024,
+      height: 1024,
+    });
+    expect(urls[0]).toContain('/v1/builds?filter%5Bapp%5D=123&sort=-uploadedDate&limit=5&fields%5Bbuilds%5D=iconAssetToken');
+    expect(await asc.latestBuildIcon('999')).toBeNull();
+  });
 });

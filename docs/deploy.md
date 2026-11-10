@@ -843,7 +843,7 @@ lock; fix it with step 16 and reconnect.
 Open `https://<your-domain>/` and look at the dashboard's **Settings** (status) page, which reads
 `GET /api/status` and works in every state once you are signed in through Access. It shows the
 readiness state, one line per readiness check, and any configuration errors. Once the deployment is
-`ready`, ask your MCP client to call **`setup_status`** (or use the same page) for the full report:
+`ready`, ask your MCP client to call **`setup_status`** (or open **Settings** → **Setup checks**) for the full report:
 each credential, live probes of the Cloudflare token, Search Console and Bing, the last sync, and
 each site's sources and data coverage. Before `ready`, `/mcp` and every other `/api/*` route refuse
 requests with an error that names the state.
@@ -873,7 +873,7 @@ The cron runs **every 15 minutes**. Once the ready flag is set (step 16), each p
 the Access application through the API (and locks again if Access was turned off or loosened), then
 does whatever sync work is due. To start right away instead of waiting for the next pass:
 
-- **Dashboard:** open `https://<your-domain>/` → **Settings** → **Sync now**.
+- **Dashboard:** open `https://<your-domain>/` → **Settings** → **Sync** → **Sync now**.
 - **API:** `POST https://<your-domain>/api/sync` from an authenticated session (it is behind Access
   like every other route). For example, with `cloudflared` installed:
   `cloudflared access curl https://<your-domain>/api/sync -X POST` (it opens a browser to sign in).
@@ -928,7 +928,7 @@ How the sync works:
   next pass.
 
 **Verify:** the dashboard shows the sync progress (a banner on every page while a site's latest days
-are still coming in, and **Settings** → **Sync progress** with each site and dataset). From an MCP
+are still coming in, and **Settings** → **Sync** with each site and dataset). From an MCP
 client, `setup_status` reports the same under `syncProgress` and in the `sync.progress` check, and
 `list_sites` shows a date range for each connected dataset. Within hours for small sites (days for
 sites with a lot of data on the free D1 write quota), history reaches back 16 months.
@@ -1062,7 +1062,7 @@ default.
 
 Bing AI Performance (citations in Copilot and Bing AI answers) has no API; Microsoft says one is on
 its backlog. Export the report as CSV in Bing Webmaster Tools and import it: dashboard →
-**Settings** → **Import AI citations**, or
+**Settings** → **Stored data** → **Import AI citations**, or
 
 ```sh
 cloudflared access curl "https://<your-domain>/api/import/ai-citations?site=<id>&date=<YYYY-MM-DD>" \
@@ -1107,6 +1107,24 @@ and `totals.inspected` grows each day.
 **Verify:** `cloudflared access curl "https://<your-domain>/api/site-icon?site=<id>" -o icon` saves
 an image (HTTP 200); a 404 means no icon was found.
 
+### An app shows a letter instead of its icon
+
+**Who:** Agent or human.
+
+- The app switcher shows the app's icon from, in order:
+  1. **App Store Connect:** the icon of the app's newest uploaded build, read with the stored
+     `ASC_KEY_ID` key and downloaded from Apple's image CDN (`*.mzstatic.com`), where App Store
+     Connect serves it. Needs an App Store Apple ID on the app and a key that can read its builds.
+  2. **The linked site** (the app's **Your site** field): that site's own icon, read as described
+     above.
+- Google Play has no API that returns the icon with the read-only access Searchkeep uses, and store
+  pages are never read, so a Google Play app without a linked site shows its first letter. Link the
+  app to your site to show the site's icon instead.
+- Browsers keep the icon for a day, and the "no icon" answer for an hour.
+
+**Verify:** `cloudflared access curl "https://<your-domain>/api/app-icon?app=<id>" -o icon` saves
+an image (HTTP 200); a 404 means neither source had an icon.
+
 ### App Store data stays empty
 
 - `list_apps` shows `appStoreReports.started: false`: do step 14a.3 (start App Store reports).
@@ -1129,7 +1147,7 @@ an image (HTTP 200); a 404 means no icon was found.
 
 ### Sync is slow or units are skipped
 
-- Open **Settings** → **Sync progress** in the dashboard (or `setup_status` → `syncProgress`): it
+- Open **Settings** → **Sync** in the dashboard (or `setup_status` → `syncProgress`): it
   shows for each site and dataset how far back the data goes, and which sources are paused or
   failing, with the error and the time of the next retry.
 - History writes up to `SYNC_DAILY_WRITE_BUDGET` rows per UTC day (80,000 by default, under D1

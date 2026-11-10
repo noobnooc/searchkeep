@@ -69,7 +69,7 @@
     <EmptyState title="Web Analytics is not set up for this site" icon="referral">
       <p>Connect Cloudflare Web Analytics to this site in Settings.</p>
       {#snippet actions()}
-        <a class="btn" href={href('settings')}><Icon name="settings" size={14} /> Setup checks</a>
+        <a class="btn" href={href('settings', 'checks')}><Icon name="settings" size={14} /> Setup checks</a>
       {/snippet}
     </EmptyState>
   </Card>

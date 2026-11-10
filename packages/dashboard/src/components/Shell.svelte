@@ -141,7 +141,7 @@
 {#snippet foot()}
   <div class="foot">
     <SyncStatus />
-    <a class="nav-item" href={href('settings')} aria-current={router.view === 'settings' ? 'page' : undefined}>
+    <a class="nav-item" href={href('settings', mode === 'apps' ? 'apps' : undefined)} aria-current={router.view === 'settings' ? 'page' : undefined}>
       <Icon name="settings" size={16} />
       <span>Settings</span>
       {#if noData}<span class="dot-badge" title="No data synced yet"></span>{/if}
@@ -335,6 +335,8 @@
   @media (max-width: 900px) {
     .app {
       grid-template-columns: minmax(0, 1fr);
+      /* Rows keep their own height; otherwise a short page stretches the top bar's row. */
+      align-content: start;
     }
     .side-col {
       display: none;

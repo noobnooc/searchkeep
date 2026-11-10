@@ -33,3 +33,4 @@ export * from './apps/reports.js';
 export * from './apps/analysis.js';
 export { planAppUnits, ASC_RECENT_INSTANCES, ASC_REVIEW_HISTORY_PAGES, PLAY_VITALS_LOOKBACK_DAYS } from './apps/sync.js';
 export * from './site-icon.js';
+export * from './app-icon.js';

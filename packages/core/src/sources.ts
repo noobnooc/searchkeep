@@ -207,9 +207,21 @@ export interface AscReview {
   territory: string | null;
 }
 
+/**
+ * An image App Store Connect serves from Apple's image CDN. `templateUrl` holds `{w}`, `{h}` and
+ * `{f}` placeholders for the width, height and format (e.g. `png`).
+ */
+export interface AscImageAsset {
+  templateUrl: string;
+  width: number;
+  height: number;
+}
+
 export interface AscClient {
   /** Apps the key can see (for suggestions in the dashboard). */
   listApps(): Promise<Array<{ id: string; name: string; bundleId: string }>>;
+  /** The app icon of the newest uploaded build that has one, or null when no build has an icon. */
+  latestBuildIcon(appleId: string): Promise<AscImageAsset | null>;
   listReportRequests(appleId: string): Promise<AscReportRequest[]>;
   /** Needs an Admin key: used only by the one-time "start reports" action, never by the sync. */
   createReportRequest(appleId: string, accessType: AscAccessType): Promise<AscReportRequest>;

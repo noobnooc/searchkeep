@@ -9,6 +9,8 @@ import {
   segmentsEnabled,
   clearJwksCache,
   evaluateReadiness,
+  appleImageUrl,
+  findAppIcon,
   findSiteIcon,
   geoFunnel,
   isRateLimited,
@@ -27,7 +29,7 @@ import {
   weekStart,
   withStoredSites,
 } from '../src/index.js';
-import type { Store } from '../src/index.js';
+import type { AscClient, Store } from '../src/index.js';
 
 function b64url(bytes: ArrayBuffer | Uint8Array | string): string {
   const arr = typeof bytes === 'string' ? new TextEncoder().encode(bytes) : bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
@@ -476,5 +478,71 @@ describe('site icon', () => {
       'https://acme.com/apple-touch-icon.png',
       'https://acme.com/static/touch.png',
     ]);
+  });
+});
+
+describe('app icon', () => {
+  const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13]);
+  const TEMPLATE = 'https://is1-ssl.mzstatic.com/image/thumb/Purple/v4/ab/AppIcon.png/{w}x{h}bb.{f}';
+  const app = { id: 'acme', name: 'Acme', appleId: '123', siteId: 'site' };
+  const asc = (icon: Awaited<ReturnType<AscClient['latestBuildIcon']>> | Error) =>
+    ({
+      latestBuildIcon: async () => {
+        if (icon instanceof Error) throw icon;
+        return icon;
+      },
+    }) as unknown as AscClient;
+  const fetchFrom = (files: Record<string, Uint8Array<ArrayBuffer> | string>) => {
+    const fetched: string[] = [];
+    const f = (async (input: RequestInfo | URL) => {
+      const url = String(input);
+      fetched.push(url);
+      const body = files[url];
+      return body === undefined ? new Response('missing', { status: 404 }) : new Response(body);
+    }) as typeof fetch;
+    return { fetch: f, fetched };
+  };
+
+  it("fills in Apple's image template, only for Apple's image CDN", () => {
+    expect(appleImageUrl({ templateUrl: TEMPLATE, width: 1024, height: 1024 })).toBe(
+      'https://is1-ssl.mzstatic.com/image/thumb/Purple/v4/ab/AppIcon.png/128x128bb.png',
+    );
+    expect(appleImageUrl({ templateUrl: TEMPLATE, width: 60, height: 60 }, 128)).toContain('/60x60bb.png');
+    expect(appleImageUrl({ templateUrl: 'https://evil.example/{w}x{h}.{f}', width: 1024, height: 1024 })).toBeNull();
+    expect(appleImageUrl({ templateUrl: 'http://a1.mzstatic.com/{w}x{h}.{f}', width: 1024, height: 1024 })).toBeNull();
+    expect(appleImageUrl({ templateUrl: 'https://a1.mzstatic.com/{w}x{h}/{c}.{f}', width: 1024, height: 1024 })).toBeNull();
+  });
+
+  it("uses the newest build's icon from App Store Connect", async () => {
+    const f = fetchFrom({ 'https://is1-ssl.mzstatic.com/image/thumb/Purple/v4/ab/AppIcon.png/128x128bb.png': PNG });
+    const icon = await findAppIcon(app, {
+      asc: asc({ templateUrl: TEMPLATE, width: 1024, height: 1024 }),
+      siteDomain: 'acme.com',
+      fetch: f.fetch,
+    });
+    expect(icon).toMatchObject({ contentType: 'image/png' });
+    expect(f.fetched).toEqual(['https://is1-ssl.mzstatic.com/image/thumb/Purple/v4/ab/AppIcon.png/128x128bb.png']);
+  });
+
+  it("falls back to the linked site's icon when App Store Connect has none or refuses", async () => {
+    for (const result of [null, new Error('HTTP 403: FORBIDDEN_ERROR')]) {
+      const f = fetchFrom({ 'https://acme.com/apple-touch-icon.png': PNG });
+      const icon = await findAppIcon(app, { asc: asc(result), siteDomain: 'acme.com', fetch: f.fetch });
+      expect(icon).toMatchObject({ url: 'https://acme.com/apple-touch-icon.png' });
+    }
+    // A Google Play app without a linked site has no icon source.
+    const f = fetchFrom({});
+    expect(await findAppIcon({ id: 'p', name: 'P', playPackage: 'com.p' }, { fetch: f.fetch })).toBeNull();
+    expect(f.fetched).toEqual([]);
+  });
+
+  it("does not follow a redirect off Apple's image CDN", async () => {
+    const f = (async (input: RequestInfo | URL) =>
+      String(input).includes('mzstatic.com')
+        ? new Response(null, { status: 302, headers: { location: 'https://elsewhere.example/icon.png' } })
+        : new Response(PNG)) as typeof fetch;
+    expect(
+      await findAppIcon({ ...app, siteId: undefined }, { asc: asc({ templateUrl: TEMPLATE, width: 512, height: 512 }), fetch: f }),
+    ).toBeNull();
   });
 });
