@@ -380,7 +380,7 @@ cloudflared access curl https://searchkeep.example.com/api/sync -X POST`;
   re-checks Access through the API first and locks again if Access was turned off or loosened.
 </p>
 <p>
-  To start right away instead of waiting for the next pass, use <strong>Sync now</strong> in the dashboard’s Settings,
+  To start right away instead of waiting for the next pass, use <strong>Settings → Sync → Sync now</strong> in the dashboard,
   or <code>POST /api/sync</code> from an authenticated session:
 </p>
 <CodeBlock lang="bash" code={firstSync} />
@@ -394,7 +394,7 @@ cloudflared access curl https://searchkeep.example.com/api/sync -X POST`;
 </p>
 <p>
   <strong>Verify:</strong> the dashboard shows the progress (a banner while a site’s latest days are coming in, and
-  <strong>Settings → Sync progress</strong> for every site), and <code>setup_status</code> reports it under
+  <strong>Settings → Sync</strong> for every site), and <code>setup_status</code> reports it under
   <code>syncProgress</code>. Over the following days history reaches back 16 months.
 </p>
 

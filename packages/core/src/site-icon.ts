@@ -9,6 +9,7 @@
 import { readCapped } from './http.js';
 import { onSiteDomain } from './url.js';
 
+/** An icon image, for the dashboard's site and app switchers. */
 export interface SiteIcon {
   /** Media type, read from the bytes (not from the server's header). */
   contentType: string;
@@ -136,10 +137,10 @@ export function sniffImage(bytes: Uint8Array): string | null {
   return null;
 }
 
-/** GETs `url`, following redirects only while they stay on the site's domain and its subdomains. */
+/** GETs `url`, following redirects only while `allowed` holds for every hop. */
 async function read(
   f: typeof fetch,
-  domain: string,
+  allowed: (url: string) => boolean,
   url: string,
   accept: string,
   max: number,
@@ -148,7 +149,7 @@ async function read(
   try {
     let current = url;
     for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
-      if (!onSiteDomain(current, domain)) return null;
+      if (!allowed(current)) return null;
       const res = await f(current, { headers: { accept, 'user-agent': USER_AGENT }, redirect: 'manual', signal });
       const location = res.status >= 300 && res.status < 400 ? res.headers.get('location') : null;
       if (location || !res.ok || !res.body) {
@@ -166,6 +167,23 @@ async function read(
   }
 }
 
+const IMAGE_ACCEPT = 'image/avif,image/webp,image/svg+xml,image/*;q=0.9,*/*;q=0.5';
+
+/**
+ * Downloads the image at `url`, following redirects only while `allowed` holds. Null unless the
+ * whole response fits in `maxBytes` and its bytes are an image. Never throws.
+ */
+export async function fetchIconImage(
+  url: string,
+  allowed: (url: string) => boolean,
+  opts: { fetch?: typeof fetch; maxBytes?: number; signal: AbortSignal },
+): Promise<SiteIcon | null> {
+  const icon = await read(opts.fetch ?? fetch, allowed, url, IMAGE_ACCEPT, opts.maxBytes ?? DEFAULT_MAX_BYTES, opts.signal);
+  if (!icon || icon.truncated || icon.bytes.byteLength === 0) return null;
+  const contentType = sniffImage(icon.bytes);
+  return contentType ? { contentType, body: icon.bytes, url } : null;
+}
+
 /** The site's icon, or null when it declares none that loads. Never throws. */
 export async function findSiteIcon(domain: string, opts: SiteIconOptions = {}): Promise<SiteIcon | null> {
   const f = opts.fetch ?? fetch;
@@ -173,7 +191,9 @@ export async function findSiteIcon(domain: string, opts: SiteIconOptions = {}): 
   const signal = AbortSignal.timeout(opts.timeoutMs ?? DEFAULT_TIMEOUT_MS);
   const home = `https://${domain}/`;
 
-  const page = await read(f, domain, home, 'text/html,application/xhtml+xml;q=0.9,*/*;q=0.5', HTML_BYTES, signal);
+  const onDomain = (url: string) => onSiteDomain(url, domain);
+
+  const page = await read(f, onDomain, home, 'text/html,application/xhtml+xml;q=0.9,*/*;q=0.5', HTML_BYTES, signal);
   // Off-domain links are dropped before the per-kind limit, so they never take an on-domain link's place.
   const links = page ? parseIconLinks(new TextDecoder().decode(page.bytes), page.url).filter((l) => onSiteDomain(l.url, domain)) : [];
   const declared = (kind: IconLink['kind']) =>
@@ -193,10 +213,8 @@ export async function findSiteIcon(domain: string, opts: SiteIconOptions = {}): 
     if (signal.aborted) break;
     if (tried.has(url)) continue;
     tried.add(url);
-    const icon = await read(f, domain, url, 'image/avif,image/webp,image/svg+xml,image/*;q=0.9,*/*;q=0.5', max, signal);
-    if (!icon || icon.truncated || icon.bytes.byteLength === 0) continue;
-    const contentType = sniffImage(icon.bytes);
-    if (contentType) return { contentType, body: icon.bytes, url };
+    const icon = await fetchIconImage(url, onDomain, { fetch: f, maxBytes: max, signal });
+    if (icon) return icon;
   }
   return null;
 }

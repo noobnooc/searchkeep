@@ -109,6 +109,9 @@ function fakeAsc(opts: { listForbidden?: boolean; requests?: AscReportRequest[] 
     async listApps() {
       return [{ id: APP.appleId, name: 'Acme', bundleId: 'com.acme.app' }];
     },
+    async latestBuildIcon() {
+      return null;
+    },
     async listReportRequests() {
       calls.push('listReportRequests');
       if (opts.listForbidden) throw new SourceError('asc', 403, 'HTTP 403: FORBIDDEN_ERROR');

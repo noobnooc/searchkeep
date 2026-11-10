@@ -62,7 +62,7 @@
         {#if site.phase === 'waiting'}
           <a class="btn sm primary" href={href('settings', 'sync')}><Icon name="sync" size={13} /> Sync now</a>
         {/if}
-        <a class="btn sm" href={href('settings', 'progress')}>Details <Icon name="arrowRight" size={13} /></a>
+        <a class="btn sm" href={href('settings', 'sync')}>Details <Icon name="arrowRight" size={13} /></a>
         {#if site.phase === 'history' || site.phase === 'done'}
           <button class="btn ghost sm icon" aria-label="Hide until the next visit" title="Hide until the next visit" onclick={() => dismiss(site.siteId)}><Icon name="x" size={14} /></button>
         {/if}

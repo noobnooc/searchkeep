@@ -8,6 +8,7 @@
   import EmptyState from './EmptyState.svelte';
   import ErrorBanner from './ErrorBanner.svelte';
   import Icon from './Icon.svelte';
+  import AppIcon from './AppIcon.svelte';
   import Pill from './Pill.svelte';
   import Skeleton from './Skeleton.svelte';
   import { request } from '../lib/api';
@@ -161,6 +162,53 @@
   }
 </script>
 
+{#snippet appForm(f: Form)}
+  <form class="app-form" onsubmit={save}>
+    <div class="grid">
+      <div class="row">
+        <label for="af-name">Name <span class="req">required</span></label>
+        <input id="af-name" class="input" type="text" placeholder="Acme" bind:value={f.name} autocomplete="off" required />
+        <p class="hint">{f.mode === 'create' ? 'The id is made from it; it cannot change later.' : `Id: ${f.id}`}</p>
+      </div>
+      <div class="row">
+        <label for="af-apple">App Store Apple ID</label>
+        <input id="af-apple" class="input mono" list="af-apple-list" placeholder="1234567890" bind:value={f.appleId} autocomplete="off" spellcheck="false" />
+        <datalist id="af-apple-list">
+          {#if discovery?.appStore.ok}{#each discovery.appStore.items as a (a.id)}<option value={a.id}>{a.name} · {a.bundleId}</option>{/each}{/if}
+        </datalist>
+        <p class="hint">{discovery && !discovery.appStore.ok ? discovery.appStore.reason : 'App Store Connect → App Information → Apple ID, or the app’s App Store link.'}</p>
+      </div>
+      <div class="row">
+        <label for="af-play">Google Play package</label>
+        <input id="af-play" class="input mono" list="af-play-list" placeholder="com.example.app" bind:value={f.playPackage} autocomplete="off" spellcheck="false" />
+        <datalist id="af-play-list">
+          {#if discovery?.googlePlay.ok}{#each discovery.googlePlay.items as p (p.packageName)}<option value={p.packageName}>{p.name}</option>{/each}{/if}
+        </datalist>
+        <p class="hint">{discovery && !discovery.googlePlay.ok ? discovery.googlePlay.reason : 'Or the app’s Google Play link.'}</p>
+      </div>
+      <div class="row">
+        <label for="af-site">Your site</label>
+        <select id="af-site" class="select" bind:value={f.siteId}>
+          <option value="">None</option>
+          {#each ui.sites as s (s.id)}<option value={s.id}>{s.domain}</option>{/each}
+        </select>
+        <p class="hint">Optional. Referrals from it are marked as your own site.</p>
+      </div>
+      <div class="row">
+        <label for="af-terr">Storefronts for public feeds</label>
+        <input id="af-terr" class="input mono" placeholder="us, gb" bind:value={f.territories} autocomplete="off" spellcheck="false" />
+        <p class="hint">Optional, up to 5. Used only when the opt-in public App Store feeds are on (APP_STORE_PUBLIC_DATA).</p>
+      </div>
+    </div>
+    <div class="form-actions">
+      <button class="btn primary" type="submit" disabled={saving || !f.name.trim() || (!f.appleId.trim() && !f.playPackage.trim())}>
+        <Icon name="check" size={14} /> {saving ? 'Saving…' : f.mode === 'create' ? 'Add app' : 'Save changes'}
+      </button>
+      <button class="btn ghost" type="button" onclick={() => (form = null)} disabled={saving}>Cancel</button>
+    </div>
+  </form>
+{/snippet}
+
 <Card title="Apps" subtitle="Your iOS and Android apps. Their store data is kept apart from the sites." id="settings-apps">
   {#snippet actions()}
     {#if !form}
@@ -171,52 +219,7 @@
   {#if notice}<p class="notice" role="status"><Icon name="info" size={14} /> {notice}</p>{/if}
   {#if error}<div class="mb"><ErrorBanner {error} title="Could not save the app" /></div>{/if}
 
-  {#if form}
-    <form class="app-form" onsubmit={save}>
-      <div class="grid">
-        <div class="row">
-          <label for="af-name">Name <span class="req">required</span></label>
-          <input id="af-name" class="input" type="text" placeholder="Acme" bind:value={form.name} autocomplete="off" required />
-          <p class="hint">{form.mode === 'create' ? 'The id is made from it; it cannot change later.' : `Id: ${form.id}`}</p>
-        </div>
-        <div class="row">
-          <label for="af-apple">App Store Apple ID</label>
-          <input id="af-apple" class="input mono" list="af-apple-list" placeholder="1234567890" bind:value={form.appleId} autocomplete="off" spellcheck="false" />
-          <datalist id="af-apple-list">
-            {#if discovery?.appStore.ok}{#each discovery.appStore.items as a (a.id)}<option value={a.id}>{a.name} · {a.bundleId}</option>{/each}{/if}
-          </datalist>
-          <p class="hint">{discovery && !discovery.appStore.ok ? discovery.appStore.reason : 'App Store Connect → App Information → Apple ID, or the app’s App Store link.'}</p>
-        </div>
-        <div class="row">
-          <label for="af-play">Google Play package</label>
-          <input id="af-play" class="input mono" list="af-play-list" placeholder="com.example.app" bind:value={form.playPackage} autocomplete="off" spellcheck="false" />
-          <datalist id="af-play-list">
-            {#if discovery?.googlePlay.ok}{#each discovery.googlePlay.items as p (p.packageName)}<option value={p.packageName}>{p.name}</option>{/each}{/if}
-          </datalist>
-          <p class="hint">{discovery && !discovery.googlePlay.ok ? discovery.googlePlay.reason : 'Or the app’s Google Play link.'}</p>
-        </div>
-        <div class="row">
-          <label for="af-site">Your site</label>
-          <select id="af-site" class="select" bind:value={form.siteId}>
-            <option value="">None</option>
-            {#each ui.sites as s (s.id)}<option value={s.id}>{s.domain}</option>{/each}
-          </select>
-          <p class="hint">Optional. Referrals from it are marked as your own site.</p>
-        </div>
-        <div class="row">
-          <label for="af-terr">Storefronts for public feeds</label>
-          <input id="af-terr" class="input mono" placeholder="us, gb" bind:value={form.territories} autocomplete="off" spellcheck="false" />
-          <p class="hint">Optional, up to 5. Used only when the opt-in public App Store feeds are on (APP_STORE_PUBLIC_DATA).</p>
-        </div>
-      </div>
-      <div class="form-actions">
-        <button class="btn primary" type="submit" disabled={saving || !form.name.trim() || (!form.appleId.trim() && !form.playPackage.trim())}>
-          <Icon name="check" size={14} /> {saving ? 'Saving…' : form.mode === 'create' ? 'Add app' : 'Save changes'}
-        </button>
-        <button class="btn ghost" type="button" onclick={() => (form = null)} disabled={saving}>Cancel</button>
-      </div>
-    </form>
-  {/if}
+  {#if form?.mode === 'create'}{@render appForm(form)}{/if}
 
   {#if ui.apps.length === 0}
     {#if !form}
@@ -229,10 +232,13 @@
     <ul class="apps">
       {#each ui.apps as a (a.id)}
         {@const pill = reportsPill(a)}
-        <li>
+        <li class:editing={form?.mode === 'edit' && form.id === a.id}>
           <div class="who">
-            <span class="name">{a.name}</span>
-            <span class="id">{[a.appleId, a.playPackage].filter(Boolean).join(' · ')}</span>
+            <AppIcon app={a} size="lg" />
+            <div class="names">
+              <span class="name">{a.name}</span>
+              <span class="id">{[a.appleId, a.playPackage].filter(Boolean).join(' · ')}</span>
+            </div>
           </div>
           <div class="srcs">
             <Pill tone={a.stores.appStore ? 'ok' : 'neutral'} icon={a.stores.appStore ? 'check' : null}>App Store</Pill>
@@ -252,6 +258,7 @@
               <span class="from-secret" title="Defined in the APPS Worker secret; change it there.">APPS secret</span>
             {/if}
           </div>
+          {#if form?.mode === 'edit' && form.id === a.id}<div class="inline-form">{@render appForm(form)}</div>{/if}
           {#if enabling === a.id}
             <form class="enable" onsubmit={startReports}>
               <div class="explain">
@@ -321,7 +328,7 @@
     margin-bottom: 16px;
     border: 1px solid var(--border);
     border-radius: var(--radius);
-    background: var(--surface-2, transparent);
+    background: var(--surface-2);
   }
   .enable {
     grid-column: 1 / -1;
@@ -406,11 +413,23 @@
     border-top: 0;
   }
   .who {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+  }
+  .names {
     display: grid;
     min-width: 0;
   }
   .name {
     font-weight: 550;
+  }
+  .inline-form {
+    grid-column: 1 / -1;
+  }
+  .inline-form .app-form {
+    margin: 4px 0 0;
   }
   .id {
     font-size: 12px;

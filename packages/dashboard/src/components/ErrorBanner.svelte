@@ -20,7 +20,7 @@
     <strong>{heading}</strong>
     <span>{message}</span>
     {#if code === 'not_configured'}
-      <span class="hint">See <a href={href('settings')}>Settings</a> for what is set up for each site.</span>
+      <span class="hint">See <a href={href('settings', 'checks')}>Settings → Setup checks</a> for what is set up.</span>
     {/if}
   </div>
   {#if retry && code !== 'not_configured'}

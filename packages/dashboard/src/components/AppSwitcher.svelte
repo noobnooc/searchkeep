@@ -1,8 +1,9 @@
 <script lang="ts">
-  // Picks the app the Apps area shows (ADR 0009). Apps have no icon fetch: their first letter is the mark.
+  // Picks the app the Apps area shows (ADR 0009).
   import { dismissable } from '../lib/dismiss';
   import { ui } from '../lib/state.svelte';
   import type { AppInfo } from '../lib/types';
+  import AppIcon from './AppIcon.svelte';
   import Icon from './Icon.svelte';
 
   let open = $state(false);
@@ -13,7 +14,7 @@
 
 <div class="switcher" {@attach dismissable(() => open, () => (open = false))}>
   <button class="trigger" aria-haspopup="listbox" aria-expanded={open} disabled={!multiple} onclick={() => (open = !open)} title={multiple ? 'Switch app' : undefined}>
-    <span class="avatar" aria-hidden="true">{app?.name.charAt(0).toUpperCase() ?? '?'}</span>
+    <AppIcon {app} />
     <span class="names">
       <span class="name truncate">{app?.name ?? 'No app configured'}</span>
       {#if app}<span class="sub truncate">{stores(app)}</span>{/if}
@@ -31,7 +32,7 @@
               ui.setApp(a.id);
               open = false;
             }}>
-            <span class="avatar sm" aria-hidden="true">{a.name.charAt(0).toUpperCase()}</span>
+            <AppIcon app={a} size="sm" />
             <span class="names">
               <span class="name truncate">{a.name}</span>
               <span class="sub truncate">{stores(a)}</span>
@@ -71,24 +72,6 @@
   .trigger :global(.chev) {
     color: var(--text-3);
     margin-left: auto;
-  }
-  .avatar {
-    flex: none;
-    display: grid;
-    place-items: center;
-    width: 28px;
-    height: 28px;
-    border-radius: 7px;
-    background: var(--accent-wash, var(--surface-3));
-    color: var(--accent-text);
-    font-size: 13px;
-    font-weight: 600;
-  }
-  .avatar.sm {
-    width: 22px;
-    height: 22px;
-    border-radius: 6px;
-    font-size: 11px;
   }
   .names {
     display: flex;

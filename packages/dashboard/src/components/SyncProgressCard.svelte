@@ -1,12 +1,21 @@
 <script lang="ts">
+  import type { Snippet } from 'svelte';
   import { int } from '../lib/format';
   import { DATASET_LABEL, datasetLine, datasetTone, pauseText, syncWatch } from '../lib/sync.svelte';
   import type { SyncDataset, SyncPhase } from '../lib/types';
+  import AppIcon from './AppIcon.svelte';
   import Card from './Card.svelte';
   import Icon from './Icon.svelte';
   import Pill from './Pill.svelte';
   import ProgressBar from './ProgressBar.svelte';
+  import SiteIcon from './SiteIcon.svelte';
   import Skeleton from './Skeleton.svelte';
+
+  interface Props {
+    /** Extra controls at the end of the header (Settings puts "Sync now" there). */
+    actions?: Snippet;
+  }
+  let { actions: extra }: Props = $props();
 
   const p = $derived(syncWatch.progress);
   const DATASETS: SyncDataset[] = ['gsc', 'bing', 'ai_crawlers', 'search_crawlers', 'web_analytics'];
@@ -43,6 +52,7 @@
   {#snippet actions()}
     {#if p}<Pill tone={PHASE[p.phase].tone} icon={p.phase === 'done' ? 'auto' : null}>{PHASE[p.phase].label}</Pill>{/if}
     <button class="btn ghost sm icon" onclick={() => syncWatch.refresh()} aria-label="Refresh progress" title="Refresh progress"><Icon name="refresh" size={14} /></button>
+    {#if extra}{@render extra()}{/if}
   {/snippet}
   {#if !p}
     <Skeleton kind="table" rows={4} />
@@ -112,8 +122,13 @@
           {#each shown as s (s.siteId)}
             <tr>
               <th scope="row">
-                <span class="domain truncate">{s.domain}</span>
-                <span class="phase {s.phase}">{PHASE[s.phase].label}</span>
+                <span class="who">
+                  <SiteIcon site={{ id: s.siteId, domain: s.domain }} size="sm" />
+                  <span class="names">
+                    <span class="domain truncate">{s.domain}</span>
+                    <span class="phase {s.phase}">{PHASE[s.phase].label}</span>
+                  </span>
+                </span>
               </th>
               {#each DATASETS as ds (ds)}
                 {@const d = s.datasets.find((x) => x.dataset === ds)}
@@ -132,6 +147,9 @@
         </tbody>
       </table>
     </div>
+    {#if sites.length > LIMIT}
+      <button class="btn ghost sm more" onclick={() => (expanded = !expanded)}>{expanded ? 'Show fewer' : `Show all ${sites.length} sites`}</button>
+    {/if}
     {/if}
     {#if apps.length > 0}
       <div class="table-wrap apps">
@@ -146,8 +164,13 @@
             {#each apps as a (a.appId)}
               <tr>
                 <th scope="row">
-                  <span class="domain truncate">{a.name}</span>
-                  <span class="phase {a.phase}">{PHASE[a.phase].label}</span>
+                  <span class="who">
+                    <AppIcon app={{ id: a.appId, name: a.name }} size="sm" />
+                    <span class="names">
+                      <span class="domain truncate">{a.name}</span>
+                      <span class="phase {a.phase}">{PHASE[a.phase].label}</span>
+                    </span>
+                  </span>
                 </th>
                 {#each appColumns as ds (ds)}
                   {@const d = a.datasets.find((x) => x.dataset === ds)}
@@ -166,9 +189,6 @@
           </tbody>
         </table>
       </div>
-    {/if}
-    {#if sites.length > LIMIT}
-      <button class="btn ghost sm more" onclick={() => (expanded = !expanded)}>{expanded ? 'Show fewer' : `Show all ${sites.length} sites`}</button>
     {/if}
   {/if}
   {#snippet footer()}
@@ -278,6 +298,17 @@
   tbody tr:last-child th,
   tbody tr:last-child td {
     border-bottom: 0;
+  }
+  .who {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    min-width: 0;
+  }
+  .names {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
   }
   .domain {
     display: block;

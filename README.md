@@ -101,7 +101,7 @@ you for your domain and email, and stops at the few steps only you can do.
 5. Check readiness on the dashboard's status page, then with the `setup_status` MCP tool. Once it
    is `ready`, the cron syncs every 15 minutes; **Sync now** in the dashboard starts right away.
    Every site gets its latest days first, then history fills in for all sites; the dashboard shows
-   the progress (**Settings** → **Sync progress**) and fills in as data arrives.
+   the progress (**Settings** → **Sync**) and fills in as data arrives.
 
 The full runbook, with click paths, CLI/API alternatives and a verification for every step, is in
 **[docs/deploy.md](docs/deploy.md)**. You can hand that file to an AI agent and let it do the work;
@@ -163,7 +163,9 @@ The JSON API mirrors the tools: `/api/sites`, `/api/overview`, `/api/performance
 `POST /api/sync` and
 `POST /api/import/ai-citations`. Query parameters use the same names as the MCP tools.
 `/api/site-icon?site=<id>` returns the site's own icon for the site switcher, read from the site
-itself (its apple-touch-icon, icon or `/favicon.ico`), never from a third-party icon service. Without a
+itself (its apple-touch-icon, icon or `/favicon.ico`), never from a third-party icon service.
+`/api/app-icon?app=<id>` returns the app's icon: its newest build's icon from App Store Connect,
+else its linked site's icon. Without a
 valid Access JWT, `/api/*` returns 403 `{"code":"locked","state":"no_access",...}` and `/mcp`
 returns a JSON-RPC error.
 
@@ -231,7 +233,7 @@ optional `store` (`apple` or `play`). The full parameter reference is at
 <https://searchkeep.dev/docs/mcp>.
 
 The "Cited" step comes from Bing AI Performance, which has no API: export its CSV in Bing
-Webmaster Tools and import it in the dashboard (**Settings** → **Import AI citations**) or with
+Webmaster Tools and import it in the dashboard (**Settings** → **Stored data** → **Import AI citations**) or with
 `POST /api/import/ai-citations?site=<id>&date=<YYYY-MM-DD>`.
 
 ## Principles

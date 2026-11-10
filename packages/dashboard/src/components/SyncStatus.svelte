@@ -24,7 +24,7 @@
 </script>
 
 {#if visible && p}
-  <a class="sync" href={href('settings', 'progress')} aria-current={router.view === 'settings' && router.sub === 'progress' ? 'page' : undefined}>
+  <a class="sync" href={href('settings', 'sync')} aria-current={router.view === 'settings' && router.sub === 'sync' ? 'page' : undefined}>
     <div class="top">
       <Icon name="sync" size={14} />
       <span class="label truncate">{label}</span>

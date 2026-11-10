@@ -320,6 +320,29 @@ describe('site icon', () => {
   });
 });
 
+describe('app icon', () => {
+  it("serves the linked site's icon when App Store Connect is not set up, behind Access", async () => {
+    const env = await makeEnv({ APPS: JSON.stringify([{ id: 'acme-app', name: 'Acme', playPackage: 'com.acme.app', siteId: 'acme' }]) });
+    const headers = { 'cf-access-jwt-assertion': await jwt() };
+    const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13]);
+    const base = globalThis.fetch;
+    vi.stubGlobal('fetch', async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input instanceof Request ? input.url : input);
+      if (url === 'https://acme.com/apple-touch-icon.png') return new Response(png, { headers: { 'content-type': 'image/png' } });
+      if (url.startsWith('https://acme.com/')) return new Response('missing', { status: 404 });
+      return base(input, init);
+    });
+
+    const res = await call(env, '/api/app-icon?app=acme-app', { headers });
+    expect(res.status).toBe(200);
+    expect(res.headers.get('content-type')).toBe('image/png');
+    expect(res.headers.get('content-security-policy')).toContain('sandbox');
+    expect(new Uint8Array(await res.arrayBuffer())).toEqual(png);
+    expect((await call(env, '/api/app-icon?app=nope', { headers })).status).toBe(404);
+    expect((await call(env, '/api/app-icon?app=acme-app')).status).toBe(403);
+  });
+});
+
 describe('Browser Run transport', () => {
   it('opens nothing until used, and only does GET', async () => {
     const { createBrowserFetch } = await import('../src/browser-fetch.js');

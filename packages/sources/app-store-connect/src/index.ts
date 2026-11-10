@@ -157,6 +157,21 @@ export function createAscClient(opts: AscClientOptions): AscClient {
       return apps.map((a) => ({ id: a.id, name: a.attributes?.name ?? a.id, bundleId: a.attributes?.bundleId ?? '' }));
     },
 
+    async latestBuildIcon(appleId) {
+      // A build that is still processing has no icon yet, so a few recent builds are read.
+      const page = await call<Page<{ iconAssetToken?: { templateUrl?: unknown; width?: unknown; height?: unknown } | null }>>(
+        `/v1/builds?filter%5Bapp%5D=${encodeURIComponent(appleId)}&sort=-uploadedDate&limit=5&fields%5Bbuilds%5D=iconAssetToken`,
+      );
+      const builds = Array.isArray(page?.data) ? page.data : [];
+      for (const b of builds) {
+        const icon = b.attributes?.iconAssetToken;
+        if (typeof icon?.templateUrl !== 'string' || icon.templateUrl === '') continue;
+        const n = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : 0);
+        return { templateUrl: icon.templateUrl, width: n(icon.width), height: n(icon.height) };
+      }
+      return null;
+    },
+
     async listReportRequests(appleId) {
       return (await all<RequestAttrs>(`/v1/apps/${encodeURIComponent(appleId)}/analyticsReportRequests?limit=200`)).map(toRequest);
     },
