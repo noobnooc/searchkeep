@@ -231,6 +231,11 @@ Because users sync `main` at any time, the `Unreleased` section is always accura
   the calls of that run now go through Cloudflare Browser Run, like Bing's `ThrottleIP` fallback.
   Nothing to set up.
 
+- Through Browser Run, the App Store lookup still failed with "appstore: network error": Apple sends
+  the lookup API's answer as a download (`Content-Disposition: attachment`), and the browser stops
+  such a navigation. Browser Run now reads a download with `fetch()` from a page on the same site,
+  so ratings and chart positions arrive.
+
 - The faster first sync no longer overloads D1. Requests that cover many days write their rows in
   bursts, and D1 answered "D1 DB is overloaded. Too many resources consumed within a 10 second
   window"; the run then failed and stayed `running` in the sync history. Now a pass pauses briefly

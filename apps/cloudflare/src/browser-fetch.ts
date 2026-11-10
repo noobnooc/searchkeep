@@ -6,7 +6,7 @@
  * on first use and serves every call of one request or sync run; call close()
  * when done.
  */
-import type { Browser, BrowserWorker, Page } from '@cloudflare/puppeteer';
+import type { Browser, BrowserWorker, HTTPResponse, Page } from '@cloudflare/puppeteer';
 
 export interface BrowserFetch {
   fetch: typeof fetch;
@@ -17,21 +17,53 @@ export interface BrowserFetch {
 
 const NAVIGATION_TIMEOUT_MS = 60_000;
 
+function originOf(url: string): string | null {
+  try {
+    return new URL(url).origin;
+  } catch {
+    return null;
+  }
+}
+
 export function createBrowserFetch(binding: BrowserWorker): BrowserFetch {
   let browser: Promise<Browser> | null = null;
   let page: Promise<Page> | null = null;
   let queue: Promise<unknown> = Promise.resolve();
 
-  async function load(url: string): Promise<Response> {
+  async function open(): Promise<Page> {
     // Loaded on first use only: most requests and runs never need a browser.
     browser ??= import('@cloudflare/puppeteer').then(({ default: puppeteer }) => puppeteer.launch(binding));
     page ??= browser.then((b) => b.newPage());
-    const res = await (await page).goto(url, { waitUntil: 'load', timeout: NAVIGATION_TIMEOUT_MS });
+    return page;
+  }
+
+  async function load(url: string): Promise<Response> {
+    const p = await open();
+    let res: HTTPResponse | null;
+    try {
+      res = await p.goto(url, { waitUntil: 'load', timeout: NAVIGATION_TIMEOUT_MS });
+    } catch (err) {
+      // A response sent as a download (Apple's lookup API answers with
+      // `Content-Disposition: attachment`) aborts the navigation. Such URLs
+      // are read with fetch() from a page on the same origin instead.
+      if (err instanceof Error && err.message.includes('net::ERR_ABORTED')) return fetchInPage(p, url);
+      throw err;
+    }
     if (!res) throw new Error('Browser Run returned no response');
     return new Response(await res.text(), {
       status: res.status(),
       headers: { 'content-type': res.headers()['content-type'] ?? 'application/octet-stream' },
     });
+  }
+
+  async function fetchInPage(p: Page, url: string): Promise<Response> {
+    const { origin } = new URL(url);
+    if (originOf(p.url()) !== origin) await p.goto(`${origin}/robots.txt`, { waitUntil: 'load', timeout: NAVIGATION_TIMEOUT_MS });
+    const res = await p.evaluate(async (target: string) => {
+      const r = await fetch(target, { credentials: 'omit' });
+      return { status: r.status, type: r.headers.get('content-type'), body: await r.text() };
+    }, url);
+    return new Response(res.body, { status: res.status, headers: { 'content-type': res.type ?? 'application/octet-stream' } });
   }
 
   const browserFetch = (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
