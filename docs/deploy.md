@@ -137,8 +137,8 @@ You need:
   `package.json` `packageManager` field), the GitHub CLI `gh` or a GitHub MCP server, `curl`, `jq`,
   and `gcloud` for step 12. An agent working with Cloudflare needs either the Cloudflare MCP server
   (signed in as you) or a short-lived API token you create for the deployment with edit permissions
-  for Workers Scripts, Workers CI (Builds), Access: Apps and Policies, and read access to your
-  zones. Delete that token when you are done. It is separate from the read-only runtime token in
+  for Workers Scripts, Workers CI (Builds), Access: Apps and Policies, Access: Organizations,
+  Identity Providers, and Groups (for the global session in step 8), and read access to your zones. Delete that token when you are done. It is separate from the read-only runtime token in
   step 10. The API examples below read it from the shell variable `CF_DEPLOY_TOKEN`
   (`read -rs CF_DEPLOY_TOKEN && export CF_DEPLOY_TOKEN`); with the Cloudflare MCP server, make the
   same requests through its tools instead.
@@ -438,6 +438,7 @@ dynamic client registration, so clients register themselves and you never paste 
   other local clients).
 - If **Allowed redirect URIs** is restricted, add the callback URLs of the web clients you use, for
   example `https://claude.ai/api/mcp/auth_callback` and `https://claude.com/api/mcp/auth_callback`.
+- Set **Access token lifetime** to `15m` and **Grant session duration** to `336h` (two weeks).
 
 → **Save**.
 
@@ -451,9 +452,28 @@ object, and `PUT` the whole object back:
     "enabled": true,
     "allow_any_on_localhost": true,
     "allow_any_on_loopback": true
+  },
+  "grant": {
+    "access_token_lifetime": "15m",
+    "session_duration": "336h"
   }
 }
 ```
+
+The grant is what Cloudflare recommends for CLI and agent clients: a short access token that the
+client refreshes silently, and a two-week grant session. Access re-evaluates the policy on every
+refresh, so removing your email from the policy still locks a client out within 15 minutes. Without
+a `grant`, MCP clients ask you to sign in again about once a day.
+
+**Global session duration:** **[Human]** or agent (permission Access: Organizations, Identity
+Providers, and Groups Write). The Zero Trust global session decides how often Access sends you back
+to the login method (with One-time PIN, a new email code). Its default is 24 hours, so set it at
+least as long as the grant session: Zero Trust → **Access controls** → **Access settings** → **Set
+your global session duration** → **Edit** → two weeks or longer → **Save**. By API, `GET
+.../access/organizations`, set `session_duration` to `"336h"` on the returned object, and `PUT` the
+whole object back to `.../access/organizations`. This setting applies to every Access application in
+the Zero Trust organization, not only Searchkeep. Keep the application's own session at 24 hours
+(step 7): Access re-issues it silently while the global session is valid.
 
 **Verify:**
 
@@ -462,9 +482,20 @@ curl -s "https://api.cloudflare.com/client/v4/accounts/<account-id>/access/apps/
   -H "Authorization: Bearer $CF_DEPLOY_TOKEN" | jq '.result.oauth_configuration.enabled'
 # true
 
+curl -s "https://api.cloudflare.com/client/v4/accounts/<account-id>/access/apps/<app-id>" \
+  -H "Authorization: Bearer $CF_DEPLOY_TOKEN" | jq '.result.oauth_configuration.grant'
+# {"access_token_lifetime": "15m", "session_duration": "336h"}
+
+curl -s "https://api.cloudflare.com/client/v4/accounts/<account-id>/access/organizations" \
+  -H "Authorization: Bearer $CF_DEPLOY_TOKEN" | jq -r '.result.session_duration'
+# 336h (or longer)
+
 curl -s -o /dev/null -D - https://<your-domain>/mcp | grep -iE '^(HTTP|www-authenticate)'
 # HTTP/2 401 and a www-authenticate header pointing to Access. A 302 means Managed OAuth is off.
 ```
+
+The session lengths are not readiness checks: a deployment with the defaults is still `ready`, it
+only asks you to sign in more often.
 
 ## 9. Store the Access team domain and AUD
 
@@ -976,6 +1007,19 @@ hostname. The zone must be active in the same Cloudflare account as the Worker.
 - **Signed in with the wrong account:** the email you used is not in the policy. Sign out at
   `https://<team>.cloudflareaccess.com/cdn-cgi/access/logout` and try again.
 - The client must support Streamable HTTP and RFC 8707 resource indicators.
+
+### Asked to sign in again every day
+
+The dashboard or an MCP client asks you to sign in about once a day (with One-time PIN, a new email
+code each time). The Managed OAuth grant or the Zero Trust global session is still at its 24-hour
+default.
+
+1. Check the grant: `jq '.result.oauth_configuration.grant'` on the Access application should show
+   `access_token_lifetime` `15m` and `session_duration` `336h`. If it is `null`, repeat step 8 with the
+   `grant` block.
+2. Check the global session: Zero Trust → **Access controls** → **Access settings** → global session
+   duration is at least two weeks (step 8, **Global session duration**).
+3. Sign in once more in each client. The new lengths apply to sessions started after the change.
 
 ### Google Search Console errors
 

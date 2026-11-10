@@ -249,7 +249,10 @@ cloudflared access curl https://searchkeep.example.com/api/sync -X POST`;
     In the application’s <strong>Advanced settings</strong>, turn on <strong>Managed OAuth</strong> with dynamic client
     registration, and allow localhost and loopback clients (used by Claude Code, Cursor and other local clients). This
     makes Access the OAuth 2.1 authorization server for MCP clients, with PKCE. Without it, Searchkeep stays in
-    <code>oauth_disabled</code>.
+    <code>oauth_disabled</code>. Set <strong>Access token lifetime</strong> to <code>15m</code> and
+    <strong>Grant session duration</strong> to <code>336h</code> (two weeks), and raise the Zero Trust
+    <strong>global session duration</strong> (Access controls → Access settings) to at least two weeks; otherwise you
+    sign in again every day. The global session applies to every Access application in your organization.
   </li>
   <li>
     Copy the application’s <strong>Application Audience (AUD) Tag</strong> and your team domain from
@@ -441,6 +444,12 @@ cloudflared access curl https://searchkeep.example.com/api/sync -X POST`;
   </dd>
   <dt><code>policy_too_broad</code></dt>
   <dd>A policy lets in more than specific people. Keep one Allow policy that includes your email address.</dd>
+  <dt>Asked to sign in again every day</dt>
+  <dd>
+    The Managed OAuth grant or the Zero Trust global session is still at its 24-hour default. Set the grant to a
+    <code>15m</code> access token and a <code>336h</code> grant session, and the global session to at least two weeks,
+    then sign in once more in each client.
+  </dd>
   <dt>A source check fails</dt>
   <dd>
     For GSC, confirm the service account was added to that exact property and that <code>gscProperty</code> matches it
