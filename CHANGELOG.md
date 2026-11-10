@@ -222,6 +222,11 @@ Because users sync `main` at any time, the `Unreleased` section is always accura
 
 ### Fixed
 
+- Apple's public App Store feeds (the opt-in `APP_STORE_PUBLIC_DATA` plugin) refuse the egress IP
+  addresses of Workers with HTTP 403, so the plugin wrote nothing. When a direct call is refused,
+  the calls of that run now go through Cloudflare Browser Run, like Bing's `ThrottleIP` fallback.
+  Nothing to set up.
+
 - The faster first sync no longer overloads D1. Requests that cover many days write their rows in
   bursts, and D1 answered "D1 DB is overloaded. Too many resources consumed within a 10 second
   window"; the run then failed and stayed `running` in the sync history. Now a pass pauses briefly

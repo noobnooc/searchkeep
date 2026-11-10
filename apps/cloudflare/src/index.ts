@@ -122,7 +122,16 @@ export function buildClients(config: SearchkeepConfig, browser: BrowserFetch | n
     clients.asc = createAscClient({ keyId: config.asc.keyId, issuerId: config.asc.issuerId, privateKey: config.asc.privateKey });
   if (config.play.clientEmail && config.play.privateKey && config.play.bucket)
     clients.play = createPlayClient({ clientEmail: config.play.clientEmail, privateKey: config.play.privateKey });
-  if (config.appStorePublic) clients.appStore = createAppStorePublicClient();
+  if (config.appStorePublic)
+    clients.appStore = createAppStorePublicClient(
+      // Apple's public feeds refuse Workers' egress IPs (HTTP 403) but accept Browser Run's.
+      browser
+        ? {
+            fallbackFetch: browser.fetch,
+            onFallback: () => console.log('appstore: HTTP 403 on direct calls, continuing through Browser Run'),
+          }
+        : {},
+    );
   return clients;
 }
 
