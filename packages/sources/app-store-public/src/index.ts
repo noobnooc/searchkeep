@@ -7,7 +7,7 @@
 import { requestJson, SourceError, type AppStoreChart, type AppStoreLookup, type AppStorePublicClient } from '@searchkeep/core';
 
 const LOOKUP = 'https://itunes.apple.com/lookup';
-/** Current feeds: top free and top paid, all apps, up to 100. */
+/** Current feeds: top free and top paid, all apps, up to 100. They often time out; the older feeds then serve the same chart. */
 const MARKETING_FEED = 'https://rss.marketingtools.apple.com/api/v2';
 /** Older iTunes feeds: also top grossing and charts per genre (up to 100 entries). */
 const ITUNES_FEED = 'https://itunes.apple.com';
@@ -34,25 +34,45 @@ const COUNTRY_RE = /^[a-z]{2}$/;
 export function createAppStorePublicClient(opts: AppStorePublicOptions = {}): AppStorePublicClient {
   const direct = opts.fetch ?? fetch;
   let viaFallback = false;
-  const request = <T>(url: string, f: typeof fetch) =>
-    requestJson<T>('appstore', url, { headers: { 'user-agent': 'Searchkeep' }, fetch: f });
-  async function get<T>(url: string): Promise<T> {
+  const request = <T>(url: string, f: typeof fetch, retries?: number) =>
+    requestJson<T>('appstore', url, { headers: { 'user-agent': 'Searchkeep' }, fetch: f, ...(retries !== undefined ? { retries } : {}) });
+  async function get<T>(url: string, retries?: number): Promise<T> {
     if (!viaFallback || !opts.fallbackFetch) {
       try {
-        return await request<T>(url, direct);
+        return await request<T>(url, direct, retries);
       } catch (err) {
         if (!opts.fallbackFetch || !(err instanceof SourceError && err.status === 403)) throw err;
         viaFallback = true;
         opts.onFallback?.();
       }
     }
-    return request<T>(url, opts.fallbackFetch);
+    return request<T>(url, opts.fallbackFetch, retries);
   }
   const country = (c: string) => {
     const v = c.trim().toLowerCase();
     if (!COUNTRY_RE.test(v)) throw new SourceError('appstore', 0, `invalid storefront "${v.slice(0, 10)}"`);
     return v;
   };
+
+  const charts = new Map<string, Promise<string[]>>();
+  async function readChart(cc: string, chart: AppStoreChart, genre: string | null): Promise<string[]> {
+    if (!genre && chart !== 'top-grossing') {
+      try {
+        // No retry: on failure the older feed below has the same chart.
+        const res = await get<{ feed?: { results?: Array<{ id?: string }> } }>(`${MARKETING_FEED}/${cc}/apps/${chart}/100/apps.json`, 0);
+        return (res?.feed?.results ?? []).map((r) => String(r.id ?? '')).filter(Boolean);
+      } catch (err) {
+        // These feeds often time out (HTTP 504 after 30 s, for example China's top paid chart).
+        if (!(err instanceof SourceError) || (err.status !== 0 && err.status < 500)) throw err;
+      }
+    }
+    const res = await get<{
+      feed?: { entry?: Array<{ id?: { attributes?: Record<string, string> } }> | { id?: { attributes?: Record<string, string> } } };
+    }>(`${ITUNES_FEED}/${cc}/rss/${LEGACY_CHARTS[chart]}/limit=100${genre ? `/genre=${genre}` : ''}/json`);
+    const entry = res?.feed?.entry;
+    const list = Array.isArray(entry) ? entry : entry ? [entry] : [];
+    return list.map((e) => e.id?.attributes?.['im:id'] ?? '').filter(Boolean);
+  }
 
   return {
     async lookup(appleId, storefront): Promise<AppStoreLookup | null> {
@@ -79,17 +99,16 @@ export function createAppStorePublicClient(opts: AppStorePublicOptions = {}): Ap
 
     async topChart(storefront, chart, genreId) {
       const cc = country(storefront);
-      if (!genreId && chart !== 'top-grossing') {
-        const res = await get<{ feed?: { results?: Array<{ id?: string }> } }>(`${MARKETING_FEED}/${cc}/apps/${chart}/100/apps.json`);
-        return (res?.feed?.results ?? []).map((r) => String(r.id ?? '')).filter(Boolean);
+      const genre = genreId && /^\d{1,8}$/.test(genreId) ? genreId : null;
+      // Every app of a run reads the same charts: each is fetched once per client (one sync run).
+      const key = `${cc}|${chart}|${genre ?? ''}`;
+      let ids = charts.get(key);
+      if (!ids) {
+        ids = readChart(cc, chart, genre);
+        charts.set(key, ids);
+        ids.catch(() => charts.delete(key));
       }
-      const genre = genreId && /^\d{1,8}$/.test(genreId) ? `/genre=${genreId}` : '';
-      const res = await get<{
-        feed?: { entry?: Array<{ id?: { attributes?: Record<string, string> } }> | { id?: { attributes?: Record<string, string> } } };
-      }>(`${ITUNES_FEED}/${cc}/rss/${LEGACY_CHARTS[chart]}/limit=100${genre}/json`);
-      const entry = res?.feed?.entry;
-      const list = Array.isArray(entry) ? entry : entry ? [entry] : [];
-      return list.map((e) => e.id?.attributes?.['im:id'] ?? '').filter(Boolean);
+      return ids;
     },
   };
 }
