@@ -35,4 +35,42 @@ describe('app store public feeds', () => {
     expect(await pub.topChart('us', 'top-grossing')).toEqual(['44']);
     await expect(pub.topChart('usa', 'top-free')).rejects.toThrow(/invalid storefront/);
   });
+
+  it('switches to the fallback transport when Apple refuses the IP (HTTP 403), and stays on it', async () => {
+    let direct = 0;
+    let fallback = 0;
+    let switched = 0;
+    const pub = createAppStorePublicClient({
+      fetch: (async () => {
+        direct++;
+        return new Response('Forbidden', { status: 403 });
+      }) as typeof fetch,
+      fallbackFetch: (async (url: string) => {
+        fallback++;
+        return String(url).includes('/lookup')
+          ? Response.json({ results: [{ trackName: 'Acme', averageUserRating: 4.5, userRatingCount: 10, primaryGenreId: 6007 }] })
+          : Response.json({ feed: { results: [{ id: '22' }] } });
+      }) as typeof fetch,
+      onFallback: () => switched++,
+    });
+    expect(await pub.lookup('22', 'us')).toMatchObject({ averageUserRating: 4.5, primaryGenreId: '6007' });
+    expect(await pub.topChart('us', 'top-free')).toEqual(['22']);
+    expect({ direct, fallback, switched }).toEqual({ direct: 1, fallback: 2, switched: 1 });
+  });
+
+  it('keeps other errors, and a 403 without a fallback, as they are', async () => {
+    let fallback = 0;
+    const fallbackFetch = (async () => {
+      fallback++;
+      return Response.json({ results: [] });
+    }) as typeof fetch;
+    const notFound = createAppStorePublicClient({
+      fetch: (async () => new Response('nope', { status: 404 })) as typeof fetch,
+      fallbackFetch,
+    });
+    await expect(notFound.lookup('22', 'us')).rejects.toThrow('HTTP 404');
+    const noFallback = createAppStorePublicClient({ fetch: (async () => new Response('Forbidden', { status: 403 })) as typeof fetch });
+    await expect(noFallback.lookup('22', 'us')).rejects.toThrow('HTTP 403');
+    expect(fallback).toBe(0);
+  });
 });

@@ -1,9 +1,10 @@
 /**
  * A fetch() for plain GET requests that loads the URL in a Cloudflare Browser
- * Run browser. Bing's Webmaster API refuses the egress IPs of Workers
- * (`ThrottleIP`, often for days) but accepts Browser Run's, so the Bing client
- * uses this as its fallback. The browser opens on first use and serves every
- * call of one request or sync run; call close() when done.
+ * Run browser. Bing's Webmaster API (`ThrottleIP`, often for days) and Apple's
+ * public App Store feeds (HTTP 403) refuse the egress IPs of Workers but accept
+ * Browser Run's, so both clients use this as their fallback. The browser opens
+ * on first use and serves every call of one request or sync run; call close()
+ * when done.
  */
 import type { Browser, BrowserWorker, Page } from '@cloudflare/puppeteer';
 

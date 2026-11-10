@@ -19,13 +19,35 @@ const LEGACY_CHARTS: Record<AppStoreChart, string> = {
 
 export interface AppStorePublicOptions {
   fetch?: typeof fetch;
+  /**
+   * Used when Apple refuses the caller's IP address (HTTP 403; it refuses the egress IPs of
+   * Workers), and for the rest of this client's life once it was needed. The Worker passes one
+   * that goes through Cloudflare Browser Run, whose IPs Apple accepts.
+   */
+  fallbackFetch?: typeof fetch;
+  /** Called once when the client switches to `fallbackFetch`. */
+  onFallback?: () => void;
 }
 
 const COUNTRY_RE = /^[a-z]{2}$/;
 
 export function createAppStorePublicClient(opts: AppStorePublicOptions = {}): AppStorePublicClient {
-  const f = opts.fetch ?? fetch;
-  const get = <T>(url: string) => requestJson<T>('appstore', url, { headers: { 'user-agent': 'Searchkeep' }, fetch: f });
+  const direct = opts.fetch ?? fetch;
+  let viaFallback = false;
+  const request = <T>(url: string, f: typeof fetch) =>
+    requestJson<T>('appstore', url, { headers: { 'user-agent': 'Searchkeep' }, fetch: f });
+  async function get<T>(url: string): Promise<T> {
+    if (!viaFallback || !opts.fallbackFetch) {
+      try {
+        return await request<T>(url, direct);
+      } catch (err) {
+        if (!opts.fallbackFetch || !(err instanceof SourceError && err.status === 403)) throw err;
+        viaFallback = true;
+        opts.onFallback?.();
+      }
+    }
+    return request<T>(url, opts.fallbackFetch);
+  }
   const country = (c: string) => {
     const v = c.trim().toLowerCase();
     if (!COUNTRY_RE.test(v)) throw new SourceError('appstore', 0, `invalid storefront "${v.slice(0, 10)}"`);

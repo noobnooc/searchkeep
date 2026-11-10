@@ -748,7 +748,10 @@ one of your sites (referrals from it are marked as your own).
 6. **Optional plugin, off by default.** `APP_STORE_PUBLIC_DATA=true` reads Apple's official public
    App Store feeds once a day (the iTunes lookup and the top charts) for the storefronts set on
    each app (default `us`, up to 5), and keeps only your own app's average rating, rating count and
-   chart position. Google Play has no such feed.
+   chart position. Google Play has no such feed. Apple refuses the egress IP addresses of Workers
+   (HTTP 403), so when a direct call is refused, the calls of that run go through Cloudflare Browser
+   Run (the `BROWSER` binding, as for Bing). Nothing to set up: it is one short page load per
+   storefront and chart a day.
 
 What arrives: App Store impressions, product page views, first-time downloads, redownloads,
 installs and deletions by territory and source (search, browse, websites, other apps), referring
