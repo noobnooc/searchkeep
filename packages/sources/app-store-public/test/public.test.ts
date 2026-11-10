@@ -9,7 +9,9 @@ describe('app store public feeds', () => {
       if (url.startsWith('https://itunes.apple.com/lookup'))
         return Response.json({
           resultCount: 1,
-          results: [{ trackName: 'Acme', averageUserRating: 4.52, userRatingCount: 2900, version: '5.0', primaryGenreId: 6007 }],
+          results: url.includes('id=99&')
+            ? [{ trackName: 'New', averageUserRating: 0, userRatingCount: 0, version: '1.0', primaryGenreId: 6011, price: 4.99 }]
+            : [{ trackName: 'Acme', averageUserRating: 4.52, userRatingCount: 2900, version: '5.0', primaryGenreId: 6007, price: 0 }],
         });
       if (url.startsWith('https://rss.marketingtools.apple.com/'))
         return Response.json({ feed: { results: [{ id: '11' }, { id: '22' }] } });
@@ -27,10 +29,13 @@ describe('app store public feeds', () => {
       userRatingCount: 2900,
       version: '5.0',
       primaryGenreId: '6007',
+      price: 0,
     });
+    // Apple reports an average of 0 while there are no ratings: that is no rating.
+    expect(await pub.lookup('99', 'cn')).toMatchObject({ averageUserRating: null, userRatingCount: 0, price: 4.99 });
     expect(urls[0]).toBe('https://itunes.apple.com/lookup?id=22&country=us&entity=software');
     expect(await pub.topChart('us', 'top-free')).toEqual(['11', '22']);
-    expect(urls[1]).toBe('https://rss.marketingtools.apple.com/api/v2/us/apps/top-free/100/apps.json');
+    expect(urls[2]).toBe('https://rss.marketingtools.apple.com/api/v2/us/apps/top-free/100/apps.json');
     expect(await pub.topChart('us', 'top-free', '6007')).toEqual(['33', '22']);
     expect(await pub.topChart('us', 'top-grossing')).toEqual(['44']);
     await expect(pub.topChart('usa', 'top-free')).rejects.toThrow(/invalid storefront/);

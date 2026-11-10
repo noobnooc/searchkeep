@@ -26,6 +26,23 @@ export function change(cur: number | null | undefined, prev: number | null | und
 
 export const CHART_LABEL: Record<string, string> = { 'top-free': 'Top free', 'top-paid': 'Top paid', 'top-grossing': 'Top grossing' };
 
+let regions: Intl.DisplayNames | null | undefined;
+/** "United States" for `US`; the code itself when the browser has no name for it. */
+export function regionName(code: string): string {
+  if (regions === undefined) {
+    try {
+      regions = new Intl.DisplayNames(['en'], { type: 'region' });
+    } catch {
+      regions = null;
+    }
+  }
+  try {
+    return regions?.of(code.toUpperCase()) ?? code;
+  } catch {
+    return code;
+  }
+}
+
 export function stars(n: number): string {
   const r = Math.max(0, Math.min(5, Math.round(n)));
   return '★'.repeat(r) + '☆'.repeat(5 - r);

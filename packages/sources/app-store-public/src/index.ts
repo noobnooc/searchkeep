@@ -83,6 +83,7 @@ export function createAppStorePublicClient(opts: AppStorePublicOptions = {}): Ap
           userRatingCount?: number;
           version?: string;
           primaryGenreId?: number;
+          price?: number;
         }>;
       }>(`${LOOKUP}?id=${encodeURIComponent(appleId)}&country=${country(storefront)}&entity=software`);
       const r = res?.results?.[0];
@@ -90,10 +91,12 @@ export function createAppStorePublicClient(opts: AppStorePublicOptions = {}): Ap
       return {
         appleId,
         name: r.trackName ?? null,
-        averageUserRating: typeof r.averageUserRating === 'number' ? r.averageUserRating : null,
+        // Ratings are 1 to 5; Apple answers 0 while there are none.
+        averageUserRating: typeof r.averageUserRating === 'number' && r.averageUserRating > 0 ? r.averageUserRating : null,
         userRatingCount: typeof r.userRatingCount === 'number' ? r.userRatingCount : null,
         version: r.version ?? null,
         primaryGenreId: r.primaryGenreId !== undefined ? String(r.primaryGenreId) : null,
+        price: typeof r.price === 'number' ? r.price : null,
       };
     },
 

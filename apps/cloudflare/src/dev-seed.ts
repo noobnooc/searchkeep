@@ -340,6 +340,16 @@ export async function seedAppDemo(store: Store, app: AppConfig, siteDomain = 'ac
       dates.filter((_, i) => i % 7 === 0).map((date, i) => ({ date, territory: 'US', average: 4.4 + 0.02 * i, count: 800 + 40 * i })),
     );
     n += await store.writeAppReviews(app.id, 'apple', reviewsFor('a', dates, r, 'USA'));
+    // Public feed chart positions (the opt-in plugin): the last two checks, free charts only.
+    n += await store.writeAppChartRanks(
+      app.id,
+      dates.slice(-2).flatMap((date, i) =>
+        APP_TERRITORIES.flatMap(([territory], t) => [
+          { date, territory, chart: 'top-free', genre: '', rank: t === 0 ? 74 - 6 * i : null },
+          { date, territory, chart: 'top-free', genre: '6007', rank: t < 3 ? 12 + 9 * t - 3 * i : t === 3 && i === 1 ? 88 : null },
+        ]),
+      ),
+    );
   }
   if (app.playPackage) {
     const byTerritory: AppStoreDailyInput[] = [];

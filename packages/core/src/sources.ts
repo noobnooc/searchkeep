@@ -269,10 +269,13 @@ export interface PlayClient {
 export interface AppStoreLookup {
   appleId: string;
   name: string | null;
+  /** Null while the app has no ratings in the storefront (Apple then reports an average of 0). */
   averageUserRating: number | null;
   userRatingCount: number | null;
   version: string | null;
   primaryGenreId: string | null;
+  /** Price in the storefront's currency: 0 for a free app, null when unknown. */
+  price: number | null;
 }
 
 export type AppStoreChart = 'top-free' | 'top-paid' | 'top-grossing';

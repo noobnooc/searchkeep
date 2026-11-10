@@ -269,7 +269,15 @@ function fakePlay() {
 
 const fakePublic = (): AppStorePublicClient => ({
   async lookup() {
-    return { appleId: APP.appleId, name: 'Acme', averageUserRating: 4.6, userRatingCount: 1234, version: '2.1', primaryGenreId: '6007' };
+    return {
+      appleId: APP.appleId,
+      name: 'Acme',
+      averageUserRating: 4.6,
+      userRatingCount: 1234,
+      version: '2.1',
+      primaryGenreId: '6007',
+      price: 0,
+    };
   },
   async topChart(_country, chart, genre) {
     if (genre) return ['1', '2', '3', APP.appleId];
@@ -619,13 +627,11 @@ export function appContract(name: string, makeStore: () => Promise<Store>): void
         );
         expect(perf.stores[0]!.current).toMatchObject({ impressions: 10, pageViews: 8, downloads: 4, redownloads: 1 });
         expect(perf.rows!.map((r) => r.source)).toEqual(['search', 'browse']);
-        expect(perf.charts).toEqual(
-          expect.arrayContaining([
-            expect.objectContaining({ chart: 'top-free', genre: '', rank: 2 }),
-            expect.objectContaining({ chart: 'top-paid', rank: null }),
-            expect.objectContaining({ chart: 'top-free', genre: '6007', rank: 4 }),
-          ]),
-        );
+        // A free app is checked in the free charts only, overall and in its category.
+        expect(perf.charts!.filter((c) => c.territory === 'US').map((c) => [c.chart, c.genre, c.rank, c.genreName])).toEqual([
+          ['top-free', '', 2, undefined],
+          ['top-free', '6007', 4, 'Productivity'],
+        ]);
 
         // Google Play: per territory and per source, search terms, UTM referrers, installs, ratings, reviews.
         const ctx = { store, config: cfg, clients: clients(), now: () => NOW };
@@ -693,6 +699,75 @@ export function appContract(name: string, makeStore: () => Promise<Store>): void
         expect(play.calls.slice(reads).filter((c) => c.startsWith('read:'))).toEqual([]);
         // Instances already read are not read again.
         expect(asc.calls.filter((c) => c === 'segments:eng-2026-10-19')).toHaveLength(1);
+      });
+
+      it("checks the app's biggest storefronts first and only the charts it can be in", async () => {
+        const cfg = config();
+        const day = '2026-10-15';
+        await store.writeAppStoreDaily(APP.id, 'apple', {
+          metrics: ['downloads'],
+          shape: 'territory',
+          dates: [day],
+          rows: [
+            { date: day, territory: 'JP', source: '*', downloads: 40 },
+            { date: day, territory: 'FR', source: '*', downloads: 9 },
+            { date: day, territory: 'US', source: '*', downloads: 3 },
+          ],
+        });
+        const looked: string[] = [];
+        const charts: string[] = [];
+        const paidApp: AppStorePublicClient = {
+          async lookup(_id, country) {
+            looked.push(country);
+            // Not sold in China; no ratings yet in France.
+            if (country === 'cn') return null;
+            const none = country === 'fr';
+            return {
+              appleId: APP.appleId,
+              name: 'Acme',
+              averageUserRating: none ? null : 4.5,
+              userRatingCount: none ? 0 : 20,
+              version: '2.1',
+              primaryGenreId: '6011',
+              price: 2.99,
+            };
+          },
+          async topChart(country, chart, genre) {
+            charts.push(`${country}:${chart}:${genre ?? ''}`);
+            return country === 'jp' && genre ? ['1', APP.appleId] : ['1'];
+          },
+        };
+        const sync = (now: Date) => runSync({ store, config: cfg, clients: { appStore: paidApp }, trigger: 'manual', now, pacing: {} });
+        await sync(new Date('2026-10-19T04:00:00Z'));
+        // The app's own storefronts by downloads, then the largest ones, at most five.
+        expect(looked).toEqual(['jp', 'fr', 'us', 'cn', 'gb']);
+        // A paid app: the paid charts only, overall and in its category; none where it is not sold.
+        expect(charts.filter((c) => c.startsWith('jp:'))).toEqual(['jp:top-paid:', 'jp:top-paid:6011']);
+        expect(charts.some((c) => c.startsWith('cn:'))).toBe(false);
+
+        // The next day JP drops out of the category chart; a chart checked before but no longer is gone.
+        await store.writeAppChartRanks(APP.id, [{ date: '2026-10-19', territory: 'JP', chart: 'top-free', genre: '', rank: null }]);
+        paidApp.topChart = async () => ['1'];
+        await sync(NOW);
+        const ctx = { store, config: cfg, clients: {}, now: () => NOW };
+        const perf = await appPerformance(ctx, { app: APP.id, store: 'apple', start: '2026-10-15', end: '2026-10-15' });
+        expect(perf.charts!.map((c) => c.territory)).toEqual(['JP', 'JP', 'FR', 'FR', 'US', 'US', 'GB', 'GB']);
+        expect(perf.charts!.filter((c) => c.territory === 'JP')).toEqual([
+          { date: '2026-10-20', territory: 'JP', chart: 'top-paid', genre: '', rank: null, previous: { date: '2026-10-19', rank: null } },
+          {
+            date: '2026-10-20',
+            territory: 'JP',
+            chart: 'top-paid',
+            genre: '6011',
+            genreName: 'Music',
+            rank: null,
+            previous: { date: '2026-10-19', rank: 2 },
+          },
+        ]);
+
+        // The rating shown is the first storefront with ratings, in the same order.
+        const reviews = await appReviews(ctx, { app: APP.id, store: 'apple' });
+        expect(reviews.summary[0]!.rating).toMatchObject({ territory: 'JP', average: 4.5, count: 20 });
       });
 
       it('continues across runs when the call budget runs out', async () => {

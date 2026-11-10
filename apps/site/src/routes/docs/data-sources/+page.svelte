@@ -310,8 +310,10 @@ cloudflared access curl "https://searchkeep.example.com/api/import/ai-citations?
 <h3 id="app-store-public">App Store public feeds (opt-in)</h3>
 <p>
   With <code>APP_STORE_PUBLIC_DATA=true</code>, a plugin reads Apple’s official public feeds once a day (the iTunes lookup
-  and the top charts) and keeps only your own app’s average rating, rating count and chart position. It is off by
-  default, and there is no Google Play counterpart. Searchkeep never tracks keyword rankings or scrapes store pages.
+  and the top charts) and keeps only your own app’s average rating, rating count and chart position. It checks up to
+  five storefronts per app (the ones you set, or else the app’s biggest App Store storefronts, then the largest ones),
+  in the free charts for a free app and the paid charts for a paid one. It is off by default, and there is no Google
+  Play counterpart. Searchkeep never tracks keyword rankings or scrapes store pages.
 </p>
 
 <h2 id="ai-citations">Importing AI citations</h2>
