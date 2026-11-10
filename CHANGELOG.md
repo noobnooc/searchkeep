@@ -236,6 +236,12 @@ Because users sync `main` at any time, the `Unreleased` section is always accura
   such a navigation. Browser Run now reads a download with `fetch()` from a page on the same site,
   so ratings and chart positions arrive.
 
+- Apple's current chart feeds (`rss.marketingtools.apple.com`) often time out with HTTP 504 after 30
+  seconds (China's top paid chart, for example). One such chart failed the app's whole App Store
+  public task, and the waits used up the run's time before the other apps. Now a chart that times
+  out is read from the older iTunes feed, without a retry, and each chart is fetched once per sync
+  run instead of once per app.
+
 - The faster first sync no longer overloads D1. Requests that cover many days write their rows in
   bursts, and D1 answered "D1 DB is overloaded. Too many resources consumed within a 10 second
   window"; the run then failed and stayed `running` in the sync history. Now a pass pauses briefly

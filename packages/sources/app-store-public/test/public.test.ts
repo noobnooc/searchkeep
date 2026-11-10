@@ -73,4 +73,32 @@ describe('app store public feeds', () => {
     await expect(noFallback.lookup('22', 'us')).rejects.toThrow('HTTP 403');
     expect(fallback).toBe(0);
   });
+
+  it('reads a chart from the older feed when the current one times out, and each chart once per client', async () => {
+    const urls: string[] = [];
+    const fetchMock = (async (url: string) => {
+      urls.push(url);
+      if (url === 'https://rss.marketingtools.apple.com/api/v2/cn/apps/top-paid/100/apps.json')
+        return new Response('<html>Gateway Timeout</html>', { status: 504 });
+      if (url.startsWith('https://rss.marketingtools.apple.com/')) return Response.json({ feed: { results: [{ id: '11' }] } });
+      if (url === 'https://itunes.apple.com/cn/rss/toppaidapplications/limit=100/json')
+        return Response.json({ feed: { entry: [{ id: { attributes: { 'im:id': '55' } } }] } });
+      return new Response('{}', { status: 404 });
+    }) as typeof fetch;
+    const pub = createAppStorePublicClient({ fetch: fetchMock });
+    expect(await pub.topChart('cn', 'top-paid')).toEqual(['55']);
+    // Tried once (no retry), then the older feed.
+    expect(urls).toEqual([
+      'https://rss.marketingtools.apple.com/api/v2/cn/apps/top-paid/100/apps.json',
+      'https://itunes.apple.com/cn/rss/toppaidapplications/limit=100/json',
+    ]);
+    expect(await pub.topChart('CN', 'top-paid')).toEqual(['55']);
+    expect(await pub.topChart('cn', 'top-free')).toEqual(['11']);
+    expect(await pub.topChart('cn', 'top-free')).toEqual(['11']);
+    expect(urls).toHaveLength(3);
+    // A client error is not a timeout: no fallback, and a failed chart is not kept.
+    await expect(pub.topChart('cn', 'top-free', '6002')).rejects.toThrow(/404/);
+    await expect(pub.topChart('cn', 'top-free', '6002')).rejects.toThrow(/404/);
+    expect(urls.filter((u) => u.includes('genre=6002'))).toHaveLength(2);
+  });
 });
