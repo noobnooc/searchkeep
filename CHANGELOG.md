@@ -132,6 +132,15 @@ Because users sync `main` at any time, the `Unreleased` section is always accura
 
 ### Changed
 
+- The opt-in App Store public feeds check the storefronts that matter to each app: the ones set on
+  the app, or else (new default, instead of only `us`) its own biggest App Store storefronts by
+  downloads, filled up with the largest storefronts (US, China, Japan, UK, Germany), up to 5.
+  Storefronts where the app is not sold are skipped, and a free app is checked only in the free
+  charts, a paid app only in the paid ones. Each storefront is saved as soon as it is read, so a run
+  that runs out of calls (`SYNC_MAX_CALLS_PER_RUN`) continues with the next one. The **App Store charts** card on an app's overview is
+  now a table of storefronts (most important first) by chart, with the category's name and the
+  change since the previous check; charts no longer checked drop out.
+
 - **Settings** is split into sections with their own addresses (`#/settings/<section>`), grouped
   in a side menu (a scrolling row on phones): **Sites** and **Apps** (what Searchkeep tracks),
   **Sync** (progress, **Sync now** and recent runs in one place), **Stored data** (data coverage per
@@ -262,6 +271,11 @@ Because users sync `main` at any time, the `Unreleased` section is always accura
   public task, and the waits used up the run's time before the other apps. Now a chart that times
   out is read from the older iTunes feed, without a retry, and each chart is fetched once per sync
   run instead of once per app.
+
+- An App Store storefront without ratings showed an average of 0 (Apple's lookup reports 0 when
+  there are none); it now has no rating, and the rating shown for an app is the first storefront
+  that has ratings. A paid app was looked up in the free category chart; it is now checked in the
+  paid charts.
 
 - The faster first sync no longer overloads D1. Requests that cover many days write their rows in
   bursts, and D1 answered "D1 DB is overloaded. Too many resources consumed within a 10 second

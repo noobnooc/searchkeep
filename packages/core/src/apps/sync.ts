@@ -22,12 +22,14 @@ import {
   type AscPending,
   type AscReportIds,
   type AscRequestKind,
+  type AppStorePublicPart,
   type AscRequestState,
   type PlayListing,
   type ReviewCursor,
 } from '../sync/state.js';
 import type { Budget, Unit } from '../sync/unit.js';
 import { ascReviewInput, ASC_REPORTS, classifyPlayFile, PLAY_COLLECTORS, playPrefixes, type AscReportSpec } from './reports.js';
+import { appStorefronts } from './storefronts.js';
 
 export interface AppSyncContext {
   store: Store;
@@ -496,7 +498,6 @@ function planPublic(args: AppPlanArgs, app: AppConfig, list: Unit[]): void {
   const { ctx, today, get, budget } = args;
   if (get(syncKeys.appStorePublic(app.id)) === today) return;
   const pub = ctx.clients.appStore!;
-  const territories = app.territories?.length ? app.territories : ['us'];
   list.push({
     task: 'appstore.public',
     siteId: appTaskId(app.id),
@@ -505,28 +506,45 @@ function planPublic(args: AppPlanArgs, app: AppConfig, list: Unit[]): void {
     calls: 1,
     key: `appstore.public:${app.id}:${today}`,
     run: async () => {
-      const ratings: AppRatingInput[] = [];
-      const ranks: AppChartRankInput[] = [];
+      // Each storefront is saved once read (up to 3 calls), so a run that runs out of calls
+      // continues with the next storefront instead of starting over.
+      const part = parseJson<AppStorePublicPart>(await ctx.store.getMeta(syncKeys.appStorePublicPart(app.id)));
+      const done = new Set(part?.day === today ? part.done : []);
+      let written = 0;
       let first = true;
-      for (const country of territories) {
+      for (const country of await appStorefronts(ctx.store, app, today)) {
+        if (done.has(country)) continue;
         if (!first) budget.spend('appstore');
         first = false;
         const info = await pub.lookup(app.appleId!, country);
-        if (info)
-          ratings.push({ date: today, territory: country.toUpperCase(), average: info.averageUserRating, count: info.userRatingCount });
-        const charts: Array<[string, string | null]> = CHARTS.map((c) => [c, null]);
-        if (info?.primaryGenreId) charts.push(['top-free', info.primaryGenreId]);
-        for (const [chart, genre] of charts) {
-          budget.spend('appstore');
-          const ids = await pub.topChart(country, chart as (typeof CHARTS)[number], genre);
-          const at = ids.indexOf(app.appleId!);
-          // Only the user's own app's position is kept, never the other apps in the chart.
-          ranks.push({ date: today, territory: country.toUpperCase(), chart, genre: genre ?? '', rank: at === -1 ? null : at + 1 });
+        // Not sold in this storefront: no rating and no chart to be in.
+        if (info) {
+          const territory = country.toUpperCase();
+          const rating: AppRatingInput = { date: today, territory, average: info.averageUserRating, count: info.userRatingCount };
+          // A free app can only be in the free charts and a paid app only in the paid ones: check
+          // those, for all apps and for the app's category. Both overall charts when the price is unknown.
+          const paid = info.price === null ? null : info.price > 0;
+          type Chart = (typeof CHARTS)[number];
+          const overall: readonly Chart[] = paid === null ? CHARTS : [paid ? 'top-paid' : 'top-free'];
+          const charts = overall.map((c): [Chart, string | null] => [c, null]);
+          if (info.primaryGenreId) charts.push([paid ? 'top-paid' : 'top-free', info.primaryGenreId]);
+          const ranks: AppChartRankInput[] = [];
+          for (const [chart, genre] of charts) {
+            budget.spend('appstore');
+            const ids = await pub.topChart(country, chart, genre);
+            const at = ids.indexOf(app.appleId!);
+            // Only the user's own app's position is kept, never the other apps in the chart.
+            ranks.push({ date: today, territory, chart, genre: genre ?? '', rank: at === -1 ? null : at + 1 });
+          }
+          written += await ctx.store.writeAppRatings(app.id, 'apple', [rating]);
+          written += await ctx.store.writeAppChartRanks(app.id, ranks);
         }
+        done.add(country);
+        await ctx.store.setMeta(
+          syncKeys.appStorePublicPart(app.id),
+          JSON.stringify({ day: today, done: [...done] } satisfies AppStorePublicPart),
+        );
       }
-      let written = 0;
-      if (ratings.length) written += await ctx.store.writeAppRatings(app.id, 'apple', ratings);
-      if (ranks.length) written += await ctx.store.writeAppChartRanks(app.id, ranks);
       await ctx.store.setMeta(syncKeys.appStorePublic(app.id), today);
       return written;
     },

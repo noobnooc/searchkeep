@@ -22,6 +22,8 @@ import {
   type IsoDate,
 } from '../types.js';
 import { clampLimit, round } from '../analysis/common.js';
+import { APP_STORE_GENRES } from './genres.js';
+import { appStorefronts, byStorefront } from './storefronts.js';
 import { appStoresOf, type OpsContext } from '../analysis/ops.js';
 
 export interface AppParams {
@@ -193,7 +195,7 @@ export async function appPerformance(ctx: OpsContext, p: AppPerformanceParams) {
       return { ...x, ownSite: x.kind !== 'app' && own.some((d) => host === d || host.endsWith(`.${d}`)) };
     });
   }
-  const charts = r.store !== 'play' && r.app.appleId ? await latestCharts(ctx, r.app.id, r.range) : [];
+  const charts = r.store !== 'play' && r.app.appleId ? await latestCharts(ctx, r.app, r.range) : [];
   const notes = [...r.notes, ...stores.map((s) => STORE_NOTES[s])];
   if (p.source && stores.includes('play') && p.territory)
     notes.push('Google Play reports sources and territories separately, so it has no rows for a territory and a source together.');
@@ -221,15 +223,33 @@ function ownDomains(ctx: OpsContext, app: AppConfig): string[] {
   return [...new Set(sites.map((s) => s.domain.replace(/^www\./, '')))];
 }
 
-async function latestCharts(ctx: OpsContext, appId: string, range: DateRange) {
-  const rows = await ctx.store.queryAppChartRanks(appId, { start: addDays(range.end, -30), end: addDays(range.end, 7) });
-  const latest = new Map<string, (typeof rows)[number]>();
+/**
+ * Positions from the latest check of each storefront (charts no longer checked drop out), with the
+ * previous check's position and the category name, most important storefront first.
+ */
+async function latestCharts(ctx: OpsContext, app: AppConfig, range: DateRange) {
+  const rows = await ctx.store.queryAppChartRanks(app.id, { start: addDays(range.end, -30), end: addDays(range.end, 7) });
+  const lastCheck = new Map<string, IsoDate>();
+  for (const x of rows) if (x.date > (lastCheck.get(x.territory) ?? '')) lastCheck.set(x.territory, x.date);
+  const before = new Map<string, { date: IsoDate; rank: number | null }>();
   for (const x of rows) {
+    if (x.date >= lastCheck.get(x.territory)!) continue;
     const key = `${x.territory}|${x.chart}|${x.genre}`;
-    const prev = latest.get(key);
-    if (!prev || x.date > prev.date) latest.set(key, x);
+    if (x.date > (before.get(key)?.date ?? '')) before.set(key, { date: x.date, rank: x.rank });
   }
-  return [...latest.values()].sort((a, b) => a.territory.localeCompare(b.territory) || a.chart.localeCompare(b.chart));
+  const latest = rows
+    .filter((x) => x.date === lastCheck.get(x.territory))
+    .map((x) => {
+      const previous = before.get(`${x.territory}|${x.chart}|${x.genre}`);
+      return {
+        ...x,
+        ...(x.genre ? { genreName: APP_STORE_GENRES[x.genre] ?? null } : {}),
+        ...(previous ? { previous } : {}),
+      };
+    })
+    .sort((a, b) => Number(Boolean(a.genre)) - Number(Boolean(b.genre)) || a.chart.localeCompare(b.chart));
+  const order = await appStorefronts(ctx.store, app, toIsoDate(ctx.now ? ctx.now() : new Date()));
+  return byStorefront(latest, order);
 }
 
 export interface AppSearchTermsParams extends AppParams {
@@ -333,14 +353,24 @@ export async function appReviews(ctx: OpsContext, p: AppReviewsParams) {
       range: { start: r.range.start, end: maxDate(r.range.end, toIsoDate(ctx.now ? ctx.now() : new Date())) },
     }),
   ]);
+  // App Store ratings are per storefront: show the most important one that has ratings.
+  const storefronts = (await appStorefronts(ctx.store, r.app, toIsoDate(ctx.now ? ctx.now() : new Date()))).map((t) => t.toUpperCase());
   const summary = storesOf(r.app, r.store).map((store) => {
     const dist: Record<string, number> = { '1': 0, '2': 0, '3': 0, '4': 0, '5': 0 };
     for (const s of stats) if (s.store === store) dist[String(s.rating)] = s.reviews;
     const count = Object.values(dist).reduce((a, b) => a + b, 0);
     const avg = count ? Object.entries(dist).reduce((t, [k, v]) => t + Number(k) * v, 0) / count : null;
-    // The rating everyone sees: Google Play's overall average, or the App Store's (public feed) in the first storefront.
-    const series = ratingRows.filter((x) => x.store === store && (store === 'play' ? x.territory === ALL_KEY : true));
-    const territory = store === 'apple' ? (series[0]?.territory ?? null) : ALL_KEY;
+    // The rating everyone sees: Google Play's overall average, or the App Store's (public feed) in
+    // the first storefront with ratings. An average of 0 (stored before it meant "no ratings") is none.
+    const series = ratingRows
+      .filter((x) => x.store === store && (store === 'play' ? x.territory === ALL_KEY : true))
+      .map((x) => (x.average === 0 ? { ...x, average: null } : x));
+    const ordered = byStorefront(
+      [...new Set(series.map((x) => x.territory))].map((t) => ({ territory: t })),
+      storefronts,
+    ).map((x) => x.territory);
+    const rated = (t: string) => series.some((x) => x.territory === t && x.average !== null);
+    const territory = store === 'apple' ? (ordered.find(rated) ?? ordered[0] ?? null) : ALL_KEY;
     const own = series.filter((x) => x.territory === territory);
     const latest = own.at(-1) ?? null;
     const inRange = own.filter((x) => x.date <= r.range.end);

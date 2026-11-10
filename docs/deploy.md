@@ -777,9 +777,12 @@ one of your sites (referrals from it are marked as your own).
 5. **Google Play crash and ANR rates.** **[Human]** In the Google Cloud project of the service
    account: **APIs & Services** → **Library** → **Google Play Developer Reporting API** → **Enable**.
 6. **Optional plugin, off by default.** `APP_STORE_PUBLIC_DATA=true` reads Apple's official public
-   App Store feeds once a day (the iTunes lookup and the top charts) for the storefronts set on
-   each app (default `us`, up to 5), and keeps only your own app's average rating, rating count and
-   chart position. Google Play has no such feed. Apple refuses the egress IP addresses of Workers
+   App Store feeds once a day (the iTunes lookup and the top charts) and keeps only your own app's
+   average rating, rating count and chart position. It checks up to 5 storefronts per app: the ones
+   set on the app, or else the app's own biggest App Store storefronts by downloads, filled up with
+   the largest storefronts (US, China, Japan, UK, Germany). A free app is checked in the free
+   charts and a paid app in the paid ones, for all apps and for the app's category; storefronts
+   where the app is not sold are skipped. Google Play has no such feed. Apple refuses the egress IP addresses of Workers
    (HTTP 403), so when a direct call is refused, the calls of that run go through Cloudflare Browser
    Run (the `BROWSER` binding, as for Bing). Nothing to set up: it is one short page load per
    storefront and chart a day.

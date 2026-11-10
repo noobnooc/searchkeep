@@ -197,7 +197,7 @@
       <div class="row">
         <label for="af-terr">Storefronts for public feeds</label>
         <input id="af-terr" class="input mono" placeholder="us, gb" bind:value={f.territories} autocomplete="off" spellcheck="false" />
-        <p class="hint">Optional, up to 5. Used only when the opt-in public App Store feeds are on (APP_STORE_PUBLIC_DATA).</p>
+        <p class="hint">Optional, up to 5, most important first. Empty: the app's biggest App Store storefronts, then the largest ones. Used only when the opt-in public App Store feeds are on (APP_STORE_PUBLIC_DATA).</p>
       </div>
     </div>
     <div class="form-actions">

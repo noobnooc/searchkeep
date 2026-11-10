@@ -601,7 +601,11 @@ export interface AppChartRank {
   territory: string;
   chart: string;
   genre: string;
+  /** Category name, for a category chart. */
+  genreName?: string | null;
   rank: number | null;
+  /** The check before the latest one. */
+  previous?: { date: string; rank: number | null };
 }
 
 export interface AppPerformanceResponse {

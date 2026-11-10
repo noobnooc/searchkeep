@@ -392,7 +392,10 @@ export interface AppConfig {
   playPackage?: string;
   /** One of the user's sites: web referrers from its domain are marked as the user's own. */
   siteId?: string;
-  /** Storefronts (ISO 3166 alpha-2, lower case) for the opt-in public App Store feeds. Default `us`. */
+  /**
+   * Storefronts (ISO 3166 alpha-2, lower case) for the opt-in public App Store feeds, most important
+   * first. Default: the app's biggest App Store storefronts by downloads, then the largest ones.
+   */
   territories?: string[];
   /** Where the app is defined: the APPS secret (read-only) or the dashboard. */
   origin?: 'secret' | 'dashboard';

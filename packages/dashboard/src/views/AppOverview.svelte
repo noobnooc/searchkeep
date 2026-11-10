@@ -10,17 +10,44 @@
   import Skeleton from '../components/Skeleton.svelte';
   import Stat, { delta } from '../components/Stat.svelte';
   import { apiUrl } from '../lib/api';
-  import { change, CHART_LABEL, STORE_LABEL } from '../lib/apps';
-  import { compact, eachDay, int, pctChange, percent, rangeLabel } from '../lib/format';
+  import { change, CHART_LABEL, regionName, STORE_LABEL } from '../lib/apps';
+  import { compact, eachDay, int, pctChange, percent, rangeLabel, shortDate } from '../lib/format';
   import { resource } from '../lib/resource.svelte';
   import { href } from '../lib/router.svelte';
   import { ui } from '../lib/state.svelte';
-  import type { AppMetrics, AppPerformanceResponse, AppStore } from '../lib/types';
+  import type { AppChartRank, AppMetrics, AppPerformanceResponse, AppStore } from '../lib/types';
 
   const perf = resource<AppPerformanceResponse>(() => (ui.appId ? apiUrl('/api/app-performance', { app: ui.appId, ...ui.appRangeParams() }) : null));
   const app = $derived(ui.app);
   const reports = $derived(app?.appStoreReports);
   const needsStart = $derived(Boolean(app?.appleId && app.stores.appStore && reports && (!reports.started || reports.stopped)));
+
+  // Chart positions as a storefront × chart table, storefronts in the order the API ranks them.
+  const chartTable = $derived.by(() => {
+    const list = perf.data?.charts ?? [];
+    if (!list.length) return null;
+    const columns: Array<{ key: string; chart: string; scope: string; category: boolean }> = [];
+    const rows: Array<{ territory: string; cells: Map<string, AppChartRank> }> = [];
+    for (const c of list) {
+      const key = `${c.chart}|${c.genre}`;
+      if (!columns.some((x) => x.key === key))
+        columns.push({ key, chart: CHART_LABEL[c.chart] ?? c.chart, scope: c.genre ? (c.genreName ?? 'Category') : 'All apps', category: Boolean(c.genre) });
+      let row = rows.find((r) => r.territory === c.territory);
+      if (!row) rows.push((row = { territory: c.territory, cells: new Map() }));
+      row.cells.set(key, c);
+    }
+    columns.sort((a, b) => Number(a.category) - Number(b.category) || a.chart.localeCompare(b.chart));
+    return { columns, rows, ranked: list.some((c) => c.rank), checked: list.reduce((d, c) => (c.date > d ? c.date : d), '') };
+  });
+
+  function movement(c: AppChartRank): { text: string; tone: 'up' | 'down' | ''; title: string } | null {
+    if (!c.previous || !c.rank) return null;
+    const on = `Since ${shortDate(c.previous.date)}`;
+    if (!c.previous.rank) return { text: 'new', tone: 'up', title: `${on}: not in the top 100 before` };
+    const d = c.previous.rank - c.rank;
+    if (d === 0) return null;
+    return d > 0 ? { text: `↑${d}`, tone: 'up', title: `${on}: was #${c.previous.rank}` } : { text: `↓${-d}`, tone: 'down', title: `${on}: was #${c.previous.rank}` };
+  }
 
   interface Kpi {
     label: string;
@@ -126,16 +153,46 @@
       </Card>
     {/each}
 
-    {#if perf.data.charts?.length}
-      <Card title="App Store charts" subtitle="Your app's position in Apple's public top charts (opt-in)">
-        <ul class="charts">
-          {#each perf.data.charts as c (`${c.territory}-${c.chart}-${c.genre}`)}
-            <li>
-              <span class="where">{c.territory} · {CHART_LABEL[c.chart] ?? c.chart}{c.genre ? ' (category)' : ''}</span>
-              {#if c.rank}<Pill tone="ok">#{c.rank}</Pill>{:else}<span class="muted">Not in the top 100</span>{/if}
-            </li>
-          {/each}
-        </ul>
+    {#if chartTable}
+      <Card title="App Store charts" subtitle="Your app's place in Apple's top 100 charts, checked {shortDate(chartTable.checked)}">
+        {#if !chartTable.ranked}
+          <p class="charts-none">Not in the top 100 of any chart checked yet.</p>
+        {/if}
+        <div class="charts-wrap">
+          <table class="charts" aria-label="App Store chart positions per storefront">
+            <thead>
+              <tr>
+                <th scope="col">Storefront</th>
+                {#each chartTable.columns as col (col.key)}
+                  <th scope="col"><span class="chart-name">{col.chart}</span> <span class="chart-scope">{col.scope}</span></th>
+                {/each}
+              </tr>
+            </thead>
+            <tbody>
+              {#each chartTable.rows as row (row.territory)}
+                <tr>
+                  <th scope="row"><span class="region">{regionName(row.territory)}</span> <span class="code">{row.territory}</span></th>
+                  {#each chartTable.columns as col (col.key)}
+                    {@const c = row.cells.get(col.key)}
+                    <td>
+                      {#if !c}
+                        <span class="muted" title="Not checked in this storefront">·</span>
+                      {:else if c.rank}
+                        <Pill tone="ok" icon={null}>#{c.rank}</Pill>
+                        {@const m = movement(c)}
+                        {#if m}<span class="move {m.tone}" title={m.title}>{m.text}</span>{/if}
+                      {:else}
+                        <span class="muted" title="Not in the top 100">—</span>
+                        {#if c.previous?.rank}<span class="move" title="On {shortDate(c.previous.date)}">was #{c.previous.rank}</span>{/if}
+                      {/if}
+                    </td>
+                  {/each}
+                </tr>
+              {/each}
+            </tbody>
+          </table>
+        </div>
+        <p class="charts-foot">— means not in the top 100. Free apps are checked in the free charts, paid apps in the paid ones.</p>
       </Card>
     {/if}
 
@@ -172,25 +229,92 @@
   .callout span {
     color: var(--text-3);
   }
-  .charts {
-    list-style: none;
-    margin: 0;
-    padding: 0;
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-    gap: 8px 16px;
-  }
-  .charts li {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 8px;
+  .charts-none {
+    margin: 0 0 10px;
     font-size: 13px;
+    color: var(--text-2);
+  }
+  .charts-wrap {
+    overflow-x: auto;
+  }
+  .charts {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+  }
+  .charts thead th {
+    text-align: left;
+    font-weight: 500;
+    font-size: 12px;
+    color: var(--text-3);
+    padding: 0 16px 8px 0;
+    border-bottom: 1px solid var(--border);
+    white-space: nowrap;
+  }
+  .chart-scope {
+    color: var(--text-4);
+  }
+  .chart-scope::before {
+    content: '· ';
+  }
+  .charts tbody th,
+  .charts td {
+    text-align: left;
+    padding: 9px 16px 9px 0;
+    border-bottom: 1px solid var(--border);
+    white-space: nowrap;
+    font-variant-numeric: tabular-nums;
+  }
+  .charts tbody tr:last-child th,
+  .charts tbody tr:last-child td {
+    border-bottom: 0;
+  }
+  .charts tbody th {
+    font-weight: 500;
+  }
+  .code {
+    margin-left: 4px;
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--text-4);
+  }
+  .move {
+    margin-left: 6px;
+    font-size: 12px;
+    color: var(--text-3);
+  }
+  .move.up {
+    color: var(--pos);
+  }
+  .move.down {
+    color: var(--neg);
+  }
+  .charts-foot {
+    margin: 10px 0 0;
+    font-size: 12px;
+    color: var(--text-4);
   }
   @media (max-width: 640px) {
     .callout {
       flex-direction: column;
       align-items: flex-start;
+    }
+    .charts thead th {
+      white-space: normal;
+      vertical-align: bottom;
+    }
+    .chart-scope {
+      display: block;
+    }
+    .chart-scope::before {
+      content: none;
+    }
+    .charts tbody th,
+    .charts td {
+      padding-right: 12px;
+    }
+    .code {
+      display: none;
     }
   }
 </style>
