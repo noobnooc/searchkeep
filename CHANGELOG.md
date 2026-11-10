@@ -240,6 +240,10 @@ Because users sync `main` at any time, the `Unreleased` section is always accura
   (a 15-minute access token, a two-week grant session) and the Zero Trust global session duration,
   so the dashboard and MCP clients no longer ask you to sign in again every day. A new
   troubleshooting entry, "Asked to sign in again every day", points to it.
+- Working on the repository (`pnpm install`, `pnpm test` and the other commands) now needs Node.js
+  22.12 or later, the minimum of the test runner Vitest 5. The root `package.json` `engines` field
+  says so, and `pnpm install` warns on older versions. Deploying is not affected: Workers Builds
+  reads `apps/cloudflare/.node-version` (`22`), which gives the latest Node.js 22.
 
 ### Fixed
 

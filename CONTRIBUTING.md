@@ -17,7 +17,7 @@ do, and the principles that decide trade-offs.
 
 ## Setup
 
-Requirements: Node.js 22 and pnpm (use the version in the root `package.json` `packageManager`
+Requirements: Node.js 22.12+ and pnpm (use the version in the root `package.json` `packageManager`
 field; `corepack enable` picks it up).
 
 ```sh
