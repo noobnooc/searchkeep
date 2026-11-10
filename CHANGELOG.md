@@ -219,6 +219,10 @@ Because users sync `main` at any time, the `Unreleased` section is always accura
   dashboard; when both define the same `id`, the secret wins. Site definitions are validated more
   strictly: a site with an invalid `brandRegex` (or other invalid field) is now skipped and reported
   by `setup_status` instead of being loaded without the field.
+- [docs/deploy.md step 8](docs/deploy.md#8-enable-managed-oauth) now sets the Managed OAuth grant
+  (a 15-minute access token, a two-week grant session) and the Zero Trust global session duration,
+  so the dashboard and MCP clients no longer ask you to sign in again every day. A new
+  troubleshooting entry, "Asked to sign in again every day", points to it.
 
 ### Fixed
 
@@ -257,6 +261,13 @@ Because users sync `main` at any time, the `Unreleased` section is always accura
   API token in `CLOUDFLARE_API_TOKEN` (Cloudflare dashboard → **My Profile** or **Account** →
   **API Tokens** → your token → **Edit**) and add **Zone: Read** and **Account Settings: Read**.
   Without them you type the zone ID and site tag yourself.
+- Optional, to stop signing in again every day: at any time, in Zero Trust → **Access controls** →
+  **Applications** → `Searchkeep` → **Edit** → **Advanced settings**, set **Access token lifetime**
+  to `15m` and **Grant session duration** to `336h`; then in **Access controls** → **Access
+  settings**, set the global session duration to two weeks or longer (it applies to every Access
+  application in your Zero Trust organization). See
+  [docs/deploy.md step 8](docs/deploy.md#8-enable-managed-oauth). If you skip it, nothing breaks;
+  you keep signing in about once a day.
 
 ## [0.1.0] - 2026-11-03
 
