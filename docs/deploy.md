@@ -800,7 +800,9 @@ Purchases and App Sessions reports, from the same report requests; sessions coun
 share analytics, and only where at least five people had sessions); Google Play store listing
 visitors and
 acquisitions by country and by traffic source with **search terms**, installs, uninstalls and
-active devices, ratings, reviews, crash and ANR rates, and with View financial data: revenue
+active devices, ratings, reviews, crash and ANR rates; installs, ratings, crashes and ANRs per app
+version, device and OS version (and App Store sessions per app version and device; the 50 biggest
+values a day, the rest as "Other"); and with View financial data: revenue
 (proceeds net of Google's fees, taxes and refunds, sales and purchases, per day and buyer country in
 your payout currency, from the monthly earnings files, so a month arrives early in the next one) and
 subscriptions (new, canceled and active per product and country). Google groups the store listing visitors

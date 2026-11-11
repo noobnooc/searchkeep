@@ -43,6 +43,13 @@
       "when": 1794396088277,
       "tag": "0005_app_subscriptions_earnings",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1794400390012,
+      "tag": "0006_app_breakdowns",
+      "breakpoints": true
     }
   ]
 }

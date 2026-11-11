@@ -26,6 +26,15 @@ Because users sync `main` at any time, the `Unreleased` section is always accura
 
 ### Added
 
+- App numbers per app version, device and OS version
+  ([ADR 0010](docs/adr/0010-app-revenue-and-engagement.md)): Google Play installs, uninstalls,
+  active devices, ratings, crashes and ANRs from the Play Console's per-version, per-device and
+  per-OS files (now also `stats/crashes/`), and App Store sessions per app version and device. The
+  new `app_breakdown` MCP tool and API, and a **Versions, devices and OS versions** card on an app's
+  **Stability** page (also shown when there are no crash rates) tie a release, a device or an OS
+  version to its ratings and crashes. At most 50 values a day are kept; the rest are summed into
+  "Other". Nothing to set up.
+
 - Google Play revenue and subscriptions ([ADR 0010](docs/adr/0010-app-revenue-and-engagement.md)).
   With the service account allowed to view financial data, the sync reads the account's monthly
   earnings files (ZIP) and keeps only each app's sums per day and buyer country in the payout

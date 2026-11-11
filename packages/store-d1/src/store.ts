@@ -64,6 +64,13 @@ import {
   type AppSubscriptionQuery,
   type AppSubscriptionRow,
   type AppEarningsInput,
+  APP_BREAKDOWN_DIMENSIONS,
+  APP_BREAKDOWN_METRICS,
+  type AppBreakdownMetric,
+  type AppBreakdownQuery,
+  type AppBreakdownRow,
+  type AppBreakdownWrite,
+  type AppBreakdownDimension,
 } from '@searchkeep/core';
 import { desc, eq } from 'drizzle-orm';
 import { drizzle, type DrizzleD1Database } from 'drizzle-orm/d1';
@@ -105,6 +112,19 @@ const APP_COLUMNS: Record<AppStoreMetric, string> = {
   proceedsCents: 'proceeds_cents',
   salesCents: 'sales_cents',
   payingUsers: 'paying_users',
+  sessions: 'sessions',
+  sessionSeconds: 'session_seconds',
+  sessionDevices: 'session_devices',
+};
+/** Breakdown metric → column (ADR 0010). */
+const BREAKDOWN_COLUMNS: Record<AppBreakdownMetric, string> = {
+  installs: 'installs',
+  deletions: 'deletions',
+  activeDevices: 'active_devices',
+  crashes: 'crashes',
+  anrs: 'anrs',
+  dailyRating: 'daily_rating',
+  totalRating: 'total_rating',
   sessions: 'sessions',
   sessionSeconds: 'session_seconds',
   sessionDevices: 'session_devices',
@@ -1690,6 +1710,126 @@ export class D1Store implements Store {
       distinctUsers: n(r.distinctUsers),
       crashes: n(r.crashes),
       crashDevices: n(r.crashDevices),
+    }));
+  }
+
+  async writeAppBreakdowns(appId: string, store: AppStore, w: AppBreakdownWrite): Promise<number> {
+    appStore(store);
+    const dimension = allow([w.dimension], APP_BREAKDOWN_DIMENSIONS, 'dimension')[0]!;
+    const metrics = allow([...new Set(w.metrics)], APP_BREAKDOWN_METRICS, 'metric');
+    if (metrics.length === 0) return 0;
+    const cols = metrics.map((m) => BREAKDOWN_COLUMNS[m]);
+    const ratings = new Set<AppBreakdownMetric>(['dailyRating', 'totalRating']);
+    const agg = new Map<string, Record<string, string | number | null>>();
+    for (const r of w.rows) {
+      const key = `${r.date}|${r.value}`;
+      const e = agg.get(key) ?? { d: r.date, v: r.value.slice(0, 120), k: `${r.date}|${r.value.slice(0, 120)}` };
+      metrics.forEach((m, i) => {
+        const v = r[m];
+        if (v === undefined || v === null) return;
+        // Counts add up; ratings are averages, the last one wins.
+        e[`m${i}`] = ratings.has(m) ? v : (Number(e[`m${i}`]) || 0) + Math.round(v);
+      });
+      agg.set(key, e);
+    }
+    const items = [...agg.values()];
+    let changes = await this.batch(
+      chunks(items).map((group) =>
+        this.db
+          .prepare(
+            `INSERT INTO app_breakdowns_daily (app_id, store, date, dimension, value, ${cols.join(', ')})
+             SELECT ?1, ?2, j.value->>'d', ?3, j.value->>'v', ${cols.map((_c, i) => `j.value->>'m${i}'`).join(', ')}
+             FROM json_each(?4) j WHERE true
+             ON CONFLICT (app_id, store, date, dimension, value) DO UPDATE SET ${cols.map((c) => `${c} = excluded.${c}`).join(', ')}
+             WHERE ${cols.map((c) => `app_breakdowns_daily.${c} IS NOT excluded.${c}`).join(' OR ')}`,
+          )
+          .bind(appId, store, dimension, JSON.stringify(group)),
+      ),
+    );
+    if (w.dates.length) {
+      // Values of the replaced days that the write no longer mentions lose these metrics.
+      const res = await this.db
+        .prepare(
+          `UPDATE app_breakdowns_daily SET ${cols.map((c) => `${c} = NULL`).join(', ')}
+           WHERE app_id = ?1 AND store = ?2 AND dimension = ?3 AND date IN (SELECT value FROM json_each(?4))
+             AND (${cols.map((c) => `${c} IS NOT NULL`).join(' OR ')})
+             AND (date || '|' || value) NOT IN (SELECT value FROM json_each(?5))`,
+        )
+        .bind(appId, store, dimension, JSON.stringify([...new Set(w.dates)]), JSON.stringify(items.map((x) => x.k)))
+        .run();
+      changes += res.meta?.changes ?? 0;
+      // A value left without any metric is gone from that day.
+      await this.db
+        .prepare(
+          `DELETE FROM app_breakdowns_daily WHERE app_id = ?1 AND store = ?2 AND dimension = ?3 AND date IN (SELECT value FROM json_each(?4))
+             AND ${Object.values(BREAKDOWN_COLUMNS)
+               .map((c) => `${c} IS NULL`)
+               .join(' AND ')}`,
+        )
+        .bind(appId, store, dimension, JSON.stringify([...new Set(w.dates)]))
+        .run();
+    }
+    return changes;
+  }
+
+  async appBreakdownValues(
+    appId: string,
+    store: AppStore,
+    dimension: AppBreakdownDimension,
+    dates: IsoDate[],
+  ): Promise<Array<{ date: IsoDate; value: string }>> {
+    if (dates.length === 0) return [];
+    return this.all<{ date: string; value: string }>(
+      `SELECT date, value FROM app_breakdowns_daily
+       WHERE app_id = ?1 AND store = ?2 AND dimension = ?3 AND date IN (SELECT value FROM json_each(?4)) AND value != 'Other'
+         AND (installs IS NOT NULL OR active_devices IS NOT NULL)`,
+      appId,
+      appStore(store),
+      allow([dimension], APP_BREAKDOWN_DIMENSIONS, 'dimension')[0]!,
+      JSON.stringify([...new Set(dates)]),
+    );
+  }
+
+  async queryAppBreakdowns(q: AppBreakdownQuery): Promise<AppBreakdownRow[]> {
+    const dimension = allow([q.dimension], APP_BREAKDOWN_DIMENSIONS, 'dimension')[0]!;
+    const binds: Bind[] = [q.appId, dimension, q.range.start, q.range.end];
+    let storeFilter = '';
+    if (q.store) {
+      binds.push(appStore(q.store));
+      storeFilter = ` AND store = ?${binds.length}`;
+    }
+    const scope = 'app_id = ?1 AND dimension = ?2 AND date >= ?3 AND date <= ?4';
+    const rows = await this.all<Record<string, string | number | null>>(
+      `SELECT store, value, COUNT(DISTINCT date) AS days,
+         SUM(installs) AS installs, SUM(deletions) AS deletions, SUM(crashes) AS crashes, SUM(anrs) AS anrs,
+         SUM(sessions) AS sessions, SUM(session_seconds) AS sessionSeconds, SUM(session_devices) AS sessionDevices,
+         AVG(daily_rating) AS dailyRating,
+         SUM(CASE WHEN date = (SELECT MAX(date) FROM app_breakdowns_daily x WHERE x.${scope.replaceAll(' AND ', ' AND x.')} AND x.store = b.store AND x.active_devices IS NOT NULL)
+             THEN active_devices END) AS activeDevices,
+         (SELECT total_rating FROM app_breakdowns_daily y WHERE y.${scope.replaceAll(' AND ', ' AND y.')} AND y.store = b.store AND y.value = b.value
+             AND y.total_rating IS NOT NULL ORDER BY y.date DESC LIMIT 1) AS totalRating
+       FROM app_breakdowns_daily b WHERE ${scope}${storeFilter}
+       GROUP BY store, value
+       ORDER BY COALESCE(SUM(installs), 0) + COALESCE(SUM(sessions), 0) + COALESCE(SUM(crashes), 0) DESC, COALESCE(SUM(active_devices), 0) DESC, value
+       LIMIT ${Math.max(1, Math.min(500, Math.floor(q.limit ?? 100)))}`,
+      ...binds,
+    );
+    const n = (v: string | number | null | undefined) => Number(v) || 0;
+    const r1 = (v: string | number | null | undefined) => (v === null || v === undefined ? null : Math.round(Number(v) * 100) / 100);
+    return rows.map((r) => ({
+      store: r.store as AppStore,
+      value: String(r.value),
+      days: n(r.days),
+      installs: n(r.installs),
+      deletions: n(r.deletions),
+      activeDevices: n(r.activeDevices),
+      crashes: n(r.crashes),
+      anrs: n(r.anrs),
+      dailyRating: r1(r.dailyRating),
+      totalRating: r1(r.totalRating),
+      sessions: n(r.sessions),
+      sessionSeconds: n(r.sessionSeconds),
+      sessionDevices: n(r.sessionDevices),
     }));
   }
 

@@ -1,4 +1,8 @@
 import type {
+  AppBreakdownDimension,
+  AppBreakdownQuery,
+  AppBreakdownRow,
+  AppBreakdownWrite,
   AppEarningsInput,
   AiCitationInput,
   AppChartRankInput,
@@ -174,6 +178,23 @@ export interface Store {
   writeAppEarningsFile(appId: string, file: string, rows: AppEarningsInput[]): Promise<IsoDate[]>;
   /** Every earnings file's sums per day and buyer country, for those days. */
   sumAppEarnings(appId: string, dates: IsoDate[]): Promise<AppEarningsInput[]>;
+  /**
+   * Sets `w.metrics` per day and value of one dimension (ADR 0010); for the days in `w.dates`,
+   * values the write does not mention get those metrics cleared.
+   */
+  writeAppBreakdowns(appId: string, store: AppStore, w: AppBreakdownWrite): Promise<number>;
+  /** The values kept by installs (installs or active devices set) per day of a dimension, `Other` left out. */
+  appBreakdownValues(
+    appId: string,
+    store: AppStore,
+    dimension: AppBreakdownDimension,
+    dates: IsoDate[],
+  ): Promise<Array<{ date: IsoDate; value: string }>>;
+  /**
+   * Per value of a dimension over the range: counts summed, active devices and the total rating on
+   * the last day with data, the daily rating averaged over days.
+   */
+  queryAppBreakdowns(q: AppBreakdownQuery): Promise<AppBreakdownRow[]>;
   /** Replaces a subscription product's rows on the days in `dates` (Google Play, ADR 0010). */
   writeAppSubscriptions(appId: string, product: string, dates: IsoDate[], rows: AppSubscriptionInput[]): Promise<number>;
 

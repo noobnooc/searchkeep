@@ -4,6 +4,7 @@
  */
 import { beforeEach, describe, expect, it } from 'vitest';
 import {
+  appBreakdown,
   appPerformance,
   appReviews,
   appSearchTerms,
@@ -12,7 +13,15 @@ import {
   listApps,
   startAppStoreReports,
 } from '../apps/analysis.js';
-import { ASC_REPORTS, downloadReferrersCollector, engagementCollector, playEarningsCollector } from '../apps/reports.js';
+import {
+  ASC_REPORTS,
+  BREAKDOWN_VALUES_PER_DAY,
+  downloadReferrersCollector,
+  engagementCollector,
+  playEarningsCollector,
+  playCrashesBreakdownCollector,
+  playInstallsBreakdownCollector,
+} from '../apps/reports.js';
 import { loadConfig, withStoredApps, type SearchkeepConfig } from '../config.js';
 import { addDays, daysBetween } from '../dates.js';
 import type { DelimitedRow } from '../delimited.js';
@@ -282,6 +291,31 @@ function fakePlay(opts: { financeDenied?: boolean } = {}) {
       },
     ],
     'stats/installs/installs_com.other.app_202610_country.csv': [],
+    // Per app version: installs, ratings, crashes and ANRs (ADR 0010).
+    [`stats/installs/installs_${pkg}_202610_app_version.csv`]: [
+      {
+        date: '2026-10-10',
+        'app version code': '31',
+        'daily device installs': '5',
+        'daily device uninstalls': '1',
+        'active device installs': '80',
+      },
+      {
+        date: '2026-10-10',
+        'app version code': '32',
+        'daily device installs': '3',
+        'daily device uninstalls': '0',
+        'active device installs': '47',
+      },
+    ],
+    [`stats/ratings/ratings_${pkg}_202610_app_version.csv`]: [
+      { date: '2026-10-10', 'app version code': '31', 'daily average rating': '3.50', 'total average rating': '4.20' },
+      { date: '2026-10-10', 'app version code': '32', 'daily average rating': '4.80', 'total average rating': '4.60' },
+    ],
+    [`stats/crashes/crashes_${pkg}_202610_app_version.csv`]: [
+      { date: '2026-10-10', 'app version code': '31', 'daily crashes': '6', 'daily anrs': '1' },
+      { date: '2026-10-10', 'app version code': '32', 'daily crashes': '1', 'daily anrs': '0' },
+    ],
     [`financial-stats/subscriptions/subscriptions_${pkg}_pro_monthly_202610_country.csv`]: [
       {
         date: '2026-10-09',
@@ -809,7 +843,24 @@ export function appContract(name: string, makeStore: () => Promise<Store>): void
 
         // Files of other packages are never read; the August file is history.
         expect(play.calls.some((c) => c.includes('com.other.app'))).toBe(false);
-        expect(play.calls.filter((c) => c.startsWith('read:'))).toHaveLength(9);
+        expect(play.calls.filter((c) => c.startsWith('read:'))).toHaveLength(12);
+
+        // Per app version: Google Play installs, ratings and crashes; App Store sessions and crash counts.
+        const versions = await appBreakdown(ctx, { app: APP.id, store: 'play', start: '2026-10-01', end: '2026-10-19' });
+        expect(
+          versions.rows.map((v) => [v.value, v.installs, v.deletions, v.activeDevices, v.crashes, v.anrs, v.dailyRating, v.totalRating]),
+        ).toEqual([
+          ['31', 5, 1, 80, 6, 1, 3.5, 4.2],
+          ['32', 3, 0, 47, 1, 0, 4.8, 4.6],
+        ]);
+        const apple = await appBreakdown(ctx, { app: APP.id, store: 'apple', start: '2026-10-18', end: '2026-10-18' });
+        expect(apple.rows.map((v) => [v.value, v.sessions, v.crashes, v.crashesPerSession])).toEqual([
+          ['2.1', 50, 1, 0.02],
+          ['2.0', 0, 3, null],
+        ]);
+        expect(
+          (await appBreakdown(ctx, { app: APP.id, store: 'apple', dimension: 'device', start: '2026-10-18', end: '2026-10-18' })).rows,
+        ).toHaveLength(1);
 
         const progress = await syncProgress({ store, config: cfg, clients: clients(), now: () => NOW });
         expect(progress.summary).toMatchObject({ apps: 1, appsWithRecentData: 1, issues: 0 });
@@ -1046,6 +1097,78 @@ export function appContract(name: string, makeStore: () => Promise<Store>): void
         expect(play.calls).toContain('list:stats/store_performance/');
         expect(play.calls).toContain('list:earnings/earnings_');
         expect(play.calls).toContain(`read:stats/installs/installs_${APP.playPackage}_202610_country.csv`);
+      });
+
+      it('keeps the biggest values of a breakdown per day and sums the rest into Other', async () => {
+        const c = playInstallsBreakdownCollector('device');
+        for (let i = 0; i < BREAKDOWN_VALUES_PER_DAY + 5; i++)
+          c.add({
+            date: '2026-10-10',
+            device: `phone-${String(i).padStart(2, '0')}`,
+            'daily device installs': String(100 - i),
+            'active device installs': '1',
+          });
+        await c.write(store, APP.id);
+        const rows = await store.queryAppBreakdowns({
+          appId: APP.id,
+          dimension: 'device',
+          range: { start: '2026-10-10', end: '2026-10-10' },
+          limit: 500,
+        });
+        expect(rows).toHaveLength(BREAKDOWN_VALUES_PER_DAY + 1);
+        expect(rows.find((r) => r.value === 'phone-00')).toMatchObject({ installs: 100 });
+        expect(rows.some((r) => r.value === 'phone-50')).toBe(false);
+        // The five smallest (50 down to 46 installs) are one row.
+        expect(rows.find((r) => r.value === 'Other')).toMatchObject({ installs: 50 + 49 + 48 + 47 + 46, activeDevices: 5 });
+        // The crashes file follows the values the installs file kept: a device outside them goes to Other.
+        const crashes = playCrashesBreakdownCollector('device');
+        crashes.add({ date: '2026-10-10', device: 'phone-00', 'daily crashes': '5', 'daily anrs': '0' });
+        crashes.add({ date: '2026-10-10', device: 'phone-54', 'daily crashes': '7', 'daily anrs': '1' });
+        await crashes.write(store, APP.id);
+        const after = await store.queryAppBreakdowns({
+          appId: APP.id,
+          dimension: 'device',
+          range: { start: '2026-10-10', end: '2026-10-10' },
+          limit: 500,
+        });
+        expect(after).toHaveLength(BREAKDOWN_VALUES_PER_DAY + 1);
+        expect(after.find((r) => r.value === 'phone-00')).toMatchObject({ installs: 100, crashes: 5 });
+        expect(after.find((r) => r.value === 'Other')).toMatchObject({ crashes: 7, anrs: 1 });
+        // Installs read again without some values clear their installs; the crashes stay until their file is read again.
+        const again = playInstallsBreakdownCollector('device');
+        again.add({ date: '2026-10-10', device: 'phone-00', 'daily device installs': '7' });
+        await again.write(store, APP.id);
+        expect(
+          (await store.queryAppBreakdowns({ appId: APP.id, dimension: 'device', range: { start: '2026-10-10', end: '2026-10-10' } })).map(
+            (r) => [r.value, r.installs, r.crashes],
+          ),
+        ).toEqual([
+          ['phone-00', 7, 5],
+          ['Other', 0, 7],
+        ]);
+      });
+
+      it('merges App Store crash counts into their versions before limiting the breakdown', async () => {
+        const cfg = config();
+        const day = '2026-10-10';
+        await store.writeAppBreakdowns(APP.id, 'apple', {
+          dimension: 'app_version',
+          metrics: ['sessions'],
+          dates: [day],
+          rows: [
+            { date: day, value: '3.0', sessions: 100 },
+            { date: day, value: '2.9', sessions: 10 },
+          ],
+        });
+        await store.writeAppVitals(APP.id, 'apple', { metrics: ['crashes'], rows: [{ date: day, version: '2.9', crashes: 4 }] });
+        const ctx = { store, config: cfg, clients: {}, now: () => NOW };
+        const top = await appBreakdown(ctx, { app: APP.id, store: 'apple', start: day, end: day, limit: 1 });
+        expect(top.rows.map((r) => [r.value, r.sessions, r.crashes])).toEqual([['3.0', 100, 0]]);
+        const both = await appBreakdown(ctx, { app: APP.id, store: 'apple', start: day, end: day, limit: 2 });
+        expect(both.rows.map((r) => [r.value, r.sessions, r.crashes, r.crashesPerSession])).toEqual([
+          ['3.0', 100, 0, null],
+          ['2.9', 10, 4, 0.4],
+        ]);
       });
 
       it('continues across runs when the call budget runs out', async () => {

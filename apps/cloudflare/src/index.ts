@@ -12,6 +12,8 @@ import {
   appPerformance,
   appReviews,
   appSearchTerms,
+  appBreakdown,
+  type AppBreakdownDimension,
   appStability,
   appSubscriptions,
   listApps,
@@ -739,6 +741,13 @@ app.get(
   handle((c) => {
     const { x, common } = appParams(c);
     return appStability(opsContext(c), x.strip({ ...common, groupBy: x.get('groupBy') as 'date' | 'version' | undefined }));
+  }),
+);
+app.get(
+  '/api/app-breakdown',
+  handle((c) => {
+    const { x, common } = appParams(c);
+    return appBreakdown(opsContext(c), x.strip({ ...common, dimension: x.get('dimension') as AppBreakdownDimension | undefined }));
   }),
 );
 app.get(

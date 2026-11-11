@@ -757,3 +757,31 @@ export interface AppSubscriptionsResponse {
   series: Array<{ date: string; newSubscriptions: number; canceledSubscriptions: number; activeSubscriptions: number }>;
   notes: string[];
 }
+
+export type AppBreakdownDimension = 'app_version' | 'device' | 'os_version';
+
+export interface AppBreakdownRow {
+  store: AppStore;
+  value: string;
+  days: number;
+  installs: number;
+  deletions: number;
+  activeDevices: number;
+  crashes: number;
+  anrs: number;
+  dailyRating: number | null;
+  totalRating: number | null;
+  sessions: number;
+  sessionSeconds: number;
+  sessionDevices: number;
+  averageSessionSeconds: number | null;
+  crashesPerSession: number | null;
+}
+
+export interface AppBreakdownResponse {
+  app: string;
+  range: DateRange;
+  dimension: AppBreakdownDimension;
+  rows: AppBreakdownRow[];
+  notes: string[];
+}

@@ -484,6 +484,23 @@ export const TOOLS: Tool[] = [
     ],
     example: 'Which countries gained the most subscribers this month?',
   },
+  {
+    name: 'app_breakdown',
+    summary: 'An app’s numbers per app version, device or OS version.',
+    description:
+      'Google Play installs, uninstalls, active devices, ratings, crashes and ANRs from the Play Console’s per-version, per-device and per-OS files, and App Store sessions and crash counts per app version. Ties a release, a device or an OS version to its ratings and crashes. At most 50 values a day are kept; the rest are summed into “Other”.',
+    readOnly: true,
+    params: [
+      app,
+      appStore,
+      start,
+      end,
+      days(28),
+      { name: 'dimension', type: '"app_version" | "device" | "os_version"', description: 'Defaults to `app_version`.' },
+      limit(50),
+    ],
+    example: 'Did version 3.2 bring more crashes or a lower rating than 3.1?',
+  },
 ];
 
 /** Tools registered by default; `submit_sitemap` appears only with `ENABLE_WRITES=true`. */

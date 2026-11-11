@@ -151,7 +151,17 @@ describe('app report recognition', () => {
       month: '202610',
     });
     expect(classifyPlayFile('stats/installs/installs_com.acme.app.pro_202610_country.csv', 'com.acme.app')).toBeNull();
-    expect(classifyPlayFile('stats/installs/installs_com.acme.app_202610_device.csv', 'com.acme.app')).toBeNull();
+    expect(classifyPlayFile('stats/installs/installs_com.acme.app_202610_device.csv', 'com.acme.app')).toEqual({
+      kind: 'installs_breakdown',
+      month: '202610',
+      dimension: 'device',
+    });
+    expect(classifyPlayFile('stats/crashes/crashes_com.acme.app_202610_app_version.csv', 'com.acme.app')).toMatchObject({
+      kind: 'crashes_breakdown',
+      dimension: 'app_version',
+    });
+    expect(classifyPlayFile('stats/crashes/crashes_com.acme.app_202610_overview.csv', 'com.acme.app')).toBeNull();
+    expect(classifyPlayFile('stats/installs/installs_com.acme.app_202610_carrier.csv', 'com.acme.app')).toBeNull();
   });
 });
 

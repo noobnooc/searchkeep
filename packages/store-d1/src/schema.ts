@@ -476,3 +476,32 @@ export const appEarnings = sqliteTable(
   },
   (t) => [primaryKey({ columns: [t.appId, t.file, t.date, t.territory] }), index('app_earnings_date').on(t.appId, t.date)],
 );
+
+/**
+ * An app's numbers per day and value of a dimension (app version, device, OS version; ADR 0010).
+ * At most 50 values per day and dimension are kept; the rest are summed into `Other`.
+ */
+export const appBreakdownsDaily = sqliteTable(
+  'app_breakdowns_daily',
+  {
+    appId: text('app_id').notNull(),
+    store: text('store').notNull(),
+    date: text('date').notNull(),
+    dimension: text('dimension').notNull(),
+    value: text('value').notNull(),
+    installs: integer('installs'),
+    deletions: integer('deletions'),
+    activeDevices: integer('active_devices'),
+    crashes: integer('crashes'),
+    anrs: integer('anrs'),
+    dailyRating: real('daily_rating'),
+    totalRating: real('total_rating'),
+    sessions: integer('sessions'),
+    sessionSeconds: integer('session_seconds'),
+    sessionDevices: integer('session_devices'),
+  },
+  (t) => [
+    primaryKey({ columns: [t.appId, t.store, t.date, t.dimension, t.value] }),
+    index('app_breakdowns_daily_date').on(t.appId, t.dimension, t.date),
+  ],
+);

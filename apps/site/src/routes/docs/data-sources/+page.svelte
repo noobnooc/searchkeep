@@ -309,7 +309,8 @@ cloudflared access curl "https://searchkeep.example.com/api/import/ai-citations?
   account reads (store performance by country and by traffic source with <strong>search terms</strong>, installs, ratings
   and reviews; files are read again only when they change). Google groups the visitors and acquisitions of countries and
   traffic sources with few users into “Other”, so a small app may have no search terms yet; installs by country are not
-  grouped. Crash and ANR rates come from the Play Developer Reporting API. With the optional <strong>View financial data</strong>
+  grouped. Installs, ratings, crashes and ANRs also come per app version, device and OS version (the 50 biggest values a
+  day; the rest as “Other”). Crash and ANR rates come from the Play Developer Reporting API. With the optional <strong>View financial data</strong>
   permission, the monthly earnings files give revenue (net proceeds, sales and purchases per day and buyer country, in your
   payout currency; order numbers and postcodes are never stored) and the subscription statistics give new, canceled and
   active subscriptions per product and country. Data arrives 3-7 days late; earnings early in the following month.
