@@ -10,6 +10,9 @@ import {
   validateApp,
   findApp,
   cellDate,
+  playInstallsCollector,
+  type AppStoreWrite,
+  type Store,
 } from '../src/index.js';
 
 const stream = (...chunks: Uint8Array[]) =>
@@ -149,5 +152,45 @@ describe('app report recognition', () => {
     });
     expect(classifyPlayFile('stats/installs/installs_com.acme.app.pro_202610_country.csv', 'com.acme.app')).toBeNull();
     expect(classifyPlayFile('stats/installs/installs_com.acme.app_202610_device.csv', 'com.acme.app')).toBeNull();
+  });
+});
+
+describe('Google Play installs files', () => {
+  const read = async (rows: Array<Record<string, string>>) => {
+    let written: AppStoreWrite | null = null;
+    const store = {
+      async writeAppStoreDaily(_app: string, _store: string, w: AppStoreWrite) {
+        written = w;
+        return w.rows.length;
+      },
+    } as unknown as Store;
+    const c = playInstallsCollector();
+    for (const r of rows) c.add(r);
+    await c.write(store, 'app');
+    return written!.rows.map((r) => [r.territory, r.installs, r.deletions, r.activeDevices]);
+  };
+  const row = (country: string, device: string, events: string) => ({
+    date: '2026-10-05',
+    country,
+    'daily device installs': '3',
+    'daily device uninstalls': device,
+    'uninstall events': events,
+    'active device installs': '40',
+  });
+
+  it('reads device uninstalls, or uninstall events when the device column stays 0 in the whole file', async () => {
+    expect(await read([row('US', '0', '2'), row('IN', '0', '1')])).toEqual([
+      ['US', 3, 2, 40],
+      ['IN', 3, 1, 40],
+    ]);
+    // Device uninstalls reported somewhere in the file: that column is used for every row.
+    expect(await read([row('US', '1', '2'), row('IN', '0', '1')])).toEqual([
+      ['US', 3, 1, 40],
+      ['IN', 3, 0, 40],
+    ]);
+    // Files without the events column keep working.
+    expect(await read([{ date: '2026-10-05', country: 'US', 'daily device installs': '3', 'daily device uninstalls': '0' }])).toEqual([
+      ['US', 3, 0, 0],
+    ]);
   });
 });

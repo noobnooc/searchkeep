@@ -6,7 +6,7 @@ import type { SearchkeepConfig } from '../config.js';
 import { addDays, addMonths, toIsoDate } from '../dates.js';
 import type { SourceClients } from '../sources.js';
 import type { Store } from '../store.js';
-import { ASC_REPORTS, classifyPlayFile } from '../apps/reports.js';
+import { ASC_REPORTS, classifyPlayFile, playReadMark } from '../apps/reports.js';
 import type { AppConfig, IsoDate, SiteConfig, SourceId } from '../types.js';
 import {
   activeBackoff,
@@ -310,12 +310,14 @@ export async function syncProgress(ctx: ProgressContext): Promise<SyncProgressRe
     if (clients.play && app.playPackage && config.play.bucket) {
       const listing = parseJson<PlayListing>(get(syncKeys.playListing(app.id)));
       const files = (listing?.objects ?? []).filter((o) => classifyPlayFile(o.name, app.playPackage!));
-      const read = files.filter((o) => get(syncKeys.playObject(app.id, o.name)) === o.generation).length;
+      const isRead = (o: { name: string; generation: string }) =>
+        get(syncKeys.playObject(app.id, o.name)) === playReadMark(classifyPlayFile(o.name, app.playPackage!)!.kind, o.generation);
+      const read = files.filter(isRead).length;
       const lastMonth = addDays(`${today.slice(0, 7)}-01`, -1)
         .slice(0, 7)
         .replace('-', '');
       const recentFiles = files.filter((o) => classifyPlayFile(o.name, app.playPackage!)!.month >= lastMonth);
-      const recent = Boolean(listing) && recentFiles.every((o) => get(syncKeys.playObject(app.id, o.name)) === o.generation);
+      const recent = Boolean(listing) && recentFiles.every(isRead);
       const complete = Boolean(listing) && read === files.length;
       const months = files.map((o) => classifyPlayFile(o.name, app.playPackage!)!.month).sort();
       out.push(

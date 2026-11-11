@@ -355,20 +355,38 @@ export function playTrafficCollector(): ReportCollector {
   };
 }
 
-/** Installs by country: device installs, uninstalls and active devices. */
+/**
+ * Installs by country: device installs, uninstalls and active devices. Some files carry a "Daily
+ * Device Uninstalls" column that stays 0 while "Uninstall events" has the uninstalls; such a file
+ * then uses the uninstall events for every row.
+ */
 export function playInstallsCollector(): ReportCollector {
-  return new FunnelCollector(
-    'play',
-    'territory',
-    ['installs', 'deletions', 'activeDevices'],
-    (row, col) => {
-      const installs = cellNumber(col(row, 'daily device installs')) ?? cellNumber(col(row, 'install events')) ?? 0;
-      const deletions = cellNumber(col(row, 'daily device uninstalls')) ?? cellNumber(col(row, 'uninstall events')) ?? 0;
-      const active = cellNumber(col(row, 'active device installs')) ?? cellNumber(col(row, 'total user installs')) ?? 0;
-      return { installs, deletions, activeDevices: active };
+  const collector = (uninstalls: string[]) =>
+    new FunnelCollector(
+      'play',
+      'territory',
+      ['installs', 'deletions', 'activeDevices'],
+      (row, col) => ({
+        installs: cellNumber(col(row, 'daily device installs')) ?? cellNumber(col(row, 'install events')) ?? 0,
+        deletions: uninstalls.reduce<number | null>((v, name) => v ?? cellNumber(col(row, name)), null) ?? 0,
+        activeDevices: cellNumber(col(row, 'active device installs')) ?? cellNumber(col(row, 'total user installs')) ?? 0,
+      }),
+      (row, col) => ({ territory: normalizeTerritory(col(row, 'country', 'territory')), source: ALL_KEY }),
+    );
+  const device = collector(['daily device uninstalls', 'uninstall events']);
+  const events = collector(['uninstall events', 'daily device uninstalls']);
+  const col = columns();
+  let deviceTotal = 0;
+  let eventTotal = 0;
+  return {
+    add(row) {
+      device.add(row);
+      events.add(row);
+      deviceTotal += cellNumber(col(row, 'daily device uninstalls')) ?? 0;
+      eventTotal += cellNumber(col(row, 'uninstall events')) ?? 0;
     },
-    (row, col) => ({ territory: normalizeTerritory(col(row, 'country', 'territory')), source: ALL_KEY }),
-  );
+    write: (store, appId, before) => (deviceTotal === 0 && eventTotal > 0 ? events : device).write(store, appId, before),
+  };
 }
 
 /** Ratings by country (or overall, territory `*`): the average of the day's ratings and of all ratings. */
@@ -526,6 +544,18 @@ export const ASC_REPORTS: readonly AscReportSpec[] = [
 
 /** The Play Console report files the sync reads. */
 export type PlayFileKind = 'store_country' | 'store_traffic' | 'installs' | 'ratings' | 'ratings_overall' | 'reviews';
+
+/**
+ * Bumped when a kind of Play file is read differently, so files already read are read once more.
+ * 2: installs files fall back to uninstall events.
+ */
+export const PLAY_READER_VERSION: Partial<Record<PlayFileKind, number>> = { installs: 2 };
+
+/** What marks a Play file as read: its generation, plus the reader version of its kind. */
+export function playReadMark(kind: PlayFileKind, generation: string): string {
+  const version = PLAY_READER_VERSION[kind];
+  return version ? `${generation}#${version}` : generation;
+}
 
 export const PLAY_COLLECTORS: Record<PlayFileKind, () => ReportCollector> = {
   store_country: playCountryCollector,

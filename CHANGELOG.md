@@ -132,6 +132,11 @@ Because users sync `main` at any time, the `Unreleased` section is always accura
 
 ### Changed
 
+- An app's **Territories** table shows installs instead of conversion when Google Play is in view,
+  with the full country name on hover. Google groups the store listing visitors and acquisitions of
+  countries with few users into **Other (grouped)**; the card says so, and installs by country
+  (not grouped) are what is sorted for Google Play.
+
 - The opt-in App Store public feeds check the storefronts that matter to each app: the ones set on
   the app, or else (new default, instead of only `us`) its own biggest App Store storefronts by
   downloads, filled up with the largest storefronts (US, China, Japan, UK, Germany), up to 5.
@@ -255,6 +260,10 @@ Because users sync `main` at any time, the `Unreleased` section is always accura
   reads `apps/cloudflare/.node-version` (`22`), which gives the latest Node.js 22.
 
 ### Fixed
+
+- Google Play uninstalls were 0 for apps whose installs files leave "Daily Device Uninstalls" at 0
+  and report them as "Uninstall events"; such a file now uses the uninstall events. Installs files
+  already read are read once more, so past months are corrected too.
 
 - On phones, short dashboard pages no longer show a large empty space under the top bar.
 - Monospace identifiers in **Settings** → **Sites** and **Apps** use the dashboard's mono font

@@ -28,7 +28,15 @@ import {
   type ReviewCursor,
 } from '../sync/state.js';
 import type { Budget, Unit } from '../sync/unit.js';
-import { ascReviewInput, ASC_REPORTS, classifyPlayFile, PLAY_COLLECTORS, playPrefixes, type AscReportSpec } from './reports.js';
+import {
+  ascReviewInput,
+  ASC_REPORTS,
+  classifyPlayFile,
+  PLAY_COLLECTORS,
+  playReadMark,
+  playPrefixes,
+  type AscReportSpec,
+} from './reports.js';
 import { appStorefronts } from './storefronts.js';
 
 export interface AppSyncContext {
@@ -366,8 +374,10 @@ function planPlay(args: AppPlanArgs, app: AppConfig, place: Place): void {
       const info = classifyPlayFile(obj.name, pkg);
       if (!info) continue;
       const key = syncKeys.playObject(app.id, obj.name);
+      // A file read by an older reader of its kind is read again.
+      const mark = playReadMark(info.kind, obj.generation);
       // Planned from today's listing: skip files already read (the meta read at plan time may be stale for new listings).
-      if (!fresh && get(key) === obj.generation) continue;
+      if (!fresh && get(key) === mark) continue;
       const recent = recentMonths.has(info.month);
       to({
         task: `play.${info.kind}${recent ? '' : '_history'}`,
@@ -376,16 +386,16 @@ function planPlay(args: AppPlanArgs, app: AppConfig, place: Place): void {
         backfill: !recent,
         ...(recent ? {} : { date: monthEnd(info.month) }),
         calls: 1,
-        key: `play.${info.kind}:${app.id}:${obj.name}:${obj.generation}`,
+        key: `play.${info.kind}:${app.id}:${obj.name}:${mark}`,
         run: async () => {
-          if (fresh && (await store.getMeta(key)) === obj.generation) return null;
+          if (fresh && (await store.getMeta(key)) === mark) return null;
           const collector = PLAY_COLLECTORS[info.kind]();
           await play.readCsv(bucket, obj.name, (row) => collector.add(row));
           const res = await collector.write(store, app.id);
-          await store.setMeta(key, obj.generation);
+          await store.setMeta(key, mark);
           return res.written;
         },
-        skip: () => store.setMeta(key, obj.generation),
+        skip: () => store.setMeta(key, mark),
       });
     }
   };

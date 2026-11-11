@@ -111,7 +111,7 @@ function totalOf(rows: AppStoreRow[]): AppStoreMetrics {
 const STORE_NOTES: Record<AppStore, string> = {
   apple:
     'App Store: impressions are list views (search results, charts, Today/Apps tabs), page views are product page views, downloads are first-time downloads (including those straight from search results, so page conversion can exceed 100% for search), installs and deletions count only people who share analytics with developers. Unique counts are summed across devices, so they are approximate.',
-  play: 'Google Play: page views are store listing visitors (unique users), downloads are store listing acquisitions; Google Play reports no impressions. Data arrives 3-7 days late.',
+  play: 'Google Play: page views are store listing visitors (unique users), downloads are store listing acquisitions; Google Play reports no impressions. Google groups the visitors and acquisitions of countries and traffic sources with few users into "OTHER" / "other" (for a small app, all of them, and then it has no search terms); installs, uninstalls and active devices by country come from the installs report, which is not grouped. Data arrives 3-7 days late.',
 };
 
 export interface AppPerformanceParams extends AppParams {
