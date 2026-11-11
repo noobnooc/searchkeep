@@ -48,7 +48,10 @@
     (['apple', 'play'] as const)
       .map((s) => ({
         store: s,
-        rows: (bySource.data?.rows ?? []).filter((r) => r.store === s && (r.downloads > 0 || views(r) > 0)).sort((a, b) => b.downloads - a.downloads),
+        // A source can bring revenue without new downloads in the period (purchases by earlier users).
+        rows: (bySource.data?.rows ?? [])
+          .filter((r) => r.store === s && (r.downloads > 0 || views(r) > 0 || r.proceedsCents !== 0 || r.purchases !== 0))
+          .sort((a, b) => b.downloads - a.downloads || b.proceedsCents - a.proceedsCents),
       }))
       .filter((g) => g.rows.length > 0),
   );
