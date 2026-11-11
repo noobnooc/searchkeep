@@ -1,4 +1,5 @@
 import type {
+  AppBreakdownDimension,
   AppBreakdownQuery,
   AppBreakdownRow,
   AppBreakdownWrite,
@@ -182,6 +183,13 @@ export interface Store {
    * values the write does not mention get those metrics cleared.
    */
   writeAppBreakdowns(appId: string, store: AppStore, w: AppBreakdownWrite): Promise<number>;
+  /** The values kept by installs (installs or active devices set) per day of a dimension, `Other` left out. */
+  appBreakdownValues(
+    appId: string,
+    store: AppStore,
+    dimension: AppBreakdownDimension,
+    dates: IsoDate[],
+  ): Promise<Array<{ date: IsoDate; value: string }>>;
   /**
    * Per value of a dimension over the range: counts summed, active devices and the total rating on
    * the last day with data, the daily rating averaged over days.

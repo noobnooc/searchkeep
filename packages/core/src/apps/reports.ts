@@ -266,6 +266,11 @@ class BreakdownCollector implements ReportCollector {
     private readonly metrics: AppBreakdownMetric[],
     private readonly valueColumns: string[],
     private readonly read: (row: DelimitedRow, col: ReturnType<typeof columns>) => Partial<AppBreakdownMetrics> | null,
+    /**
+     * Keep the values the installs file kept for a day (Google Play ratings and crashes), so each
+     * named value and `Other` describe the same devices; a day without installs keeps its own top.
+     */
+    private readonly followInstalls = false,
   ) {}
 
   add(row: DelimitedRow): void {
@@ -294,10 +299,16 @@ class BreakdownCollector implements ReportCollector {
     for (const r of keep(this.rows.values(), before)) byDay.set(r.date, [...(byDay.get(r.date) ?? []), r]);
     const rows: AppBreakdownInput[] = [];
     const weight = (r: AppBreakdownInput) => COUNTED.reduce((t, m) => t + ((r[m] as number | undefined) ?? 0), 0);
+    const kept = new Map<IsoDate, Set<string>>();
+    if (this.followInstalls)
+      for (const x of await store.appBreakdownValues(appId, this.store, this.dimension, dates))
+        kept.set(x.date, (kept.get(x.date) ?? new Set()).add(x.value));
     for (const [date, list] of byDay) {
       list.sort((a, b) => weight(b) - weight(a) || a.value.localeCompare(b.value));
-      rows.push(...list.slice(0, BREAKDOWN_VALUES_PER_DAY));
-      const rest = list.slice(BREAKDOWN_VALUES_PER_DAY);
+      const set = kept.get(date);
+      const keep = set ? list.filter((r) => set.has(r.value)) : list.slice(0, BREAKDOWN_VALUES_PER_DAY);
+      rows.push(...keep);
+      const rest = set ? list.filter((r) => !set.has(r.value)) : list.slice(BREAKDOWN_VALUES_PER_DAY);
       if (rest.length) {
         const other: AppBreakdownInput = { date, value: 'Other' };
         for (const r of rest)
@@ -389,18 +400,32 @@ export function playRatingsBreakdownCollector(dimension: AppBreakdownDimension):
     const n = cellNumber(v);
     return n !== null && n > 0 && n <= 5 ? n : null;
   };
-  return new BreakdownCollector('play', dimension, ['dailyRating', 'totalRating'], PLAY_DIMENSION_COLUMNS[dimension], (row, col) => ({
-    dailyRating: rating(col(row, 'daily average rating')),
-    totalRating: rating(col(row, 'total average rating')),
-  }));
+  return new BreakdownCollector(
+    'play',
+    dimension,
+    ['dailyRating', 'totalRating'],
+    PLAY_DIMENSION_COLUMNS[dimension],
+    (row, col) => ({
+      dailyRating: rating(col(row, 'daily average rating')),
+      totalRating: rating(col(row, 'total average rating')),
+    }),
+    true,
+  );
 }
 
 /** Google Play crashes and ANRs per app version, device or OS version. */
 export function playCrashesBreakdownCollector(dimension: AppBreakdownDimension): ReportCollector {
-  return new BreakdownCollector('play', dimension, ['crashes', 'anrs'], PLAY_DIMENSION_COLUMNS[dimension], (row, col) => ({
-    crashes: num(col(row, 'daily crashes')),
-    anrs: num(col(row, 'daily anrs')),
-  }));
+  return new BreakdownCollector(
+    'play',
+    dimension,
+    ['crashes', 'anrs'],
+    PLAY_DIMENSION_COLUMNS[dimension],
+    (row, col) => ({
+      crashes: num(col(row, 'daily crashes')),
+      anrs: num(col(row, 'daily anrs')),
+    }),
+    true,
+  );
 }
 
 /** Referring websites and apps from the Detailed reports (`Source Info`). */

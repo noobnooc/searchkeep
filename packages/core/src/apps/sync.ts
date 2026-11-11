@@ -435,8 +435,10 @@ function planPlay(args: AppPlanArgs, app: AppConfig, place: Place): void {
           for (const o of list) if (classifyPlayFile(o.name, pkg)) objects.push({ name: o.name, generation: o.generation });
         }
         if (kind === 'finance') finance ??= 'ok';
-        // Newest months first, so the latest data lands before history.
-        objects.sort((a, b) => b.name.localeCompare(a.name));
+        // Installs files first (they choose the values a breakdown keeps per day, which the ratings
+        // and crashes files then follow); within a kind, newest months first.
+        const rank = (name: string) => (name.startsWith('stats/installs/') ? 0 : 1);
+        objects.sort((a, b) => rank(a.name) - rank(b.name) || b.name.localeCompare(a.name));
         await store.setMeta(key, JSON.stringify({ day: today, objects, ...(finance ? { finance } : {}) } satisfies PlayListing));
         if (kind === 'reports' && objects.length === 0) ctx.log?.(`play ${app.id}: no report files for ${pkg} in the bucket yet`);
         planObjects(objects, enqueue, true);

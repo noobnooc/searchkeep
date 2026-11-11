@@ -487,12 +487,13 @@ export async function appBreakdown(ctx: OpsContext, p: AppBreakdownParams) {
   const dimension = p.dimension ?? 'app_version';
   if (!APP_BREAKDOWN_DIMENSIONS.includes(dimension))
     throw new SearchkeepError('bad_request', `dimension must be one of ${APP_BREAKDOWN_DIMENSIONS.join(', ')}.`);
+  // Every value, so App Store crash counts merge into their versions before the limit applies.
   const rows = await ctx.store.queryAppBreakdowns({
     appId: r.app.id,
     ...(r.store ? { store: r.store } : {}),
     dimension,
     range: r.range,
-    limit: r.limit,
+    limit: 500,
   });
   // App Store crash counts per app version come from the App Crashes report (app_stability).
   if (dimension === 'app_version' && r.store !== 'play' && r.app.appleId) {
@@ -519,11 +520,13 @@ export async function appBreakdown(ctx: OpsContext, p: AppBreakdownParams) {
         });
     }
   }
+  const weight = (x: (typeof rows)[number]) => x.installs + x.sessions + x.crashes;
+  rows.sort((a, b) => weight(b) - weight(a) || b.activeDevices - a.activeDevices || a.value.localeCompare(b.value));
   return {
     app: r.app.id,
     range: r.range,
     dimension,
-    rows: rows.map((x) => ({
+    rows: rows.slice(0, r.limit).map((x) => ({
       ...x,
       averageSessionSeconds: x.sessions > 0 ? round(x.sessionSeconds / x.sessions, 1) : null,
       crashesPerSession: x.sessions > 0 && x.crashes > 0 ? round(x.crashes / x.sessions, 4) : null,

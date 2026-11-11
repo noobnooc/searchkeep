@@ -19,6 +19,7 @@ import {
   downloadReferrersCollector,
   engagementCollector,
   playEarningsCollector,
+  playCrashesBreakdownCollector,
   playInstallsBreakdownCollector,
 } from '../apps/reports.js';
 import { loadConfig, withStoredApps, type SearchkeepConfig } from '../config.js';
@@ -1119,15 +1120,55 @@ export function appContract(name: string, makeStore: () => Promise<Store>): void
         expect(rows.some((r) => r.value === 'phone-50')).toBe(false);
         // The five smallest (50 down to 46 installs) are one row.
         expect(rows.find((r) => r.value === 'Other')).toMatchObject({ installs: 50 + 49 + 48 + 47 + 46, activeDevices: 5 });
-        // A day read again without some values clears them.
+        // The crashes file follows the values the installs file kept: a device outside them goes to Other.
+        const crashes = playCrashesBreakdownCollector('device');
+        crashes.add({ date: '2026-10-10', device: 'phone-00', 'daily crashes': '5', 'daily anrs': '0' });
+        crashes.add({ date: '2026-10-10', device: 'phone-54', 'daily crashes': '7', 'daily anrs': '1' });
+        await crashes.write(store, APP.id);
+        const after = await store.queryAppBreakdowns({
+          appId: APP.id,
+          dimension: 'device',
+          range: { start: '2026-10-10', end: '2026-10-10' },
+          limit: 500,
+        });
+        expect(after).toHaveLength(BREAKDOWN_VALUES_PER_DAY + 1);
+        expect(after.find((r) => r.value === 'phone-00')).toMatchObject({ installs: 100, crashes: 5 });
+        expect(after.find((r) => r.value === 'Other')).toMatchObject({ crashes: 7, anrs: 1 });
+        // Installs read again without some values clear their installs; the crashes stay until their file is read again.
         const again = playInstallsBreakdownCollector('device');
         again.add({ date: '2026-10-10', device: 'phone-00', 'daily device installs': '7' });
         await again.write(store, APP.id);
         expect(
           (await store.queryAppBreakdowns({ appId: APP.id, dimension: 'device', range: { start: '2026-10-10', end: '2026-10-10' } })).map(
-            (r) => [r.value, r.installs],
+            (r) => [r.value, r.installs, r.crashes],
           ),
-        ).toEqual([['phone-00', 7]]);
+        ).toEqual([
+          ['phone-00', 7, 5],
+          ['Other', 0, 7],
+        ]);
+      });
+
+      it('merges App Store crash counts into their versions before limiting the breakdown', async () => {
+        const cfg = config();
+        const day = '2026-10-10';
+        await store.writeAppBreakdowns(APP.id, 'apple', {
+          dimension: 'app_version',
+          metrics: ['sessions'],
+          dates: [day],
+          rows: [
+            { date: day, value: '3.0', sessions: 100 },
+            { date: day, value: '2.9', sessions: 10 },
+          ],
+        });
+        await store.writeAppVitals(APP.id, 'apple', { metrics: ['crashes'], rows: [{ date: day, version: '2.9', crashes: 4 }] });
+        const ctx = { store, config: cfg, clients: {}, now: () => NOW };
+        const top = await appBreakdown(ctx, { app: APP.id, store: 'apple', start: day, end: day, limit: 1 });
+        expect(top.rows.map((r) => [r.value, r.sessions, r.crashes])).toEqual([['3.0', 100, 0]]);
+        const both = await appBreakdown(ctx, { app: APP.id, store: 'apple', start: day, end: day, limit: 2 });
+        expect(both.rows.map((r) => [r.value, r.sessions, r.crashes, r.crashesPerSession])).toEqual([
+          ['3.0', 100, 0, null],
+          ['2.9', 10, 4, 0.4],
+        ]);
       });
 
       it('continues across runs when the call budget runs out', async () => {

@@ -70,6 +70,7 @@ import {
   type AppBreakdownQuery,
   type AppBreakdownRow,
   type AppBreakdownWrite,
+  type AppBreakdownDimension,
 } from '@searchkeep/core';
 import { desc, eq } from 'drizzle-orm';
 import { drizzle, type DrizzleD1Database } from 'drizzle-orm/d1';
@@ -1769,6 +1770,24 @@ export class D1Store implements Store {
         .run();
     }
     return changes;
+  }
+
+  async appBreakdownValues(
+    appId: string,
+    store: AppStore,
+    dimension: AppBreakdownDimension,
+    dates: IsoDate[],
+  ): Promise<Array<{ date: IsoDate; value: string }>> {
+    if (dates.length === 0) return [];
+    return this.all<{ date: string; value: string }>(
+      `SELECT date, value FROM app_breakdowns_daily
+       WHERE app_id = ?1 AND store = ?2 AND dimension = ?3 AND date IN (SELECT value FROM json_each(?4)) AND value != 'Other'
+         AND (installs IS NOT NULL OR active_devices IS NOT NULL)`,
+      appId,
+      appStore(store),
+      allow([dimension], APP_BREAKDOWN_DIMENSIONS, 'dimension')[0]!,
+      JSON.stringify([...new Set(dates)]),
+    );
   }
 
   async queryAppBreakdowns(q: AppBreakdownQuery): Promise<AppBreakdownRow[]> {
