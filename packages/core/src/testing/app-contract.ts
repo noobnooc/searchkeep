@@ -4,7 +4,7 @@
  */
 import { beforeEach, describe, expect, it } from 'vitest';
 import { appPerformance, appReviews, appSearchTerms, appStability, listApps, startAppStoreReports } from '../apps/analysis.js';
-import { downloadReferrersCollector, engagementCollector } from '../apps/reports.js';
+import { ASC_REPORTS, downloadReferrersCollector, engagementCollector } from '../apps/reports.js';
 import { loadConfig, withStoredApps, type SearchkeepConfig } from '../config.js';
 import { addDays, daysBetween } from '../dates.js';
 import type { DelimitedRow } from '../delimited.js';
@@ -45,6 +45,8 @@ function fakeAsc(opts: { listForbidden?: boolean; requests?: AscReportRequest[] 
     eng: ['2026-10-17', '2026-10-18', '2026-10-19'].map((d) => ({ id: `eng-${d}`, processingDate: d })),
     dl: [{ id: 'dl-2026-10-19', processingDate: '2026-10-19' }],
     crash: [{ id: 'crash-2026-10-19', processingDate: '2026-10-19' }],
+    pur: [{ id: 'pur-2026-10-19', processingDate: '2026-10-19' }],
+    ses: [{ id: 'ses-2026-10-19', processingDate: '2026-10-19' }],
     'snap-eng': [{ id: 'snap-eng-1', processingDate: '2026-10-19' }],
   };
   const rowsFor = (instanceId: string): DelimitedRow[] => {
@@ -76,6 +78,37 @@ function fakeAsc(opts: { listForbidden?: boolean; requests?: AscReportRequest[] 
         { date: '2026-10-18', 'download type': 'Redownload', 'source type': 'App Store search', territory: 'US', counts: '1' },
         { date: '2026-10-18', 'download type': 'Manual update', 'source type': 'App Store search', territory: 'US', counts: '9' },
       ];
+    }
+    if (kind === 'pur') {
+      const pur = (source: string, territory: string, purchases: number, proceeds: string, sales: string, payingUsers: number) => ({
+        date: '2026-10-18',
+        'purchase type': 'In-app purchases',
+        'content name': 'Pro',
+        'source type': source,
+        territory,
+        purchases: String(purchases),
+        'proceeds in usd': proceeds,
+        'sales in usd': sales,
+        'paying users': String(payingUsers),
+      });
+      // Three purchases and one refund from search, one purchase from a website.
+      return [
+        pur('App Store search', 'US', 3, '20.97', '29.97', 2),
+        pur('App Store search', 'US', -1, '-6.99', '-9.99', 0),
+        pur('Web referrer', 'GB', 1, '4.99', '6.99', 1),
+      ];
+    }
+    if (kind === 'ses') {
+      const ses = (source: string, sessions: number, seconds: number, devices: number) => ({
+        date: '2026-10-18',
+        'app version': '2.1',
+        'source type': source,
+        territory: 'US',
+        sessions: String(sessions),
+        'total session duration': String(seconds),
+        'unique devices': String(devices),
+      });
+      return [ses('App Store search', 40, 3600, 8), ses('App Store browse', 10, 600, 2)];
     }
     return [
       { date: '2026-10-18', 'app version': '2.0', crashes: '3', 'unique devices': '2' },
@@ -139,6 +172,9 @@ function fakeAsc(opts: { listForbidden?: boolean; requests?: AscReportRequest[] 
             { id: 'dl', name: 'App Downloads Standard', category: 'APP_STORE_COMMERCE' },
             { id: 'crash', name: 'App Crashes', category: 'APP_USAGE' },
             { id: 'other', name: 'App Crashes Expanded', category: 'PERFORMANCE' },
+            { id: 'pur', name: 'App Store Purchases Standard', category: 'APP_STORE_COMMERCE' },
+            { id: 'pre', name: 'App Store Pre-orders Standard', category: 'APP_STORE_COMMERCE' },
+            { id: 'ses', name: 'App Sessions Standard', category: 'APP_USAGE' },
           ];
     },
     async listInstances(reportId) {
@@ -527,13 +563,14 @@ export function appContract(name: string, makeStore: () => Promise<Store>): void
         const today = '2026-10-20';
         await store.setMeta(syncKeys.ascRequests(APP.id), JSON.stringify({ ongoing: 'ongoing', snapshot: 'snap', checkedOn: today }));
         await store.setMeta(syncKeys.ascReviews(APP.id), JSON.stringify({ historyDone: true, checkedOn: today }));
+        const looked = ASC_REPORTS.map((r) => r.key);
         await store.setMeta(
           syncKeys.ascReports(APP.id, 'ongoing'),
-          JSON.stringify({ requestId: 'ongoing', checkedOn: today, reports: {} }),
+          JSON.stringify({ requestId: 'ongoing', checkedOn: today, reports: {}, looked }),
         );
         await store.setMeta(
           syncKeys.ascReports(APP.id, 'snapshot'),
-          JSON.stringify({ requestId: 'snap', checkedOn: today, reports: { engagement: 'snap-eng' } }),
+          JSON.stringify({ requestId: 'snap', checkedOn: today, reports: { engagement: 'snap-eng' }, looked }),
         );
         await store.setMeta(
           syncKeys.ascPending(APP.id, 'snapshot', 'engagement'),
@@ -626,7 +663,27 @@ export function appContract(name: string, makeStore: () => Promise<Store>): void
           { app: APP.id, store: 'apple', start: '2026-10-18', end: '2026-10-18', groupBy: ['source'] },
         );
         expect(perf.stores[0]!.current).toMatchObject({ impressions: 10, pageViews: 8, downloads: 4, redownloads: 1 });
-        expect(perf.rows!.map((r) => r.source)).toEqual(['search', 'browse']);
+        // Revenue (net of the refund) and sessions, attributed to how people found the app.
+        expect(perf.stores[0]!.currency).toBe('USD');
+        expect(perf.stores[0]!.current).toMatchObject({
+          purchases: 3,
+          proceeds: 18.97,
+          sales: 26.97,
+          payingUsers: 3,
+          sessions: 50,
+          sessionSeconds: 4200,
+          sessionDevices: 10,
+          averageSessionSeconds: 84,
+          sessionsPerDevice: 5,
+          proceedsPerDownload: 4.7425,
+        });
+        expect(perf.rows!.map((r) => r.source)).toEqual(['search', 'browse', 'web_referrer']);
+        expect(perf.rows!.find((r) => r.source === 'search')).toMatchObject({ proceeds: 13.98, sessions: 40, proceedsPerDownload: 3.495 });
+        expect(perf.rows!.find((r) => r.source === 'web_referrer')).toMatchObject({
+          proceeds: 4.99,
+          downloads: 0,
+          proceedsPerDownload: null,
+        });
         // A free app is checked in the free charts only, overall and in its category.
         expect(perf.charts!.filter((c) => c.territory === 'US').map((c) => [c.chart, c.genre, c.rank, c.genreName])).toEqual([
           ['top-free', '', 2, undefined],
@@ -813,6 +870,43 @@ export function appContract(name: string, makeStore: () => Promise<Store>): void
         expect(again.calls.filter((c) => c.startsWith('read:'))).toEqual([]);
         const progress = await syncProgress({ store, config: cfg, clients: { play: play.client }, now: () => NOW });
         expect(progress.apps[0]!.datasets.find((d) => d.dataset === 'google_play')).toMatchObject({ complete: true });
+      });
+
+      it('looks for report kinds added since the last listing right away', async () => {
+        const cfg = config({ APP_STORE_PUBLIC_DATA: 'false' });
+        const today = '2026-10-20';
+        await store.setMeta(syncKeys.ascRequests(APP.id), JSON.stringify({ ongoing: 'ongoing', checkedOn: today }));
+        await store.setMeta(syncKeys.ascReviews(APP.id), JSON.stringify({ historyDone: true, checkedOn: today }));
+        // Listed two days ago by a version that knew fewer reports: normally good for a week.
+        await store.setMeta(
+          syncKeys.ascReports(APP.id, 'ongoing'),
+          JSON.stringify({
+            requestId: 'ongoing',
+            checkedOn: '2026-10-18',
+            reports: { engagement: 'eng', downloads: 'dl', crashes: 'crash' },
+          }),
+        );
+        const asc = fakeAsc();
+        await runSync({ store, config: cfg, clients: { asc: asc.client }, trigger: 'manual', now: NOW, pacing: {} });
+        expect(asc.calls).toContain('listReports:ongoing');
+        expect(asc.calls).toContain('listInstances:pur');
+        expect(asc.calls).toContain('listInstances:ses');
+        const saved = JSON.parse((await store.getMeta(syncKeys.ascReports(APP.id, 'ongoing')))!);
+        expect(saved.reports).toMatchObject({ purchases: 'pur', sessions: 'ses' });
+        expect(saved.reports).not.toHaveProperty('pre');
+        // Listed with every kind looked for: not listed again tomorrow.
+        const next = fakeAsc();
+        await store.setMeta(syncKeys.ascRequests(APP.id), JSON.stringify({ ongoing: 'ongoing', checkedOn: '2026-10-21' }));
+        await store.setMeta(syncKeys.ascReviews(APP.id), JSON.stringify({ historyDone: true, checkedOn: '2026-10-21' }));
+        await runSync({
+          store,
+          config: cfg,
+          clients: { asc: next.client },
+          trigger: 'manual',
+          now: new Date('2026-10-21T04:00:00Z'),
+          pacing: {},
+        });
+        expect(next.calls).not.toContain('listReports:ongoing');
       });
 
       it('continues across runs when the call budget runs out', async () => {

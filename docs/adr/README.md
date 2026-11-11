@@ -18,17 +18,18 @@ choice without knowing why it was made.
 
 ## Index
 
-| ADR                                                  | Title                                                | Status   |
-| ---------------------------------------------------- | ---------------------------------------------------- | -------- |
-| [0001](0001-single-worker-three-entrances.md)        | One Worker with three entrances                      | Accepted |
-| [0002](0002-no-durable-objects.md)                   | No Durable Objects in v0.1                           | Accepted |
-| [0003](0003-cloudflare-access-for-authentication.md) | Cloudflare Access does authentication                | Accepted |
-| [0004](0004-drizzle-and-store-interface.md)          | Drizzle behind a Store interface                     | Accepted |
-| [0005](0005-fork-and-workers-builds-deployment.md)   | Deploy by fork and Workers Builds, no Deploy button  | Accepted |
-| [0006](0006-discrete-mcp-tools-not-code-mode.md)     | Discrete, task-shaped MCP tools instead of Code Mode | Accepted |
-| [0007](0007-agent-operations-via-github.md)          | Agent operations only through GitHub issues and PRs  | Accepted |
-| [0008](0008-sites-managed-in-the-dashboard.md)       | Sites can be managed in the dashboard                | Accepted |
-| [0009](0009-apps-as-a-second-kind-of-property.md)    | Apps as a second kind of property                    | Accepted |
+| ADR                                                  | Title                                                 | Status   |
+| ---------------------------------------------------- | ----------------------------------------------------- | -------- |
+| [0001](0001-single-worker-three-entrances.md)        | One Worker with three entrances                       | Accepted |
+| [0002](0002-no-durable-objects.md)                   | No Durable Objects in v0.1                            | Accepted |
+| [0003](0003-cloudflare-access-for-authentication.md) | Cloudflare Access does authentication                 | Accepted |
+| [0004](0004-drizzle-and-store-interface.md)          | Drizzle behind a Store interface                      | Accepted |
+| [0005](0005-fork-and-workers-builds-deployment.md)   | Deploy by fork and Workers Builds, no Deploy button   | Accepted |
+| [0006](0006-discrete-mcp-tools-not-code-mode.md)     | Discrete, task-shaped MCP tools instead of Code Mode  | Accepted |
+| [0007](0007-agent-operations-via-github.md)          | Agent operations only through GitHub issues and PRs   | Accepted |
+| [0008](0008-sites-managed-in-the-dashboard.md)       | Sites can be managed in the dashboard                 | Accepted |
+| [0009](0009-apps-as-a-second-kind-of-property.md)    | Apps as a second kind of property                     | Accepted |
+| [0010](0010-app-revenue-and-engagement.md)           | App revenue and engagement, attributed to acquisition | Accepted |
 
 ## Template
 

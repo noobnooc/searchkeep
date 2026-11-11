@@ -26,6 +26,17 @@ Because users sync `main` at any time, the `Unreleased` section is always accura
 
 ### Added
 
+- App revenue and sessions, attributed to acquisition
+  ([ADR 0010](docs/adr/0010-app-revenue-and-engagement.md)). The App Store sync also reads the
+  **App Store Purchases** and **App Sessions** reports (Standard), which the existing report requests
+  already produce: purchases net of refunds, proceeds and sales in USD (Apple's estimates), paying
+  users, sessions, session length and devices, per day, storefront and source. `app_performance`
+  and an app's overview show them with proceeds per download, average session length and sessions
+  per device; the acquisition page adds proceeds per source and storefront. Nothing to set up; a
+  report kind added in a new version is looked for on the next sync. The charter now covers app
+  engagement and revenue that the stores attribute to acquisition, and never stores per-order or
+  per-person financial data.
+
 - Apps, kept apart from sites ([ADR 0009](docs/adr/0009-apps-as-a-second-kind-of-property.md)).
   Add your iOS and Android apps in the dashboard (**Settings** → **Apps**) or the new `APPS` secret,
   with the App Store Apple ID, the Google Play package name, or both, and optionally one of your

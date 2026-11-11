@@ -206,6 +206,37 @@ export function installsCollector(): ReportCollector {
   );
 }
 
+/** App Store Purchases (Standard): paid app and in-app purchases, net of refunds, in USD (Apple's estimate). */
+export function purchasesCollector(): ReportCollector {
+  return new FunnelCollector(
+    'apple',
+    'cross',
+    ['purchases', 'proceedsCents', 'salesCents', 'payingUsers'],
+    (row, col) => ({
+      purchases: num(col(row, 'purchases')),
+      proceedsCents: Math.round(num(col(row, 'proceeds in usd', 'proceeds')) * 100),
+      salesCents: Math.round(num(col(row, 'sales in usd', 'sales')) * 100),
+      payingUsers: num(col(row, 'paying users')),
+    }),
+    appleKeys,
+  );
+}
+
+/** App Sessions (Standard): sessions, their total length and the devices behind them. */
+export function sessionsCollector(): ReportCollector {
+  return new FunnelCollector(
+    'apple',
+    'cross',
+    ['sessions', 'sessionSeconds', 'sessionDevices'],
+    (row, col) => ({
+      sessions: num(col(row, 'sessions')),
+      sessionSeconds: num(col(row, 'total session duration')),
+      sessionDevices: num(col(row, 'unique devices')),
+    }),
+    appleKeys,
+  );
+}
+
 /** Referring websites and apps from the Detailed reports (`Source Info`). */
 class ReferrerCollector implements ReportCollector {
   private readonly rows = new Map<string, AppReferrerInput>();
@@ -527,6 +558,18 @@ export const ASC_REPORTS: readonly AscReportSpec[] = [
     label: 'App Crashes',
     match: (n) => /^app crashes$/i.test(n.trim()),
     collector: crashesCollector,
+  },
+  {
+    key: 'purchases',
+    label: 'App Store Purchases',
+    match: (n) => has(n, /\bpurchases\b/i, /standard/i) && !/pre-?order/i.test(n),
+    collector: purchasesCollector,
+  },
+  {
+    key: 'sessions',
+    label: 'App Sessions',
+    match: (n) => has(n, /\bsessions\b/i, /standard/i),
+    collector: sessionsCollector,
   },
   {
     key: 'engagement_referrers',

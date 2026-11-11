@@ -167,9 +167,12 @@ function planAppStore(args: AppPlanArgs, app: AppConfig, asc: AscClient, place: 
     // Apple creates a request's reports a day or two after it was made: an empty list is checked
     // again the next day, a full one weekly.
     const found = ids ? Object.keys(ids.reports).length : 0;
+    // A report kind added since the last listing (new Searchkeep version) is looked for right away.
+    const looked = new Set(ids?.looked ?? Object.keys(ids?.reports ?? {}));
     const fresh =
       ids &&
       ids.requestId === requestId &&
+      ASC_REPORTS.every((s) => looked.has(s.key)) &&
       (ids.checkedOn === today || (found > 0 && daysBetween(ids.checkedOn, today) < ASC_REPORT_IDS_DAYS));
     if (fresh) {
       for (const spec of ASC_REPORTS) if (ids.reports[spec.key]) planInstances(st, kind, spec, ids.reports[spec.key]!, to);
@@ -190,7 +193,7 @@ function planAppStore(args: AppPlanArgs, app: AppConfig, asc: AscClient, place: 
           const hit = reports.find((r) => spec.match(r.name));
           if (hit) map[spec.key] = hit.id;
         }
-        const saved: AscReportIds = { requestId, checkedOn: today, reports: map };
+        const saved: AscReportIds = { requestId, checkedOn: today, reports: map, looked: ASC_REPORTS.map((s) => s.key) };
         await store.setMeta(syncKeys.ascReports(app.id, kind), JSON.stringify(saved));
         for (const spec of ASC_REPORTS) if (map[spec.key]) planInstances(st, kind, spec, map[spec.key]!, enqueue);
         return 0;

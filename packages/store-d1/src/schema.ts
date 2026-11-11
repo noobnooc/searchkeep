@@ -335,6 +335,14 @@ export const appStoreDaily = sqliteTable(
     installs: integer('installs').notNull().default(0),
     deletions: integer('deletions').notNull().default(0),
     activeDevices: integer('active_devices').notNull().default(0),
+    // ADR 0010: revenue (cents of the store's currency) and sessions, attributed like the funnel.
+    purchases: integer('purchases').notNull().default(0),
+    proceedsCents: integer('proceeds_cents').notNull().default(0),
+    salesCents: integer('sales_cents').notNull().default(0),
+    payingUsers: integer('paying_users').notNull().default(0),
+    sessions: integer('sessions').notNull().default(0),
+    sessionSeconds: integer('session_seconds').notNull().default(0),
+    sessionDevices: integer('session_devices').notNull().default(0),
   },
   (t) => [primaryKey({ columns: [t.appId, t.store, t.date, t.territory, t.source] }), index('app_store_daily_date').on(t.appId, t.date)],
 );

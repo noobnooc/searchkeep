@@ -49,6 +49,34 @@ export function decimal(n: number | null | undefined, digits = 1): string {
   return n < 0 ? `${MINUS}${body}` : body;
 }
 
+/** 1234.5, 'USD' → "$1,234.50"; `short`: "$1.2k", "$817", "$4.99". Unknown currency codes fall back to "1,234.50 XYZ". */
+export function money(n: number | null | undefined, currency: string, short = false): string {
+  if (n === null || n === undefined || !Number.isFinite(n)) return DASH;
+  const a = Math.abs(n);
+  let body: string;
+  try {
+    const symbol = new Intl.NumberFormat('en-US', { style: 'currency', currency, currencyDisplay: 'narrowSymbol' })
+      .formatToParts(0)
+      .find((p) => p.type === 'currency')?.value;
+    const digits = short ? (a >= 1000 ? undefined : a >= 100 ? 0 : 2) : 2;
+    const amount =
+      digits === undefined ? compact(a) : a.toLocaleString('en-US', { minimumFractionDigits: digits, maximumFractionDigits: digits });
+    body = symbol && symbol !== currency ? `${symbol}${amount}` : `${amount} ${currency}`;
+  } catch {
+    body = `${a.toFixed(2)} ${currency}`;
+  }
+  return n < 0 ? `${MINUS}${body}` : body;
+}
+
+/** 84 → "1m 24s", 3700 → "1h 1m", 12 → "12s". */
+export function duration(seconds: number | null | undefined): string {
+  if (seconds === null || seconds === undefined || !Number.isFinite(seconds)) return DASH;
+  const s = Math.round(seconds);
+  if (s < 60) return `${s}s`;
+  if (s < 3600) return `${Math.floor(s / 60)}m ${s % 60}s`;
+  return `${Math.floor(s / 3600)}h ${Math.floor((s % 3600) / 60)}m`;
+}
+
 /** Ratio 0..1 → "2.4%" (two decimals below 1%). */
 export function percent(ratio: number | null | undefined, digits?: number): string {
   if (ratio === null || ratio === undefined || !Number.isFinite(ratio)) return DASH;

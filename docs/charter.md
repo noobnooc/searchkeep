@@ -8,8 +8,9 @@
 ## Mission
 
 Give every site and app owner a durable, private record of how their own sites perform in search
-and in AI answers, and how their own apps are found in the app stores, running entirely inside
-infrastructure they already own.
+and in AI answers, how their own apps are found in the app stores and what the people who find them
+do once they have the app (engagement and revenue), running entirely inside infrastructure they
+already own.
 
 ## Target users
 
@@ -30,6 +31,8 @@ Searchkeep is not built for agencies tracking competitors or for enterprise SEO 
   reviews) and Google Play Console (bulk reports and the Play Developer Reporting API). Apps are kept
   apart from sites, and linked to them only through the user's own data (for example the web
   referrers that send people from the user's site to the app's store page).
+- Sync the app engagement and revenue that the stores attribute to acquisition (store source, page
+  type, storefront), so acquisition can be judged by what it brings, not only by downloads.
 - Connect the GEO funnel per page: crawled by AI crawlers, cited in AI answers, clicked by visitors.
 - Provide task-shaped analysis (quick wins, cannibalization, CTR anomalies, content decay, period
   comparisons, brand vs. non-brand) through MCP tools and a dashboard that share the same functions.
@@ -45,6 +48,8 @@ Searchkeep is not built for agencies tracking competitors or for enterprise SEO 
   exception is an optional plugin, off by default, that reads Apple's official public App Store
   feeds (top charts and ratings) and keeps only the user's own app's chart position and rating,
   never other apps.
+- No per-order or per-person financial data is stored: financial reports are aggregated while they
+  are read.
 - No telemetry, analytics beacons, "phone home" checks or project-operated servers in the data path.
 - No hosted or multi-tenant version run by the project.
 - No writes to external systems unless the user explicitly enables them.

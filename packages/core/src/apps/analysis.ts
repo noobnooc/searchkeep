@@ -77,19 +77,37 @@ const storesOf = (app: AppConfig, store?: AppStore): AppStore[] =>
 
 const zero = (): AppStoreMetrics => Object.fromEntries(APP_STORE_METRICS.map((m) => [m, 0])) as AppStoreMetrics;
 
-/** Funnel metrics with the conversion rates derived from them. */
+/** Funnel metrics with the conversion rates, amounts and ratios derived from them. */
 export interface AppFunnel extends AppStoreMetrics {
   /** downloads ÷ unique page views (Google Play: acquisitions ÷ store listing visitors). */
   pageConversion: number | null;
   /** downloads ÷ unique impressions (App Store only). */
   impressionConversion: number | null;
+  /** Proceeds and sales in the store's currency (App Store: USD). */
+  proceeds: number;
+  sales: number;
+  /** proceeds ÷ downloads of the same rows: what a download is worth, roughly. */
+  proceedsPerDownload: number | null;
+  /** sessionSeconds ÷ sessions. */
+  averageSessionSeconds: number | null;
+  /** sessions ÷ devices with sessions. */
+  sessionsPerDevice: number | null;
 }
 
+/** Currency of each store's amounts. */
+export const STORE_CURRENCY: Record<AppStore, string | null> = { apple: 'USD', play: null };
+
 function funnel(m: AppStoreMetrics): AppFunnel {
+  const proceeds = m.proceedsCents / 100;
   return {
     ...m,
     pageConversion: m.pageViewsUnique > 0 ? round(m.downloads / m.pageViewsUnique, 4) : null,
     impressionConversion: m.impressionsUnique > 0 ? round(m.downloads / m.impressionsUnique, 4) : null,
+    proceeds: round(proceeds, 2),
+    sales: round(m.salesCents / 100, 2),
+    proceedsPerDownload: m.downloads > 0 && m.proceedsCents !== 0 ? round(proceeds / m.downloads, 4) : null,
+    averageSessionSeconds: m.sessions > 0 ? round(m.sessionSeconds / m.sessions, 1) : null,
+    sessionsPerDevice: m.sessionDevices > 0 ? round(m.sessions / m.sessionDevices, 2) : null,
   };
 }
 
@@ -110,7 +128,7 @@ function totalOf(rows: AppStoreRow[]): AppStoreMetrics {
 
 const STORE_NOTES: Record<AppStore, string> = {
   apple:
-    'App Store: impressions are list views (search results, charts, Today/Apps tabs), page views are product page views, downloads are first-time downloads (including those straight from search results, so page conversion can exceed 100% for search), installs and deletions count only people who share analytics with developers. Unique counts are summed across devices, so they are approximate.',
+    "App Store: impressions are list views (search results, charts, Today/Apps tabs), page views are product page views, downloads are first-time downloads (including those straight from search results, so page conversion can exceed 100% for search), installs and deletions count only people who share analytics with developers. Unique counts are summed across devices, so they are approximate. Proceeds and sales are Apple's estimates in USD of paid app and in-app purchases net of refunds (proceeds: after taxes and Apple's commission), attributed to the source and storefront where the buyer found the app; paying users are summed across rows, an upper bound. Sessions count only people who share analytics, and only where at least five people had sessions.",
   play: 'Google Play: page views are store listing visitors (unique users), downloads are store listing acquisitions; Google Play reports no impressions. Google groups the visitors and acquisitions of countries and traffic sources with few users into "OTHER" / "other" (for a small app, all of them, and then it has no search terms); installs, uninstalls and active devices by country come from the installs report, which is not grouped. Data arrives 3-7 days late.',
 };
 
@@ -153,6 +171,7 @@ export async function appPerformance(ctx: OpsContext, p: AppPerformanceParams) {
       ]);
       return {
         store,
+        currency: STORE_CURRENCY[store],
         current: funnel(totalOf(cur)),
         previous: funnel(totalOf(before)),
         series: cur.map((x) => ({ date: x.date!, ...funnel(x) })),

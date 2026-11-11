@@ -789,7 +789,11 @@ one of your sites (referrals from it are marked as your own).
 
 What arrives: App Store impressions, product page views, first-time downloads, redownloads,
 installs and deletions by territory and source (search, browse, websites, other apps), referring
-websites and apps, crash counts and customer reviews; Google Play store listing visitors and
+websites and apps, crash counts, customer reviews, and revenue (purchases, proceeds and sales in
+USD, paying users) and sessions attributed to the same sources and storefronts (App Store
+Purchases and App Sessions reports, from the same report requests; sessions count only people who
+share analytics, and only where at least five people had sessions); Google Play store listing
+visitors and
 acquisitions by country and by traffic source with **search terms**, installs, uninstalls and
 active devices, ratings, reviews, and crash and ANR rates. Google groups the store listing visitors
 and acquisitions of countries and traffic sources with few users into "Other" before it writes the

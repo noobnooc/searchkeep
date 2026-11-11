@@ -232,6 +232,8 @@ export interface AscReportIds {
   checkedOn: IsoDate;
   /** Report key → report id. */
   reports: Record<string, string>;
+  /** Report keys looked for; a key added since is looked for again right away. */
+  looked?: string[];
 }
 
 export interface ReviewCursor {
