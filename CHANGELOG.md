@@ -291,6 +291,13 @@ Because users sync `main` at any time, the `Unreleased` section is always accura
 
 ### Fixed
 
+- Google Play stopped syncing when the service account could list the financial files but not read
+  them (no **View financial data**): the first earnings or subscriptions file answered 403 and failed
+  the whole Google Play sync. Such a file is now passed over with the other financial files until the
+  next day, the rest of Google Play syncs, and `probe.play_finance` tries reading a financial file
+  instead of only listing them, so it warns in this case too. A new version that finds more kinds of
+  Play files also lists the bucket again on its first sync, instead of the next day.
+
 - Google Play uninstalls were 0 for apps whose installs files leave "Daily Device Uninstalls" at 0
   and report them as "Uninstall events"; such a file now uses the uninstall events. Installs files
   already read are read once more, so past months are corrected too.

@@ -33,6 +33,8 @@ import {
   ASC_REPORTS,
   classifyPlayFile,
   PLAY_COLLECTORS,
+  PLAY_FINANCIAL_KINDS,
+  PLAY_LISTING_VERSION,
   playReadMark,
   playFinancialPrefixes,
   playPrefixes,
@@ -372,10 +374,26 @@ function planPlay(args: AppPlanArgs, app: AppConfig, place: Place): void {
       .replace('-', ''),
   ]);
 
+  const financeKey = syncKeys.playFinanceListing(app.id);
+  const financeDenied = async () => parseJson<PlayListing>(await store.getMeta(financeKey))?.finance === 'denied';
+  /**
+   * Without "View financial data" the financial files can still be listed, but reading one answers
+   * 403: today's financial listing is then emptied and marked denied, and the rest goes on.
+   */
+  const denyFinance = async (name: string) => {
+    const saved = parseJson<PlayListing>(await store.getMeta(financeKey));
+    await store.setMeta(
+      financeKey,
+      JSON.stringify({ day: saved?.day ?? today, v: PLAY_LISTING_VERSION, objects: [], finance: 'denied' } satisfies PlayListing),
+    );
+    ctx.log?.(`play ${app.id}: ${name.slice(0, 120)} answered 403; revenue and subscriptions need "View financial data"`);
+  };
+
   const planObjects = (objects: PlayListing['objects'], to: Place, fresh: boolean) => {
     for (const obj of objects) {
       const info = classifyPlayFile(obj.name, pkg);
       if (!info) continue;
+      const financial = PLAY_FINANCIAL_KINDS.includes(info.kind);
       const key = syncKeys.playObject(app.id, obj.name);
       // A file read by an older reader of its kind is read again.
       const mark = playReadMark(info.kind, obj.generation);
@@ -392,8 +410,16 @@ function planPlay(args: AppPlanArgs, app: AppConfig, place: Place): void {
         key: `play.${info.kind}:${app.id}:${obj.name}:${mark}`,
         run: async () => {
           if (fresh && (await store.getMeta(key)) === mark) return null;
+          // Another financial file was refused earlier today: this one is not tried until tomorrow.
+          if (financial && (await financeDenied())) return null;
           const collector = PLAY_COLLECTORS[info.kind](info, pkg, obj.name);
-          await play.readCsv(bucket, obj.name, (row) => collector.add(row));
+          try {
+            await play.readCsv(bucket, obj.name, (row) => collector.add(row));
+          } catch (err) {
+            if (!financial || !(err instanceof SourceError) || (err.status !== 403 && err.status !== 401)) throw err;
+            await denyFinance(obj.name);
+            return null;
+          }
           const res = await collector.write(store, app.id);
           await store.setMeta(key, mark);
           return res.written;
@@ -410,7 +436,8 @@ function planPlay(args: AppPlanArgs, app: AppConfig, place: Place): void {
   const planListing = (kind: 'reports' | 'finance') => {
     const key = kind === 'reports' ? syncKeys.playListing(app.id) : syncKeys.playFinanceListing(app.id);
     const saved = parseJson<PlayListing>(get(key));
-    if (saved && saved.day === today) return planObjects(saved.objects, place, false);
+    // Listed today by this version (an older one may not have known every kind of file yet).
+    if (saved && saved.day === today && saved.v === PLAY_LISTING_VERSION) return planObjects(saved.objects, place, false);
     const prefixes = kind === 'reports' ? playPrefixes(pkg) : playFinancialPrefixes(pkg);
     place({
       task: kind === 'reports' ? 'play.list' : 'play.finance_list',
@@ -439,12 +466,15 @@ function planPlay(args: AppPlanArgs, app: AppConfig, place: Place): void {
         // and crashes files then follow); within a kind, newest months first.
         const rank = (name: string) => (name.startsWith('stats/installs/') ? 0 : 1);
         objects.sort((a, b) => rank(a.name) - rank(b.name) || b.name.localeCompare(a.name));
-        await store.setMeta(key, JSON.stringify({ day: today, objects, ...(finance ? { finance } : {}) } satisfies PlayListing));
+        await store.setMeta(
+          key,
+          JSON.stringify({ day: today, v: PLAY_LISTING_VERSION, objects, ...(finance ? { finance } : {}) } satisfies PlayListing),
+        );
         if (kind === 'reports' && objects.length === 0) ctx.log?.(`play ${app.id}: no report files for ${pkg} in the bucket yet`);
         planObjects(objects, enqueue, true);
         return 0;
       },
-      skip: () => store.setMeta(key, JSON.stringify({ day: today, objects: [] } satisfies PlayListing)),
+      skip: () => store.setMeta(key, JSON.stringify({ day: today, v: PLAY_LISTING_VERSION, objects: [] } satisfies PlayListing)),
     });
   };
   planListing('reports');

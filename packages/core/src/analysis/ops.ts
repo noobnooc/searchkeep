@@ -278,16 +278,21 @@ export async function setupStatus(ctx: OpsContext, p: { readiness: ReadinessRepo
         return 'ok';
       });
       // Revenue and subscriptions (ADR 0010) need "View financial data"; the rest works without it.
+      // Any account with access to the bucket can list the financial files: only reading one tells.
       await probe('probe.play_finance', 'Service account can read Google Play revenue and subscriptions', async () => {
+        const denied: [SetupCheck['status'], string] = [
+          'warn',
+          `Google Play revenue and subscriptions stay empty: in the Play Console → Users and permissions → ${config.play.clientEmail ?? 'the service account'}, turn on "View financial data, orders and cancellation survey responses" under Account permissions. Everything else syncs without it.`,
+        ];
+        const bucket = config.play.bucket!;
         try {
-          await play.listObjects(config.play.bucket!, 'earnings/earnings_');
-          return 'ok';
+          let files = await play.listObjects(bucket, 'earnings/earnings_');
+          if (files.length === 0) files = await play.listObjects(bucket, 'financial-stats/subscriptions/');
+          // No financial file yet (nothing sold so far): nothing to try.
+          if (files.length === 0) return 'ok';
+          return (await play.canRead(bucket, files[0]!.name)) ? 'ok' : denied;
         } catch (err) {
-          if (err instanceof SourceError && (err.status === 403 || err.status === 401))
-            return [
-              'warn',
-              `Google Play revenue and subscriptions stay empty: in the Play Console → Users and permissions → ${config.play.clientEmail ?? 'the service account'}, turn on "View financial data, orders and cancellation survey responses" under Account permissions. Everything else syncs without it.`,
-            ];
+          if (err instanceof SourceError && (err.status === 403 || err.status === 401)) return denied;
           throw err;
         }
       });

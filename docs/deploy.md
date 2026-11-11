@@ -1165,8 +1165,9 @@ an image (HTTP 200); a 404 means neither source had an icon.
   developer account's bucket (copy it again from **Download reports**).
 - Crash and ANR rates are missing: enable the Google Play Developer Reporting API (step 14a.5).
 - Revenue and subscriptions are missing and `probe.play_finance` warns: grant **View financial data,
-  orders and cancellation survey responses** to the service account (step 14a.4). Earnings of a month
-  arrive early in the next month.
+  orders and cancellation survey responses** to the service account (step 14a.4). Without it the
+  financial files can still be listed but not read; the sync passes over them and tries again the
+  next day. Earnings of a month arrive early in the next month.
 
 ### Sync is slow or units are skipped
 

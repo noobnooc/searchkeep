@@ -249,7 +249,9 @@ export interface ReviewCursor {
 
 export interface PlayListing {
   day: IsoDate;
+  /** `PLAY_LISTING_VERSION` of the version that listed; a listing by an older one is made again. */
+  v?: number;
   objects: Array<{ name: string; generation: string }>;
-  /** Whether the financial files could be listed ("View financial data", ADR 0010). */
+  /** Whether the financial files could be listed and read ("View financial data", ADR 0010). */
   finance?: 'ok' | 'denied';
 }

@@ -21,7 +21,10 @@ import {
   playEarningsCollector,
   playCrashesBreakdownCollector,
   playInstallsBreakdownCollector,
+  PLAY_LISTING_VERSION,
 } from '../apps/reports.js';
+import { setupStatus } from '../analysis/ops.js';
+import { evaluateReadiness } from '../auth/readiness.js';
 import { loadConfig, withStoredApps, type SearchkeepConfig } from '../config.js';
 import { addDays, daysBetween } from '../dates.js';
 import type { DelimitedRow } from '../delimited.js';
@@ -221,7 +224,12 @@ function fakeAsc(opts: { listForbidden?: boolean; requests?: AscReportRequest[] 
   return { client, calls };
 }
 
-function fakePlay(opts: { financeDenied?: boolean } = {}) {
+/**
+ * `financeDenied`: listing the financial folders answers 403. `financeReadDenied`: they can be
+ * listed, but reading a financial file answers 403 (what an account without "View financial data" sees).
+ */
+function fakePlay(opts: { financeDenied?: boolean; financeReadDenied?: boolean } = {}) {
+  const financial = (name: string) => /^(financial-stats|earnings)\//.test(name);
   const calls: string[] = [];
   const pkg = APP.playPackage;
   const earning = (country: string, type: string, amount: string, product = pkg) => ({
@@ -359,7 +367,7 @@ function fakePlay(opts: { financeDenied?: boolean } = {}) {
   const client: PlayClient = {
     async listObjects(_bucket, prefix) {
       calls.push(`list:${prefix}`);
-      if (opts.financeDenied && /^(financial-stats|earnings)\//.test(prefix))
+      if (opts.financeDenied && financial(prefix))
         throw new SourceError('play', 403, 'HTTP 403: does not have storage.objects.list access');
       return Object.keys(files)
         .filter((n) => n.startsWith(prefix))
@@ -367,8 +375,13 @@ function fakePlay(opts: { financeDenied?: boolean } = {}) {
     },
     async readCsv(_bucket, name, onRow) {
       calls.push(`read:${name}`);
+      if (opts.financeReadDenied && financial(name)) throw new SourceError('play', 403, `could not read ${name} (HTTP 403)`);
       for (const r of files[name] ?? []) onRow(r);
       return files[name]?.length ?? 0;
+    },
+    async canRead(_bucket, name) {
+      calls.push(`canRead:${name}`);
+      return !((opts.financeReadDenied || opts.financeDenied) && financial(name));
     },
     async vitals(_pkg, metric, range) {
       calls.push(`vitals:${metric}:${range.start}..${range.end}`);
@@ -1050,6 +1063,69 @@ export function appContract(name: string, makeStore: () => Promise<Store>): void
         const perf = await appPerformance(ctx, { app: APP.id, store: 'play', start: '2026-10-01', end: '2026-10-19' });
         expect(perf.stores[0]).toMatchObject({ currency: null, current: { installs: 16, proceeds: 0 } });
         expect((await appSubscriptions(ctx, { app: APP.id, start: '2026-10-01', end: '2026-10-19' })).current.activeSubscriptions).toBe(0);
+      });
+
+      it('syncs the rest of Google Play when the financial files can be listed but not read', async () => {
+        const cfg = config({ APP_STORE_PUBLIC_DATA: 'false' });
+        const play = fakePlay({ financeReadDenied: true });
+        const run = await runSync({ store, config: cfg, clients: { play: play.client }, trigger: 'manual', now: NOW, pacing: {} });
+        expect(run.status).toBe('ok');
+        expect(play.calls).toContain(`read:stats/installs/installs_${APP.playPackage}_202610_country.csv`);
+        expect(play.calls).toContain(`read:stats/installs/installs_${APP.playPackage}_202610_app_version.csv`);
+        // The first financial file answers 403; the others are not tried.
+        const financialReads = (calls: string[]) =>
+          calls.filter((c) => c.startsWith('read:earnings/') || c.startsWith('read:financial-stats/'));
+        expect(financialReads(play.calls)).toHaveLength(1);
+        expect(JSON.parse((await store.getMeta(syncKeys.playFinanceListing(APP.id)))!)).toMatchObject({ finance: 'denied', objects: [] });
+        const progress = await syncProgress({ store, config: cfg, clients: { play: play.client }, now: () => NOW });
+        expect(progress.apps[0]!.datasets.find((d) => d.dataset === 'google_play')).toMatchObject({ complete: true });
+        // Not tried again the same day.
+        const later = fakePlay({ financeReadDenied: true });
+        await runSync({
+          store,
+          config: cfg,
+          clients: { play: later.client },
+          trigger: 'manual',
+          now: new Date('2026-10-20T05:00:00Z'),
+          pacing: {},
+        });
+        expect(financialReads(later.calls)).toHaveLength(0);
+        // setup_status says which permission to turn on; listing alone would have looked fine.
+        const readiness = evaluateReadiness({
+          configured: true,
+          identityOk: true,
+          inspection: { appFound: true, managedOAuthEnabled: true, broadPolicyReasons: [] },
+        });
+        const check = async (client: PlayClient) =>
+          (await setupStatus({ store, config: cfg, clients: { play: client } }, { readiness })).checks.find(
+            (c) => c.id === 'probe.play_finance',
+          );
+        expect(await check(later.client)).toMatchObject({ status: 'warn', detail: expect.stringContaining('View financial data') });
+        expect(later.calls).toContain('canRead:earnings/earnings_202610_1234567890-0.zip');
+        expect(await check(fakePlay({ financeDenied: true }).client)).toMatchObject({ status: 'warn' });
+        expect(await check(fakePlay().client)).toMatchObject({ status: 'ok' });
+      });
+
+      it('lists the Play files again when today’s listing was made by an older version', async () => {
+        const cfg = config({ APP_STORE_PUBLIC_DATA: 'false' });
+        // Listed earlier today by a version that did not look for files per app version yet.
+        await store.setMeta(syncKeys.playListing(APP.id), JSON.stringify({ day: '2026-10-20', objects: [] }));
+        const play = fakePlay();
+        await runSync({ store, config: cfg, clients: { play: play.client }, trigger: 'manual', now: NOW, pacing: {} });
+        expect(play.calls).toContain(`list:stats/crashes/crashes_${APP.playPackage}_`);
+        expect(play.calls).toContain(`read:stats/installs/installs_${APP.playPackage}_202610_app_version.csv`);
+        expect(JSON.parse((await store.getMeta(syncKeys.playListing(APP.id)))!)).toMatchObject({ v: PLAY_LISTING_VERSION });
+        // Listed by this version: not listed again the same day.
+        const later = fakePlay();
+        await runSync({
+          store,
+          config: cfg,
+          clients: { play: later.client },
+          trigger: 'manual',
+          now: new Date('2026-10-20T05:00:00Z'),
+          pacing: {},
+        });
+        expect(later.calls.filter((c) => c.startsWith('list:'))).toHaveLength(0);
       });
 
       it('keeps each earnings file apart, so a file read again changes only its own part of a day', async () => {

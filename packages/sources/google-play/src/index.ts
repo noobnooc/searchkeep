@@ -168,6 +168,22 @@ export function createPlayClient(opts: PlayClientOptions): PlayClient {
       return readDelimited(res.body, onRow);
     },
 
+    async canRead(bucket, name) {
+      const url = `${STORAGE}/b/${encodeURIComponent(bucket)}/o/${encodeURIComponent(name)}?alt=media`;
+      let res: Response;
+      try {
+        res = await f(url, { headers: { authorization: `Bearer ${await token()}`, range: 'bytes=0-0' } });
+      } catch (err) {
+        throw new SourceError('play', 0, `report download failed (${err instanceof Error ? err.name : 'network error'})`);
+      }
+      await res.body?.cancel().catch(() => undefined);
+      if (res.ok) return true;
+      if (res.status === 403 || res.status === 401) return false;
+      throw new SourceError('play', res.status, `could not read ${name.slice(0, 120)} (HTTP ${res.status})`, {
+        rateLimited: res.status === 429,
+      });
+    },
+
     vitals: queryVitals,
 
     async listApps() {

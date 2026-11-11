@@ -260,6 +260,8 @@ export interface PlayClient {
   listObjects(bucket: string, prefix: string): Promise<PlayObject[]>;
   /** Reads a report file (CSV, usually UTF-16) row by row; returns the number of rows. */
   readCsv(bucket: string, name: string, onRow: (row: DelimitedRow) => void): Promise<number>;
+  /** Whether the service account may read a file: fetches its first byte; false on 401 or 403. */
+  canRead(bucket: string, name: string): Promise<boolean>;
   /** Daily crash or ANR rates per version code from the Play Developer Reporting API. */
   vitals(packageName: string, metric: 'crash' | 'anr', range: DateRange): Promise<PlayVitalsRow[]>;
   /** Apps the service account can see (for suggestions in the dashboard). */
