@@ -109,6 +109,7 @@ const TASKS: Record<SyncDataset, string[]> = {
   app_store: ['asc.requests', 'asc.reports', 'asc.reviews', ...ASC_REPORTS.flatMap((r) => [`asc.${r.key}`, `asc.${r.key}_history`])],
   google_play: [
     'play.list',
+    'play.finance_list',
     'play.vitals',
     ...['store_country', 'store_traffic', 'installs', 'ratings', 'ratings_overall', 'reviews', 'subscriptions', 'earnings'].flatMap((k) => [
       `play.${k}`,
@@ -309,7 +310,8 @@ export async function syncProgress(ctx: ProgressContext): Promise<SyncProgressRe
     }
     if (clients.play && app.playPackage && config.play.bucket) {
       const listing = parseJson<PlayListing>(get(syncKeys.playListing(app.id)));
-      const files = (listing?.objects ?? []).filter((o) => classifyPlayFile(o.name, app.playPackage!));
+      const finance = parseJson<PlayListing>(get(syncKeys.playFinanceListing(app.id)));
+      const files = [...(listing?.objects ?? []), ...(finance?.objects ?? [])].filter((o) => classifyPlayFile(o.name, app.playPackage!));
       const isRead = (o: { name: string; generation: string }) =>
         get(syncKeys.playObject(app.id, o.name)) === playReadMark(classifyPlayFile(o.name, app.playPackage!)!.kind, o.generation);
       const read = files.filter(isRead).length;

@@ -12,7 +12,7 @@ import {
   listApps,
   startAppStoreReports,
 } from '../apps/analysis.js';
-import { ASC_REPORTS, downloadReferrersCollector, engagementCollector } from '../apps/reports.js';
+import { ASC_REPORTS, downloadReferrersCollector, engagementCollector, playEarningsCollector } from '../apps/reports.js';
 import { loadConfig, withStoredApps, type SearchkeepConfig } from '../config.js';
 import { addDays, daysBetween } from '../dates.js';
 import type { DelimitedRow } from '../delimited.js';
@@ -219,7 +219,7 @@ function fakePlay(opts: { financeDenied?: boolean } = {}) {
     description: 'GPA.0000-1111-2222-33333',
     'transaction date': 'Oct 10, 2026',
     'transaction type': type,
-    'product id': product,
+    'package id': product,
     'buyer country': country,
     'buyer postal code': '94110',
     'merchant currency': 'EUR',
@@ -319,6 +319,8 @@ function fakePlay(opts: { financeDenied?: boolean } = {}) {
       earning('DE', 'Google fee refund', '0.75'),
       earning('US', 'Charge', '100.00', 'com.other.app'),
     ],
+    // An adjustment file with one more charge on the same day: it adds to the month's file.
+    'earnings/earnings_202610_1234567890-1.zip': [earning('US', 'Charge', '4.99'), earning('US', 'Google fee', '-0.75')],
   };
   const client: PlayClient = {
     async listObjects(_bucket, prefix) {
@@ -762,10 +764,11 @@ export function appContract(name: string, makeStore: () => Promise<Store>): void
           installs: 16,
           deletions: 3,
           activeDevices: 127,
-          // Earnings of this app only: 9.99 charged, 1.50 fee and 1.60 tax kept; the refunded charge nets out.
-          purchases: 1,
-          sales: 9.99,
-          proceeds: 6.89,
+          // Earnings of this app only: 9.99 charged, 1.50 fee and 1.60 tax kept, the refunded charge nets
+          // out, and the adjustment file adds 4.99 charged and a 0.75 fee on the same day.
+          purchases: 2,
+          sales: 14.98,
+          proceeds: 11.13,
         });
         expect(playPerf.stores[0]!.currency).toBe('EUR');
         const subs = await appSubscriptions(ctx, { app: APP.id, start: '2026-10-01', end: '2026-10-19' });
@@ -806,7 +809,7 @@ export function appContract(name: string, makeStore: () => Promise<Store>): void
 
         // Files of other packages are never read; the August file is history.
         expect(play.calls.some((c) => c.includes('com.other.app'))).toBe(false);
-        expect(play.calls.filter((c) => c.startsWith('read:'))).toHaveLength(8);
+        expect(play.calls.filter((c) => c.startsWith('read:'))).toHaveLength(9);
 
         const progress = await syncProgress({ store, config: cfg, clients: clients(), now: () => NOW });
         expect(progress.summary).toMatchObject({ apps: 1, appsWithRecentData: 1, issues: 0 });
@@ -991,11 +994,58 @@ export function appContract(name: string, makeStore: () => Promise<Store>): void
         expect(run.status).toBe('ok');
         expect(play.calls).toContain(`read:stats/installs/installs_${APP.playPackage}_202610_country.csv`);
         expect(play.calls.some((c) => c.startsWith('read:earnings/') || c.startsWith('read:financial-stats/'))).toBe(false);
-        expect(JSON.parse((await store.getMeta(syncKeys.playListing(APP.id)))!)).toMatchObject({ finance: 'denied' });
+        expect(JSON.parse((await store.getMeta(syncKeys.playFinanceListing(APP.id)))!)).toMatchObject({ finance: 'denied', objects: [] });
         const ctx = { store, config: cfg, clients: {}, now: () => NOW };
         const perf = await appPerformance(ctx, { app: APP.id, store: 'play', start: '2026-10-01', end: '2026-10-19' });
         expect(perf.stores[0]).toMatchObject({ currency: null, current: { installs: 16, proceeds: 0 } });
         expect((await appSubscriptions(ctx, { app: APP.id, start: '2026-10-01', end: '2026-10-19' })).current.activeSubscriptions).toBe(0);
+      });
+
+      it('keeps each earnings file apart, so a file read again changes only its own part of a day', async () => {
+        const read = async (file: string, rows: DelimitedRow[]) => {
+          const c = playEarningsCollector(APP.playPackage, file);
+          for (const r of rows) c.add(r);
+          await c.write(store, APP.id);
+        };
+        const row = (country: string, amount: string): DelimitedRow => ({
+          'transaction date': 'Oct 10, 2026',
+          'transaction type': 'Charge',
+          'package id': APP.playPackage,
+          'buyer country': country,
+          'merchant currency': 'EUR',
+          'amount (merchant currency)': amount,
+        });
+        const byCountry = async () =>
+          (
+            await store.queryAppStore({
+              appId: APP.id,
+              store: 'play',
+              range: { start: '2026-10-10', end: '2026-10-10' },
+              dimensions: ['territory'],
+              orderBy: 'proceedsCents',
+            })
+          )
+            .filter((r) => r.proceedsCents !== 0)
+            .map((r) => [r.territory, r.proceedsCents]);
+        await read('earnings/earnings_202610.zip', [row('US', '9.99')]);
+        await read('earnings/earnings_202610_adjustments.zip', [row('US', '4.99')]);
+        expect(await byCountry()).toEqual([['US', 1498]]);
+        // The adjustment file changed: its US charge is gone and a German one came in.
+        await read('earnings/earnings_202610_adjustments.zip', [row('DE', '1.00')]);
+        expect(await byCountry()).toEqual([
+          ['US', 999],
+          ['DE', 100],
+        ]);
+      });
+
+      it('syncs Google Play within the smallest call budget', async () => {
+        const cfg = config({ APP_STORE_PUBLIC_DATA: 'false', SYNC_MAX_CALLS_PER_RUN: '5' });
+        const play = fakePlay();
+        for (let i = 0; i < 6; i++)
+          await runSync({ store, config: cfg, clients: { play: play.client }, trigger: 'manual', now: NOW, pacing: {} });
+        expect(play.calls).toContain('list:stats/store_performance/');
+        expect(play.calls).toContain('list:earnings/earnings_');
+        expect(play.calls).toContain(`read:stats/installs/installs_${APP.playPackage}_202610_country.csv`);
       });
 
       it('continues across runs when the call budget runs out', async () => {

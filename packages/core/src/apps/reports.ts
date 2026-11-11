@@ -8,6 +8,7 @@ import { isIsoDate } from '../dates.js';
 import type { Store } from '../store.js';
 import {
   ALL_KEY,
+  type AppEarningsInput,
   type AppReferrerInput,
   type AppReviewInput,
   type AppStore,
@@ -598,35 +599,49 @@ export const ASC_REPORTS: readonly AscReportSpec[] = [
 
 /**
  * Google Play earnings (ADR 0010), one row per charge, fee, tax or refund of the whole developer
- * account. Only the app's own rows are kept, summed per day and buyer country in the account's
- * payout currency: net proceeds (charges, fees, taxes and refunds), sales (charges and refunds of
- * charges) and purchases (charges minus refunded charges). Order ids, postcodes and every other
- * per-order field are never read into what is stored.
+ * account. Only the app's own rows (`Package ID`) are kept, summed per day and buyer country in the
+ * account's payout currency: net proceeds (charges, fees, taxes and refunds), sales (charges and
+ * refunds of charges) and purchases (charges minus refunded charges). Order ids, postcodes and every
+ * other per-order field are never read into what is stored. Each file's sums are kept apart, since
+ * a month's file and Google's adjustment files can cover the same days, and a day's totals are
+ * recomputed from all of them.
  */
-export function playEarningsCollector(pkg: string): ReportCollector {
+export function playEarningsCollector(pkg: string, file: string): ReportCollector {
+  const col = columns();
+  const sums = new Map<string, AppEarningsInput>();
   let currency: string | null = null;
-  const funnel = new FunnelCollector(
-    'play',
-    'territory',
-    ['purchases', 'proceedsCents', 'salesCents'],
-    (row, col) => {
-      if (col(row, 'product id').trim() !== pkg) return null;
+  return {
+    add(row) {
+      if (col(row, 'package id', 'product id').trim() !== pkg) return;
+      const date = cellDate(col(row, 'transaction date', 'date'));
+      if (!date) return;
+      const territory = normalizeTerritory(col(row, 'buyer country'));
       const cents = Math.round(num(col(row, 'amount (merchant currency)')) * 100);
       const type = lower(col(row, 'transaction type'));
       const code = col(row, 'merchant currency').trim().toUpperCase();
       if (/^[A-Z]{3}$/.test(code)) currency = code;
       const charge = type === 'charge' ? 1 : type === 'charge refund' ? -1 : 0;
-      return { proceedsCents: cents, salesCents: charge ? cents : 0, purchases: charge };
+      const key = `${date}|${territory}`;
+      const e = sums.get(key) ?? { date, territory, purchases: 0, proceedsCents: 0, salesCents: 0 };
+      e.proceedsCents += cents;
+      if (charge) {
+        e.salesCents += cents;
+        e.purchases += charge;
+      }
+      sums.set(key, e);
     },
-    (row, col) => ({ territory: normalizeTerritory(col(row, 'buyer country')), source: ALL_KEY }),
-    ['transaction date', 'date'],
-  );
-  return {
-    add: (row) => funnel.add(row),
-    async write(store, appId, before) {
-      const res = await funnel.write(store, appId, before);
+    async write(store, appId) {
+      const days = await store.writeAppEarningsFile(appId, file, [...sums.values()]);
       if (currency) await store.setMeta(playCurrencyKey(appId), currency);
-      return res;
+      if (days.length === 0) return { written: 0, oldest: null };
+      const totals = await store.sumAppEarnings(appId, days);
+      const written = await store.writeAppStoreDaily(appId, 'play', {
+        metrics: ['purchases', 'proceedsCents', 'salesCents'],
+        shape: 'territory',
+        dates: days,
+        rows: totals.map((t) => ({ ...t, source: ALL_KEY })),
+      });
+      return { written, oldest: days[0]! };
     },
   };
 }
@@ -695,7 +710,7 @@ export function playReadMark(kind: PlayFileKind, generation: string): string {
   return version ? `${generation}#${version}` : generation;
 }
 
-export const PLAY_COLLECTORS: Record<PlayFileKind, (file: PlayFile, pkg: string) => ReportCollector> = {
+export const PLAY_COLLECTORS: Record<PlayFileKind, (file: PlayFile, pkg: string, name: string) => ReportCollector> = {
   store_country: playCountryCollector,
   store_traffic: playTrafficCollector,
   installs: playInstallsCollector,
@@ -703,7 +718,7 @@ export const PLAY_COLLECTORS: Record<PlayFileKind, (file: PlayFile, pkg: string)
   ratings_overall: () => playRatingsCollector(true),
   reviews: playReviewsCollector,
   subscriptions: (file, pkg) => playSubscriptionsCollector(file.product ?? '', pkg),
-  earnings: (_file, pkg) => playEarningsCollector(pkg),
+  earnings: (_file, pkg, name) => playEarningsCollector(pkg, name),
 };
 
 /** Where to list the Play Console files of a package. */

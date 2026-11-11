@@ -1,4 +1,5 @@
 import type {
+  AppEarningsInput,
   AiCitationInput,
   AppChartRankInput,
   AppConfig,
@@ -166,6 +167,13 @@ export interface Store {
   writeAppReviews(appId: string, store: AppStore, rows: AppReviewInput[]): Promise<number>;
   writeAppVitals(appId: string, store: AppStore, w: AppVitalsWrite): Promise<number>;
   writeAppChartRanks(appId: string, rows: AppChartRankInput[]): Promise<number>;
+  /**
+   * Replaces one Google Play earnings file's sums (ADR 0010) and returns the days it covered before
+   * or covers now, whose totals then need recomputing.
+   */
+  writeAppEarningsFile(appId: string, file: string, rows: AppEarningsInput[]): Promise<IsoDate[]>;
+  /** Every earnings file's sums per day and buyer country, for those days. */
+  sumAppEarnings(appId: string, dates: IsoDate[]): Promise<AppEarningsInput[]>;
   /** Replaces a subscription product's rows on the days in `dates` (Google Play, ADR 0010). */
   writeAppSubscriptions(appId: string, product: string, dates: IsoDate[], rows: AppSubscriptionInput[]): Promise<number>;
 

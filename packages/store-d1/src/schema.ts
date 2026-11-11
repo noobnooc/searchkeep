@@ -458,3 +458,21 @@ export const appSubscriptionsDaily = sqliteTable(
   },
   (t) => [primaryKey({ columns: [t.appId, t.date, t.territory, t.product, t.basePlan] })],
 );
+
+/**
+ * Google Play earnings per file (ADR 0010): each earnings file's sums per day and buyer country, so a
+ * file read again (or an adjustment file) changes only its own part of a day's revenue.
+ */
+export const appEarnings = sqliteTable(
+  'app_earnings',
+  {
+    appId: text('app_id').notNull(),
+    file: text('file').notNull(),
+    date: text('date').notNull(),
+    territory: text('territory').notNull(),
+    purchases: integer('purchases').notNull().default(0),
+    proceedsCents: integer('proceeds_cents').notNull().default(0),
+    salesCents: integer('sales_cents').notNull().default(0),
+  },
+  (t) => [primaryKey({ columns: [t.appId, t.file, t.date, t.territory] }), index('app_earnings_date').on(t.appId, t.date)],
+);

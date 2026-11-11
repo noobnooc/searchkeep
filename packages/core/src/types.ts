@@ -709,6 +709,15 @@ export interface AppSubscriptionInput {
   activeSubscriptions: number;
 }
 
+/** Google Play earnings summed per day and buyer country (ADR 0010); amounts in cents of the payout currency. */
+export interface AppEarningsInput {
+  date: IsoDate;
+  territory: string;
+  purchases: number;
+  proceedsCents: number;
+  salesCents: number;
+}
+
 export type AppSubscriptionDimension = 'date' | 'product' | 'territory';
 
 export interface AppSubscriptionQuery {
