@@ -12,6 +12,7 @@ import {
   appPerformance,
   appReviews,
   appSearchTerms,
+  appBreakdown,
   appStability,
   appSubscriptions,
   listApps,
@@ -128,6 +129,7 @@ export const TOOL_NAMES = [
   'app_reviews',
   'app_stability',
   'app_subscriptions',
+  'app_breakdown',
 ] as const;
 
 /** Parameters shared by the app tools (ADR 0009). */
@@ -525,6 +527,22 @@ export function createSearchkeepMcpServer(deps: McpDeps): McpServer {
       annotations: READ_ONLY,
     },
     async (args) => run(() => appSubscriptions(ctx, clean(args))),
+  );
+
+  server.registerTool(
+    'app_breakdown',
+    {
+      title: 'App breakdown',
+      description:
+        "An app's numbers per app version, device model or OS version: Google Play installs, uninstalls, active devices, daily and total ratings, crashes and ANRs; App Store sessions and crash counts per app version. Use it to tie a release, a device or an OS version to its ratings and crashes.",
+      inputSchema: {
+        ...appCommon,
+        store: appStore,
+        dimension: z.enum(['app_version', 'device', 'os_version']).optional().describe('Default app_version.'),
+      },
+      annotations: READ_ONLY,
+    },
+    async (args) => run(() => appBreakdown(ctx, clean(args))),
   );
 
   return server;

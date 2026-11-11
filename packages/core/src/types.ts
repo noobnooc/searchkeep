@@ -709,6 +709,69 @@ export interface AppSubscriptionInput {
   activeSubscriptions: number;
 }
 
+/** What an app's numbers are broken down by (ADR 0010): app version, device model or OS version. */
+export type AppBreakdownDimension = 'app_version' | 'device' | 'os_version';
+export const APP_BREAKDOWN_DIMENSIONS: readonly AppBreakdownDimension[] = ['app_version', 'device', 'os_version'];
+
+/**
+ * Per day and value of a dimension: Google Play installs, uninstalls, active devices (a level),
+ * ratings (averages, not summable), crashes and ANRs; App Store sessions.
+ */
+export interface AppBreakdownMetrics {
+  installs: number;
+  deletions: number;
+  activeDevices: number;
+  crashes: number;
+  anrs: number;
+  dailyRating: number | null;
+  totalRating: number | null;
+  sessions: number;
+  sessionSeconds: number;
+  sessionDevices: number;
+}
+export type AppBreakdownMetric = keyof AppBreakdownMetrics;
+export const APP_BREAKDOWN_METRICS: readonly AppBreakdownMetric[] = [
+  'installs',
+  'deletions',
+  'activeDevices',
+  'crashes',
+  'anrs',
+  'dailyRating',
+  'totalRating',
+  'sessions',
+  'sessionSeconds',
+  'sessionDevices',
+];
+
+export interface AppBreakdownInput extends Partial<AppBreakdownMetrics> {
+  date: IsoDate;
+  /** The app version, device model or OS version as the store reports it; `Other` for the rest. */
+  value: string;
+}
+
+export interface AppBreakdownWrite {
+  dimension: AppBreakdownDimension;
+  /** Metrics set by this write; for the days in `dates`, values not mentioned get them cleared. */
+  metrics: AppBreakdownMetric[];
+  dates: IsoDate[];
+  rows: AppBreakdownInput[];
+}
+
+export interface AppBreakdownQuery {
+  appId: string;
+  store?: AppStore;
+  dimension: AppBreakdownDimension;
+  range: DateRange;
+  limit?: number;
+}
+
+export interface AppBreakdownRow extends AppBreakdownMetrics {
+  store: AppStore;
+  value: string;
+  /** Days with data for the value in the range. */
+  days: number;
+}
+
 /** Google Play earnings summed per day and buyer country (ADR 0010); amounts in cents of the payout currency. */
 export interface AppEarningsInput {
   date: IsoDate;

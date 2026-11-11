@@ -10,8 +10,10 @@ import type { AscClient, AscReportRequest } from '../sources.js';
 import { parseJson, syncKeys, type AscRequestState } from '../sync/state.js';
 import {
   ALL_KEY,
+  APP_BREAKDOWN_DIMENSIONS,
   APP_STORE_METRICS,
   APP_STORES,
+  type AppBreakdownDimension,
   type AppConfig,
   type AppDimension,
   type AppReferrerKind,
@@ -23,7 +25,7 @@ import {
 } from '../types.js';
 import { clampLimit, round } from '../analysis/common.js';
 import { APP_STORE_GENRES } from './genres.js';
-import { playCurrencyKey } from './reports.js';
+import { BREAKDOWN_VALUES_PER_DAY, playCurrencyKey } from './reports.js';
 import { appStorefronts, byStorefront } from './storefronts.js';
 import { appStoresOf, type OpsContext } from '../analysis/ops.js';
 
@@ -466,6 +468,68 @@ export async function appStability(ctx: OpsContext, p: AppStabilityParams) {
     rows: groupBy === 'version' ? rows.filter((x) => x.version !== '') : rows,
     notes: [
       'Google Play rates are shares of daily users (Play Developer Reporting API); Google flags apps above 1.09% user-perceived crash rate or 0.47% user-perceived ANR rate. App Store numbers are crash counts from people who share analytics with developers.',
+    ],
+  };
+}
+
+export interface AppBreakdownParams extends AppParams {
+  /** `app_version` (default), `device` or `os_version`. */
+  dimension?: AppBreakdownDimension;
+}
+
+/**
+ * An app's numbers per app version, device model or OS version (ADR 0010): Google Play installs,
+ * uninstalls, active devices, ratings, crashes and ANRs; App Store sessions, and crash counts per
+ * app version. Ties a release, a device or an OS version to its ratings and crashes.
+ */
+export async function appBreakdown(ctx: OpsContext, p: AppBreakdownParams) {
+  const r = await resolveApp(ctx, p, { days: 28, limit: 50 });
+  const dimension = p.dimension ?? 'app_version';
+  if (!APP_BREAKDOWN_DIMENSIONS.includes(dimension))
+    throw new SearchkeepError('bad_request', `dimension must be one of ${APP_BREAKDOWN_DIMENSIONS.join(', ')}.`);
+  const rows = await ctx.store.queryAppBreakdowns({
+    appId: r.app.id,
+    ...(r.store ? { store: r.store } : {}),
+    dimension,
+    range: r.range,
+    limit: r.limit,
+  });
+  // App Store crash counts per app version come from the App Crashes report (app_stability).
+  if (dimension === 'app_version' && r.store !== 'play' && r.app.appleId) {
+    const crashes = await ctx.store.queryAppVitals({ appId: r.app.id, store: 'apple', range: r.range, groupBy: 'version', limit: 500 });
+    for (const c of crashes) {
+      if (!c.version || !c.crashes) continue;
+      const row = rows.find((x) => x.store === 'apple' && x.value === c.version);
+      if (row) row.crashes += c.crashes;
+      else
+        rows.push({
+          store: 'apple',
+          value: c.version,
+          days: 0,
+          installs: 0,
+          deletions: 0,
+          activeDevices: 0,
+          crashes: c.crashes,
+          anrs: 0,
+          dailyRating: null,
+          totalRating: null,
+          sessions: 0,
+          sessionSeconds: 0,
+          sessionDevices: 0,
+        });
+    }
+  }
+  return {
+    app: r.app.id,
+    range: r.range,
+    dimension,
+    rows: rows.map((x) => ({
+      ...x,
+      averageSessionSeconds: x.sessions > 0 ? round(x.sessionSeconds / x.sessions, 1) : null,
+      crashesPerSession: x.sessions > 0 && x.crashes > 0 ? round(x.crashes / x.sessions, 4) : null,
+    })),
+    notes: [
+      `Per ${dimension.replace('_', ' ')}: Google Play installs, uninstalls, active devices (on the last day), ratings (the daily average averaged over days, and the last total average), crashes and ANRs from the Play Console's files; App Store sessions (people who share analytics, at least five per value) and crash counts. At most ${BREAKDOWN_VALUES_PER_DAY} values a day are kept; the rest are summed into "Other".`,
     ],
   };
 }

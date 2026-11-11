@@ -493,6 +493,61 @@ export async function seedAppDemo(store: Store, app: AppConfig, siteDomain = 'ac
       }),
     );
     n += await store.writeAppSubscriptions(app.id, 'pro_monthly', dates, subs);
+    // Per app version and device (ADR 0010): the newest version crashes more until a fix ships.
+    const versions: Array<[string, number, number, number]> = [
+      ['320', 0.55, 0.004, 4.6],
+      ['319', 0.3, 0.012, 4.1],
+      ['318', 0.15, 0.003, 4.4],
+    ];
+    const devices: Array<[string, number]> = [
+      ['Pixel 8', 0.3],
+      ['Galaxy S24', 0.25],
+      ['Redmi Note 13', 0.2],
+      ['Galaxy A54', 0.15],
+      ['OnePlus 12', 0.1],
+    ];
+    const breakdown = (list: Array<[string, number, ...number[]]>) =>
+      dates.flatMap((date) =>
+        list.map(([value, share, crashRate, rating]) => {
+          const installs = Math.round(180 * share * (0.6 + r()));
+          const active = Math.round(9000 * share);
+          return {
+            date,
+            value,
+            installs,
+            deletions: Math.round(installs * 0.2),
+            activeDevices: active,
+            crashes: Math.round(active * (crashRate ?? 0.005) * (0.5 + r())),
+            anrs: Math.round(active * 0.001 * r()),
+            dailyRating: Math.round(((rating ?? 4.3) - 0.3 + r() * 0.6) * 100) / 100,
+            totalRating: rating ?? 4.3,
+          };
+        }),
+      );
+    for (const [dimension, list] of [
+      ['app_version', versions],
+      ['device', devices],
+    ] as const)
+      n += await store.writeAppBreakdowns(app.id, 'play', {
+        dimension,
+        metrics: ['installs', 'deletions', 'activeDevices', 'crashes', 'anrs', 'dailyRating', 'totalRating'],
+        dates,
+        rows: breakdown(list as Array<[string, number, ...number[]]>),
+      });
+    n += await store.writeAppBreakdowns(app.id, 'apple', {
+      dimension: 'app_version',
+      metrics: ['sessions', 'sessionSeconds', 'sessionDevices'],
+      dates,
+      rows: dates.flatMap((date) =>
+        [
+          ['2.4', 0.6],
+          ['2.3', 0.4],
+        ].map(([value, share]) => {
+          const sessions = Math.round(2000 * Number(share) * (0.7 + r() * 0.6));
+          return { date, value: String(value), sessions, sessionSeconds: sessions * 95, sessionDevices: Math.round(sessions / 3) };
+        }),
+      ),
+    });
   }
   return n;
 }

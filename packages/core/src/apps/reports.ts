@@ -8,6 +8,10 @@ import { isIsoDate } from '../dates.js';
 import type { Store } from '../store.js';
 import {
   ALL_KEY,
+  type AppBreakdownDimension,
+  type AppBreakdownInput,
+  type AppBreakdownMetric,
+  type AppBreakdownMetrics,
   type AppEarningsInput,
   type AppReferrerInput,
   type AppReviewInput,
@@ -234,19 +238,169 @@ export function purchasesCollector(): ReportCollector {
   );
 }
 
-/** App Sessions (Standard): sessions, their total length and the devices behind them. */
+/** Values kept per day and dimension; the rest are summed into `Other` (ADR 0010). */
+export const BREAKDOWN_VALUES_PER_DAY = 50;
+const COUNTED: AppBreakdownMetric[] = [
+  'installs',
+  'deletions',
+  'activeDevices',
+  'crashes',
+  'anrs',
+  'sessions',
+  'sessionSeconds',
+  'sessionDevices',
+];
+
+/**
+ * An app's numbers per day and value of one dimension (app version, device or OS version). Counts
+ * add up per value; ratings are averages and are not carried into `Other`.
+ */
+class BreakdownCollector implements ReportCollector {
+  private readonly rows = new Map<string, AppBreakdownInput>();
+  private readonly days = new Set<IsoDate>();
+  private readonly col = columns();
+
+  constructor(
+    private readonly store: AppStore,
+    private readonly dimension: AppBreakdownDimension,
+    private readonly metrics: AppBreakdownMetric[],
+    private readonly valueColumns: string[],
+    private readonly read: (row: DelimitedRow, col: ReturnType<typeof columns>) => Partial<AppBreakdownMetrics> | null,
+  ) {}
+
+  add(row: DelimitedRow): void {
+    const date = cellDate(this.col(row, 'date'));
+    if (!date) return;
+    this.days.add(date);
+    const values = this.read(row, this.col);
+    if (!values) return;
+    const value =
+      this.col(row, ...this.valueColumns)
+        .trim()
+        .slice(0, 120) || '-';
+    const key = `${date}|${value}`;
+    const e = this.rows.get(key) ?? { date, value };
+    for (const [m, v] of Object.entries(values) as Array<[AppBreakdownMetric, number | null]>) {
+      if (v === null || v === undefined) continue;
+      e[m] = m === 'dailyRating' || m === 'totalRating' ? v : ((e[m] as number | undefined) ?? 0) + v;
+    }
+    this.rows.set(key, e);
+  }
+
+  async write(store: Store, appId: string, before?: IsoDate | null): Promise<WriteResult> {
+    const dates = coveredDays(this.days, before);
+    if (dates.length === 0) return { written: 0, oldest: null };
+    const byDay = new Map<IsoDate, AppBreakdownInput[]>();
+    for (const r of keep(this.rows.values(), before)) byDay.set(r.date, [...(byDay.get(r.date) ?? []), r]);
+    const rows: AppBreakdownInput[] = [];
+    const weight = (r: AppBreakdownInput) => COUNTED.reduce((t, m) => t + ((r[m] as number | undefined) ?? 0), 0);
+    for (const [date, list] of byDay) {
+      list.sort((a, b) => weight(b) - weight(a) || a.value.localeCompare(b.value));
+      rows.push(...list.slice(0, BREAKDOWN_VALUES_PER_DAY));
+      const rest = list.slice(BREAKDOWN_VALUES_PER_DAY);
+      if (rest.length) {
+        const other: AppBreakdownInput = { date, value: 'Other' };
+        for (const r of rest)
+          for (const m of COUNTED) if (r[m] !== undefined) other[m] = ((other[m] as number | undefined) ?? 0) + (r[m] as number);
+        rows.push(other);
+      }
+    }
+    const written = await store.writeAppBreakdowns(appId, this.store, { dimension: this.dimension, metrics: this.metrics, dates, rows });
+    return { written, oldest: dates[0]! };
+  }
+}
+
+/** Collectors that all read the same rows and write in turn. */
+function both(...collectors: ReportCollector[]): ReportCollector {
+  return {
+    add: (row) => collectors.forEach((c) => c.add(row)),
+    async write(store, appId, before) {
+      let written = 0;
+      let oldest: IsoDate | null = null;
+      for (const c of collectors) {
+        const res = await c.write(store, appId, before);
+        written += res.written;
+        if (res.oldest && (!oldest || res.oldest < oldest)) oldest = res.oldest;
+      }
+      return { written, oldest };
+    },
+  };
+}
+
+/**
+ * App Sessions (Standard): sessions, their total length and the devices behind them, per storefront
+ * and source, and per app version and device (ADR 0010).
+ */
 export function sessionsCollector(): ReportCollector {
-  return new FunnelCollector(
-    'apple',
-    'cross',
-    ['sessions', 'sessionSeconds', 'sessionDevices'],
-    (row, col) => ({
-      sessions: num(col(row, 'sessions')),
-      sessionSeconds: num(col(row, 'total session duration')),
-      sessionDevices: num(col(row, 'unique devices')),
-    }),
-    appleKeys,
+  const read = (row: DelimitedRow, col: ReturnType<typeof columns>) => ({
+    sessions: num(col(row, 'sessions')),
+    sessionSeconds: num(col(row, 'total session duration')),
+    sessionDevices: num(col(row, 'unique devices')),
+  });
+  const metrics: AppBreakdownMetric[] = ['sessions', 'sessionSeconds', 'sessionDevices'];
+  return both(
+    new FunnelCollector('apple', 'cross', ['sessions', 'sessionSeconds', 'sessionDevices'], read, appleKeys),
+    new BreakdownCollector('apple', 'app_version', metrics, ['app version'], read),
+    new BreakdownCollector('apple', 'device', metrics, ['device'], read),
   );
+}
+
+/** Columns that name a dimension's value in the Play Console's breakdown files. */
+const PLAY_DIMENSION_COLUMNS: Record<AppBreakdownDimension, string[]> = {
+  app_version: ['app version code', 'app version'],
+  device: ['device'],
+  os_version: ['android os version', 'os version'],
+};
+
+/** Google Play installs, uninstalls and active devices per app version, device or OS version. */
+export function playInstallsBreakdownCollector(dimension: AppBreakdownDimension): ReportCollector {
+  // Uninstalls as for the installs by country: uninstall events when the device column stays 0.
+  const make = (uninstalls: string[]) =>
+    new BreakdownCollector(
+      'play',
+      dimension,
+      ['installs', 'deletions', 'activeDevices'],
+      PLAY_DIMENSION_COLUMNS[dimension],
+      (row, col) => ({
+        installs: cellNumber(col(row, 'daily device installs')) ?? cellNumber(col(row, 'install events')) ?? 0,
+        deletions: uninstalls.reduce<number | null>((v, name) => v ?? cellNumber(col(row, name)), null) ?? 0,
+        activeDevices: cellNumber(col(row, 'active device installs')) ?? cellNumber(col(row, 'total user installs')) ?? 0,
+      }),
+    );
+  const device = make(['daily device uninstalls', 'uninstall events']);
+  const events = make(['uninstall events', 'daily device uninstalls']);
+  const col = columns();
+  let deviceTotal = 0;
+  let eventTotal = 0;
+  return {
+    add(row) {
+      device.add(row);
+      events.add(row);
+      deviceTotal += cellNumber(col(row, 'daily device uninstalls')) ?? 0;
+      eventTotal += cellNumber(col(row, 'uninstall events')) ?? 0;
+    },
+    write: (store, appId, before) => (deviceTotal === 0 && eventTotal > 0 ? events : device).write(store, appId, before),
+  };
+}
+
+/** Google Play daily and total average rating per app version, device or OS version. */
+export function playRatingsBreakdownCollector(dimension: AppBreakdownDimension): ReportCollector {
+  const rating = (v: string) => {
+    const n = cellNumber(v);
+    return n !== null && n > 0 && n <= 5 ? n : null;
+  };
+  return new BreakdownCollector('play', dimension, ['dailyRating', 'totalRating'], PLAY_DIMENSION_COLUMNS[dimension], (row, col) => ({
+    dailyRating: rating(col(row, 'daily average rating')),
+    totalRating: rating(col(row, 'total average rating')),
+  }));
+}
+
+/** Google Play crashes and ANRs per app version, device or OS version. */
+export function playCrashesBreakdownCollector(dimension: AppBreakdownDimension): ReportCollector {
+  return new BreakdownCollector('play', dimension, ['crashes', 'anrs'], PLAY_DIMENSION_COLUMNS[dimension], (row, col) => ({
+    crashes: num(col(row, 'daily crashes')),
+    anrs: num(col(row, 'daily anrs')),
+  }));
 }
 
 /** Referring websites and apps from the Detailed reports (`Source Info`). */
@@ -685,7 +839,17 @@ export function playSubscriptionsCollector(product: string, pkg: string): Report
 
 /** The Play Console report files the sync reads. */
 export type PlayFileKind =
-  'store_country' | 'store_traffic' | 'installs' | 'ratings' | 'ratings_overall' | 'reviews' | 'subscriptions' | 'earnings';
+  | 'store_country'
+  | 'store_traffic'
+  | 'installs'
+  | 'ratings'
+  | 'ratings_overall'
+  | 'reviews'
+  | 'subscriptions'
+  | 'earnings'
+  | 'installs_breakdown'
+  | 'ratings_breakdown'
+  | 'crashes_breakdown';
 
 /** Kinds read only with the Play Console's "View financial data" permission. */
 export const PLAY_FINANCIAL_KINDS: readonly PlayFileKind[] = ['subscriptions', 'earnings'];
@@ -696,6 +860,8 @@ export interface PlayFile {
   month: string;
   /** Subscription product id (subscriptions files). */
   product?: string;
+  /** What a breakdown file is broken down by. */
+  dimension?: AppBreakdownDimension;
 }
 
 /**
@@ -719,11 +885,20 @@ export const PLAY_COLLECTORS: Record<PlayFileKind, (file: PlayFile, pkg: string,
   reviews: playReviewsCollector,
   subscriptions: (file, pkg) => playSubscriptionsCollector(file.product ?? '', pkg),
   earnings: (_file, pkg, name) => playEarningsCollector(pkg, name),
+  installs_breakdown: (file) => playInstallsBreakdownCollector(file.dimension ?? 'app_version'),
+  ratings_breakdown: (file) => playRatingsBreakdownCollector(file.dimension ?? 'app_version'),
+  crashes_breakdown: (file) => playCrashesBreakdownCollector(file.dimension ?? 'app_version'),
 };
 
 /** Where to list the Play Console files of a package. */
 export function playPrefixes(pkg: string): string[] {
-  return ['stats/store_performance/', `stats/installs/installs_${pkg}_`, `stats/ratings/ratings_${pkg}_`, `reviews/reviews_${pkg}_`];
+  return [
+    'stats/store_performance/',
+    `stats/installs/installs_${pkg}_`,
+    `stats/ratings/ratings_${pkg}_`,
+    `stats/crashes/crashes_${pkg}_`,
+    `reviews/reviews_${pkg}_`,
+  ];
 }
 
 /** Where to list the financial files (subscriptions of a package; earnings of the whole account). */
@@ -737,10 +912,16 @@ export function classifyPlayFile(name: string, pkg: string): PlayFile | null {
   const escaped = pkg.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   let m = new RegExp(`^(?:[a-z]+_)?store_performance_${escaped}_(\\d{6})_(country|traffic_source)\\.csv$`).exec(base);
   if (m) return { kind: m[2] === 'country' ? 'store_country' : 'store_traffic', month: m[1]! };
-  m = new RegExp(`^installs_${escaped}_(\\d{6})_country\\.csv$`).exec(base);
-  if (m) return { kind: 'installs', month: m[1]! };
-  m = new RegExp(`^ratings_${escaped}_(\\d{6})_(country|overview)\\.csv$`).exec(base);
-  if (m) return { kind: m[2] === 'country' ? 'ratings' : 'ratings_overall', month: m[1]! };
+  m = new RegExp(`^installs_${escaped}_(\\d{6})_(country|app_version|device|os_version)\\.csv$`).exec(base);
+  if (m)
+    return m[2] === 'country'
+      ? { kind: 'installs', month: m[1]! }
+      : { kind: 'installs_breakdown', month: m[1]!, dimension: m[2] as AppBreakdownDimension };
+  m = new RegExp(`^ratings_${escaped}_(\\d{6})_(country|overview|app_version|device|os_version)\\.csv$`).exec(base);
+  if (m && (m[2] === 'country' || m[2] === 'overview')) return { kind: m[2] === 'country' ? 'ratings' : 'ratings_overall', month: m[1]! };
+  if (m) return { kind: 'ratings_breakdown', month: m[1]!, dimension: m[2] as AppBreakdownDimension };
+  m = new RegExp(`^crashes_${escaped}_(\\d{6})_(app_version|device|os_version)\\.csv$`).exec(base);
+  if (m) return { kind: 'crashes_breakdown', month: m[1]!, dimension: m[2] as AppBreakdownDimension };
   m = new RegExp(`^reviews_${escaped}_(\\d{6})\\.csv$`).exec(base);
   if (m) return { kind: 'reviews', month: m[1]! };
   m = new RegExp(`^subscriptions_${escaped}_(.+)_(\\d{6})_country\\.csv$`).exec(base);

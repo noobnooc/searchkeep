@@ -111,10 +111,19 @@ const TASKS: Record<SyncDataset, string[]> = {
     'play.list',
     'play.finance_list',
     'play.vitals',
-    ...['store_country', 'store_traffic', 'installs', 'ratings', 'ratings_overall', 'reviews', 'subscriptions', 'earnings'].flatMap((k) => [
-      `play.${k}`,
-      `play.${k}_history`,
-    ]),
+    ...[
+      'store_country',
+      'store_traffic',
+      'installs',
+      'ratings',
+      'ratings_overall',
+      'reviews',
+      'subscriptions',
+      'earnings',
+      'installs_breakdown',
+      'ratings_breakdown',
+      'crashes_breakdown',
+    ].flatMap((k) => [`play.${k}`, `play.${k}_history`]),
   ],
   app_store_public: ['appstore.public'],
 };
