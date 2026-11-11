@@ -794,6 +794,27 @@ export function appContract(name: string, makeStore: () => Promise<Store>): void
         expect(new Set(ranks.map((r) => r.territory)).size).toBe(5);
       });
 
+      it('reads Google Play installs files once more after their reader changed', async () => {
+        const cfg = config({ APP_STORE_PUBLIC_DATA: 'false' });
+        const installs = `stats/installs/installs_${APP.playPackage}_202610_country.csv`;
+        const visitors = `stats/store_performance/store_performance_${APP.playPackage}_202608_country.csv`;
+        // Read by the previous reader, which marked files with their generation only.
+        await store.setMeta(syncKeys.playObject(APP.id, installs), '1');
+        await store.setMeta(syncKeys.playObject(APP.id, visitors), '1');
+        const play = fakePlay();
+        const sync = (client: PlayClient) =>
+          runSync({ store, config: cfg, clients: { play: client }, trigger: 'manual', now: NOW, pacing: {} });
+        await sync(play.client);
+        expect(play.calls).toContain(`read:${installs}`);
+        expect(play.calls).not.toContain(`read:${visitors}`);
+        expect(await store.getMeta(syncKeys.playObject(APP.id, installs))).toBe('1#2');
+        const again = fakePlay();
+        await sync(again.client);
+        expect(again.calls.filter((c) => c.startsWith('read:'))).toEqual([]);
+        const progress = await syncProgress({ store, config: cfg, clients: { play: play.client }, now: () => NOW });
+        expect(progress.apps[0]!.datasets.find((d) => d.dataset === 'google_play')).toMatchObject({ complete: true });
+      });
+
       it('continues across runs when the call budget runs out', async () => {
         const cfg = config({ SYNC_MAX_CALLS_PER_RUN: '5' });
         const c = clients();

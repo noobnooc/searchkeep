@@ -10,7 +10,7 @@
   import Segmented from '../components/Segmented.svelte';
   import Skeleton from '../components/Skeleton.svelte';
   import { apiUrl } from '../lib/api';
-  import { sourceLabel, STORE_LABEL } from '../lib/apps';
+  import { regionName, sourceLabel, STORE_LABEL } from '../lib/apps';
   import { deltaCompact, int, percent, rangeLabel } from '../lib/format';
   import { resource } from '../lib/resource.svelte';
   import { ui } from '../lib/state.svelte';
@@ -46,12 +46,25 @@
   );
 
   const maxViews = $derived(Math.max(1, ...(byTerritory.data?.rows ?? []).map(views)));
+  /** Google Play's bucket for countries with few visitors is not a country; the subtitle explains it. */
+  function territoryLabel(r: AppRow): string {
+    const code = r.territory ?? '';
+    if (code === 'OTHER') return r.store === 'play' ? 'Other (grouped)' : 'Other';
+    return code === '-' || !code ? 'Unknown' : code;
+  }
+  // Google Play breaks out installs by country but groups small countries' visitors and acquisitions.
+  const playOnly = $derived(store === 'play' || Boolean(app && !app.appleId));
+  const showInstalls = $derived(Boolean(app?.playPackage) && store !== 'apple');
+  const playGrouped = $derived((byTerritory.data?.rows ?? []).some((r) => r.store === 'play' && r.territory === 'OTHER' && views(r) > 0));
   const territoryCols: Column<AppRow>[] = $derived([
-    { key: 'territory', label: 'Territory', grow: true, sortable: true },
+    { key: 'territory', label: 'Territory', grow: true, sortable: true, render: territoryCell },
     ...(both ? [{ key: 'store', label: 'Store', sortable: true, text: (r: AppRow) => (r.store ? STORE_LABEL[r.store] : '') }] : []),
     { key: 'views', label: 'Page views', align: 'right', sortable: true, sortValue: views, text: (r) => int(views(r)), bar: (r) => ({ value: views(r), max: maxViews }) },
     { key: 'downloads', label: 'Downloads', align: 'right', sortable: true, text: (r) => int(r.downloads) },
-    { key: 'pageConversion', label: 'Conversion', align: 'right', sortable: true, text: (r) => percent(r.pageConversion), hideOnMobile: true },
+    // Google Play's conversion means little once its visitors are grouped; its installs by country do.
+    showInstalls
+      ? { key: 'installs', label: 'Installs', align: 'right', sortable: true, text: (r) => int(r.installs) }
+      : { key: 'pageConversion', label: 'Conversion', align: 'right', sortable: true, text: (r) => percent(r.pageConversion), hideOnMobile: true },
   ]);
 
   const refCols: Column<AppReferrerRow>[] = $derived([
@@ -71,6 +84,10 @@
     { key: 'visitorsChange', label: 'Change', align: 'right', sortable: true, text: (t) => deltaCompact(t.visitorsChange), hideOnMobile: true },
   ]);
 </script>
+
+{#snippet territoryCell(r: AppRow)}
+  <span title={r.territory && /^[A-Z]{2}$/.test(r.territory) ? regionName(r.territory) : undefined}>{territoryLabel(r)}</span>
+{/snippet}
 
 {#snippet refCell(r: AppReferrerRow)}
   <span class="ref">
@@ -105,7 +122,11 @@
           {/each}
         {/if}
       </Card>
-      <Card title="Territories" flush busy={byTerritory.loading && Boolean(byTerritory.data)}>
+      <Card
+        title="Territories"
+        subtitle={playGrouped ? 'Google Play groups the visitors and downloads of countries with few visitors into Other; its installs by country are not grouped.' : undefined}
+        flush
+        busy={byTerritory.loading && Boolean(byTerritory.data)}>
         {#if byTerritory.error}
           <div class="pad"><ErrorBanner error={byTerritory.error} retry={byTerritory.reload} /></div>
         {:else if !byTerritory.data}
@@ -113,7 +134,15 @@
         {:else if (byTerritory.data.rows ?? []).length === 0}
           <EmptyState compact title="No store data in this range" icon="globe" />
         {:else}
-          <DataTable label="Store funnel by territory" rows={byTerritory.data.rows ?? []} columns={territoryCols} sort={{ key: 'downloads', dir: 'desc' }} rowKey={(r) => `${r.store}-${r.territory}`} limit={10} />
+          {#key playOnly}
+            <DataTable
+              label="Store funnel by territory"
+              rows={byTerritory.data.rows ?? []}
+              columns={territoryCols}
+              sort={{ key: playOnly ? 'installs' : 'downloads', dir: 'desc' }}
+              rowKey={(r) => `${r.store}-${r.territory}`}
+              limit={10} />
+          {/key}
         {/if}
       </Card>
     </div>

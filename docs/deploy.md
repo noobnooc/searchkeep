@@ -791,8 +791,11 @@ What arrives: App Store impressions, product page views, first-time downloads, r
 installs and deletions by territory and source (search, browse, websites, other apps), referring
 websites and apps, crash counts and customer reviews; Google Play store listing visitors and
 acquisitions by country and by traffic source with **search terms**, installs, uninstalls and
-active devices, ratings, reviews, and crash and ANR rates. App Store data is complete 2-5 days after
-a day ends, Google Play's 3-7 days. Numbers are not guaranteed to match the App Store Connect
+active devices, ratings, reviews, and crash and ANR rates. Google groups the store listing visitors
+and acquisitions of countries and traffic sources with few users into "Other" before it writes the
+files, so a small app may see only "Other" there and no search terms; its installs by country are
+not grouped, and Crash and ANR rates need a minimum number of users. App Store data is complete 2-5
+days after a day ends, Google Play's 3-7 days. Numbers are not guaranteed to match the App Store Connect
 website exactly, and Apple does not promise that either.
 
 **Verify:** `setup_status` reports `config.asc` and `config.play` as `ok`, `probe.asc` ("App Store

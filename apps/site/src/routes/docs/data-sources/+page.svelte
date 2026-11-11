@@ -304,8 +304,9 @@ cloudflared access curl "https://searchkeep.example.com/api/import/ai-citations?
 <p>
   Google Play has no statistics API: the Play Console writes monthly CSV files to a Cloud Storage bucket, which the service
   account reads (store performance by country and by traffic source with <strong>search terms</strong>, installs, ratings
-  and reviews; files are read again only when they change). Crash and ANR rates come from the Play Developer Reporting
-  API. Data arrives 3-7 days late.
+  and reviews; files are read again only when they change). Google groups the visitors and acquisitions of countries and
+  traffic sources with few users into “Other”, so a small app may have no search terms yet; installs by country are not
+  grouped. Crash and ANR rates come from the Play Developer Reporting API. Data arrives 3-7 days late.
 </p>
 <h3 id="app-store-public">App Store public feeds (opt-in)</h3>
 <p>
