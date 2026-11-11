@@ -108,4 +108,22 @@ describe('google play', () => {
       'play: could not read reviews/reviews_com.a_202610.csv (HTTP 403)',
     );
   });
+
+  it('checks whether a file may be read by fetching its first byte', async () => {
+    clearPlayTokenCache();
+    const pk = await pemKey();
+    const seen: Array<{ url: string; range: string | null }> = [];
+    const fetchMock = (async (url: string, init?: RequestInit) => {
+      if (url.includes('oauth2')) return Response.json({ access_token: 'tok', expires_in: 3600 });
+      seen.push({ url, range: new Headers(init?.headers).get('range') });
+      if (url.includes('earnings')) return new Response('denied', { status: 403 });
+      if (url.includes('missing')) return new Response('gone', { status: 404 });
+      return new Response('P', { status: 206 });
+    }) as typeof fetch;
+    const play = createPlayClient({ clientEmail: 'sa@x', privateKey: pk, fetch: fetchMock });
+    expect(await play.canRead('b', 'financial-stats/subscriptions/subscriptions_com.a_m_202610_country.csv')).toBe(true);
+    expect(await play.canRead('b', 'earnings/earnings_202610_1-0.zip')).toBe(false);
+    await expect(play.canRead('b', 'missing.csv')).rejects.toThrow('play: could not read missing.csv (HTTP 404)');
+    expect(seen.every((s) => s.range === 'bytes=0-0' && s.url.endsWith('?alt=media'))).toBe(true);
+  });
 });

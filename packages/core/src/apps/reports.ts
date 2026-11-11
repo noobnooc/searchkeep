@@ -915,6 +915,13 @@ export const PLAY_COLLECTORS: Record<PlayFileKind, (file: PlayFile, pkg: string,
   crashes_breakdown: (file) => playCrashesBreakdownCollector(file.dimension ?? 'app_version'),
 };
 
+/**
+ * Bumped when `playPrefixes`, `playFinancialPrefixes` or `classifyPlayFile` find files they did
+ * not before, so a listing made earlier the same day by an older version is made again.
+ * 2: files per app version, device and OS version, and crashes files (ADR 0010).
+ */
+export const PLAY_LISTING_VERSION = 2;
+
 /** Where to list the Play Console files of a package. */
 export function playPrefixes(pkg: string): string[] {
   return [
