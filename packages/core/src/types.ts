@@ -694,6 +694,43 @@ export interface AppChartRankInput {
   rank: number | null;
 }
 
+/** Google Play subscription statistics (ADR 0010): per day, country, product and base plan. */
+export interface AppSubscriptionInput {
+  date: IsoDate;
+  /** Upper-case country code as Google reports it. */
+  territory: string;
+  /** Subscription product id. */
+  product: string;
+  /** Base plan id, or empty. */
+  basePlan: string;
+  newSubscriptions: number;
+  canceledSubscriptions: number;
+  /** Active subscriptions that day: a level, not a daily count. */
+  activeSubscriptions: number;
+}
+
+export type AppSubscriptionDimension = 'date' | 'product' | 'territory';
+
+export interface AppSubscriptionQuery {
+  appId: string;
+  range: DateRange;
+  /** Group by these; none gives the totals. */
+  dimensions: AppSubscriptionDimension[];
+  product?: string;
+  territory?: string;
+  limit?: number;
+}
+
+export interface AppSubscriptionRow {
+  date?: IsoDate;
+  product?: string;
+  territory?: string;
+  newSubscriptions: number;
+  canceledSubscriptions: number;
+  /** Per date: that day's; otherwise on the range's last day with data. */
+  activeSubscriptions: number;
+}
+
 export interface AppDataCoverage {
   appId: string;
   store: AppStore;

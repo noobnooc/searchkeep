@@ -467,6 +467,23 @@ export const TOOLS: Tool[] = [
     ],
     example: 'Did the last Android release raise the crash rate?',
   },
+  {
+    name: 'app_subscriptions',
+    summary: 'Google Play subscriptions per product and country, against the previous period.',
+    description:
+      'New, canceled and active Google Play subscriptions per product and country over the period, against the previous period, with the daily trend of active subscriptions. Comes from the Play Console’s subscription statistics and needs the service account to view financial data.',
+    readOnly: true,
+    params: [
+      app,
+      start,
+      end,
+      days(28),
+      { name: 'product', type: 'string', description: 'Only this subscription product id.' },
+      { name: 'territory', type: 'string', description: 'Only this country, e.g. `US`.' },
+      limit(50),
+    ],
+    example: 'Which countries gained the most subscribers this month?',
+  },
 ];
 
 /** Tools registered by default; `submit_sitemap` appears only with `ENABLE_WRITES=true`. */

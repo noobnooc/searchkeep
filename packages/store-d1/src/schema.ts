@@ -442,3 +442,19 @@ export const appChartRanks = sqliteTable(
   },
   (t) => [primaryKey({ columns: [t.appId, t.date, t.territory, t.chart, t.genre] })],
 );
+
+/** Google Play subscription statistics (ADR 0010): per day, country, product and base plan. */
+export const appSubscriptionsDaily = sqliteTable(
+  'app_subscriptions_daily',
+  {
+    appId: text('app_id').notNull(),
+    date: text('date').notNull(),
+    territory: text('territory').notNull(),
+    product: text('product').notNull(),
+    basePlan: text('base_plan').notNull().default(''),
+    newSubscriptions: integer('new_subscriptions').notNull().default(0),
+    canceledSubscriptions: integer('canceled_subscriptions').notNull().default(0),
+    activeSubscriptions: integer('active_subscriptions').notNull().default(0),
+  },
+  (t) => [primaryKey({ columns: [t.appId, t.date, t.territory, t.product, t.basePlan] })],
+);

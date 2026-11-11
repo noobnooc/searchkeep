@@ -1,5 +1,6 @@
 import { findSite, SearchkeepError, segmentsEnabled } from '../config.js';
 import { safeMessage } from '../errors.js';
+import { SourceError } from '../http.js';
 import type { ReadinessReport } from '../auth/readiness.js';
 import type { SourceClients } from '../sources.js';
 import { pageToUrl } from '../url.js';
@@ -275,6 +276,20 @@ export async function setupStatus(ctx: OpsContext, p: { readiness: ReadinessRepo
             `No report files for ${pkg} yet. The Play Console writes them within a day or two; access granted to a new service account can take up to 24 hours.`,
           ];
         return 'ok';
+      });
+      // Revenue and subscriptions (ADR 0010) need "View financial data"; the rest works without it.
+      await probe('probe.play_finance', 'Service account can read Google Play revenue and subscriptions', async () => {
+        try {
+          await play.listObjects(config.play.bucket!, 'earnings/earnings_');
+          return 'ok';
+        } catch (err) {
+          if (err instanceof SourceError && (err.status === 403 || err.status === 401))
+            return [
+              'warn',
+              `Google Play revenue and subscriptions stay empty: in the Play Console → Users and permissions → ${config.play.clientEmail ?? 'the service account'}, turn on "View financial data, orders and cancellation survey responses" under Account permissions. Everything else syncs without it.`,
+            ];
+          throw err;
+        }
       });
     }
     if (cloudflare) {

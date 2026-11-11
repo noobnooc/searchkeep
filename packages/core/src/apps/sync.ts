@@ -34,6 +34,7 @@ import {
   classifyPlayFile,
   PLAY_COLLECTORS,
   playReadMark,
+  playFinancialPrefixes,
   playPrefixes,
   type AscReportSpec,
 } from './reports.js';
@@ -392,7 +393,7 @@ function planPlay(args: AppPlanArgs, app: AppConfig, place: Place): void {
         key: `play.${info.kind}:${app.id}:${obj.name}:${mark}`,
         run: async () => {
           if (fresh && (await store.getMeta(key)) === mark) return null;
-          const collector = PLAY_COLLECTORS[info.kind]();
+          const collector = PLAY_COLLECTORS[info.kind](info, pkg);
           await play.readCsv(bucket, obj.name, (row) => collector.add(row));
           const res = await collector.write(store, app.id);
           await store.setMeta(key, mark);
@@ -405,23 +406,33 @@ function planPlay(args: AppPlanArgs, app: AppConfig, place: Place): void {
 
   if (!listing || listing.day !== today) {
     const prefixes = playPrefixes(pkg);
+    const financial = playFinancialPrefixes(pkg);
     place({
       task: 'play.list',
       siteId,
       source: 'play',
       backfill: false,
-      calls: prefixes.length,
+      calls: prefixes.length + financial.length,
       key: `play.list:${app.id}:${today}`,
       run: async () => {
         const objects: PlayListing['objects'] = [];
-        for (const prefix of prefixes) {
-          for (const o of await play.listObjects(bucket, prefix)) {
-            if (classifyPlayFile(o.name, pkg)) objects.push({ name: o.name, generation: o.generation });
+        const add = (list: Awaited<ReturnType<typeof play.listObjects>>) => {
+          for (const o of list) if (classifyPlayFile(o.name, pkg)) objects.push({ name: o.name, generation: o.generation });
+        };
+        for (const prefix of prefixes) add(await play.listObjects(bucket, prefix));
+        // Financial files need "View financial data" (ADR 0010); without it the rest goes on.
+        let finance: PlayListing['finance'] = 'ok';
+        for (const prefix of financial) {
+          try {
+            add(await play.listObjects(bucket, prefix));
+          } catch (err) {
+            if (!(err instanceof SourceError) || (err.status !== 403 && err.status !== 401)) throw err;
+            finance = 'denied';
           }
         }
         // Newest months first, so the latest data lands before history.
         objects.sort((a, b) => b.name.localeCompare(a.name));
-        await store.setMeta(syncKeys.playListing(app.id), JSON.stringify({ day: today, objects } satisfies PlayListing));
+        await store.setMeta(syncKeys.playListing(app.id), JSON.stringify({ day: today, objects, finance } satisfies PlayListing));
         if (objects.length === 0) ctx.log?.(`play ${app.id}: no report files for ${pkg} in the bucket yet`);
         planObjects(objects, enqueue, true);
         return 0;

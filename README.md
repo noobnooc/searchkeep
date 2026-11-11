@@ -222,6 +222,7 @@ AGENTS.md              Instructions for AI agents working on this repository
 | `app_search_terms`     | Google Play search terms: visitors, acquisitions, conversion, change and low converters.         |
 | `app_reviews`          | Ratings over time, star distribution and reviews, filtered by stars, territory, version, text.   |
 | `app_stability`        | Crash and ANR rates (Google Play) and crash counts (App Store) per day or app version.           |
+| `app_subscriptions`    | Google Play subscriptions: new, canceled and active per product and country, with the trend.     |
 
 All tools are read-only except `submit_sitemap`. Common parameters: `site`, `start` and `end`
 (`YYYY-MM-DD`), `days` (default 28), `source` (`gsc` or `bing`, default `gsc`), `searchType` (`web`,

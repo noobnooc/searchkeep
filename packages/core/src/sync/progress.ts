@@ -110,7 +110,7 @@ const TASKS: Record<SyncDataset, string[]> = {
   google_play: [
     'play.list',
     'play.vitals',
-    ...['store_country', 'store_traffic', 'installs', 'ratings', 'ratings_overall', 'reviews'].flatMap((k) => [
+    ...['store_country', 'store_traffic', 'installs', 'ratings', 'ratings_overall', 'reviews', 'subscriptions', 'earnings'].flatMap((k) => [
       `play.${k}`,
       `play.${k}_history`,
     ]),

@@ -4,6 +4,7 @@
  */
 import {
   addDays,
+  playCurrencyKey,
   AI_CRAWLERS,
   normalizePage,
   SEARCH_CRAWLERS,
@@ -461,6 +462,37 @@ export async function seedAppDemo(store: Store, app: AppConfig, siteDomain = 'ac
       dates.map((date, i) => ({ date, territory: '*', average: 4.2 + 0.001 * i, dailyAverage: 3.8 + r() })),
     );
     n += await store.writeAppReviews(app.id, 'play', reviewsFor('p', dates, r, null));
+    // Earnings per buyer country in the payout currency, and one subscription product (ADR 0010).
+    n += await store.writeAppStoreDaily(app.id, 'play', {
+      metrics: ['purchases', 'proceedsCents', 'salesCents'],
+      shape: 'territory',
+      dates,
+      rows: dates.flatMap((date) =>
+        APP_TERRITORIES.map(([territory, tw]) => {
+          const purchases = Math.round(6 * tw * (0.5 + r()));
+          return { date, territory, source: '*', purchases, salesCents: purchases * 599, proceedsCents: purchases * 509 };
+        }),
+      ),
+    });
+    await store.setMeta(playCurrencyKey(app.id), 'EUR');
+    let subscribers = 420;
+    const subs = dates.flatMap((date) =>
+      APP_TERRITORIES.map(([territory, tw]) => {
+        const added = Math.round(5 * tw * (0.5 + r()));
+        const canceled = Math.round(3 * tw * (0.5 + r()));
+        if (territory === 'US') subscribers += added - canceled;
+        return {
+          date,
+          territory,
+          product: 'pro_monthly',
+          basePlan: 'monthly',
+          newSubscriptions: added,
+          canceledSubscriptions: canceled,
+          activeSubscriptions: Math.round(subscribers * tw),
+        };
+      }),
+    );
+    n += await store.writeAppSubscriptions(app.id, 'pro_monthly', dates, subs);
   }
   return n;
 }

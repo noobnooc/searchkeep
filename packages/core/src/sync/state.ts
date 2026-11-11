@@ -248,4 +248,6 @@ export interface ReviewCursor {
 export interface PlayListing {
   day: IsoDate;
   objects: Array<{ name: string; generation: string }>;
+  /** Whether the financial files could be listed ("View financial data", ADR 0010). */
+  finance?: 'ok' | 'denied';
 }

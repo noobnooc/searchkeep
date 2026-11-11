@@ -13,6 +13,7 @@ import {
   type AppStore,
   type AppStoreDailyInput,
   type AppStoreMetric,
+  type AppSubscriptionInput,
   type AppVitalsInput,
   type IsoDate,
 } from '../types.js';
@@ -64,8 +65,17 @@ export function cellDate(value: string): IsoDate | null {
     const d = `${m[3]}-${m[1]!.padStart(2, '0')}-${m[2]!.padStart(2, '0')}`;
     if (isIsoDate(d)) return d;
   }
+  // "Nov 1, 2026" (Google Play's financial reports).
+  m = /^([A-Za-z]{3})[a-z]*\.? (\d{1,2}), (\d{4})$/.exec(v);
+  if (m) {
+    const month = MONTHS.indexOf(m[1]!.toLowerCase()) + 1;
+    const d = `${m[3]}-${String(month).padStart(2, '0')}-${m[2]!.padStart(2, '0')}`;
+    if (month > 0 && isIsoDate(d)) return d;
+  }
   return null;
 }
+
+const MONTHS = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
 
 /** Finds a column by exact name or prefix once, then reads it from every row. */
 function columns() {
@@ -120,10 +130,11 @@ class FunnelCollector implements ReportCollector {
     private readonly metrics: AppStoreMetric[],
     private readonly read: (row: DelimitedRow, col: ReturnType<typeof columns>) => Partial<Record<AppStoreMetric, number>> | null,
     private readonly keys: (row: DelimitedRow, col: ReturnType<typeof columns>) => { territory: string; source: string },
+    private readonly dateColumns: string[] = ['date'],
   ) {}
 
   add(row: DelimitedRow): void {
-    const date = cellDate(this.col(row, 'date'));
+    const date = cellDate(this.col(row, ...this.dateColumns));
     if (!date) return;
     this.days.add(date);
     const values = this.read(row, this.col);
@@ -585,8 +596,92 @@ export const ASC_REPORTS: readonly AscReportSpec[] = [
   },
 ];
 
+/**
+ * Google Play earnings (ADR 0010), one row per charge, fee, tax or refund of the whole developer
+ * account. Only the app's own rows are kept, summed per day and buyer country in the account's
+ * payout currency: net proceeds (charges, fees, taxes and refunds), sales (charges and refunds of
+ * charges) and purchases (charges minus refunded charges). Order ids, postcodes and every other
+ * per-order field are never read into what is stored.
+ */
+export function playEarningsCollector(pkg: string): ReportCollector {
+  let currency: string | null = null;
+  const funnel = new FunnelCollector(
+    'play',
+    'territory',
+    ['purchases', 'proceedsCents', 'salesCents'],
+    (row, col) => {
+      if (col(row, 'product id').trim() !== pkg) return null;
+      const cents = Math.round(num(col(row, 'amount (merchant currency)')) * 100);
+      const type = lower(col(row, 'transaction type'));
+      const code = col(row, 'merchant currency').trim().toUpperCase();
+      if (/^[A-Z]{3}$/.test(code)) currency = code;
+      const charge = type === 'charge' ? 1 : type === 'charge refund' ? -1 : 0;
+      return { proceedsCents: cents, salesCents: charge ? cents : 0, purchases: charge };
+    },
+    (row, col) => ({ territory: normalizeTerritory(col(row, 'buyer country')), source: ALL_KEY }),
+    ['transaction date', 'date'],
+  );
+  return {
+    add: (row) => funnel.add(row),
+    async write(store, appId, before) {
+      const res = await funnel.write(store, appId, before);
+      if (currency) await store.setMeta(playCurrencyKey(appId), currency);
+      return res;
+    },
+  };
+}
+
+/** Meta key of the payout currency of an app's Google Play amounts. */
+export const playCurrencyKey = (appId: string) => `app:play:currency:${appId}`;
+
+/**
+ * Google Play subscription statistics of one product (ADR 0010): new, canceled and active per day
+ * and country. Rows of another package (a file name like `com.acme.app_pro_x` is ambiguous) are skipped.
+ */
+export function playSubscriptionsCollector(product: string, pkg: string): ReportCollector {
+  const col = columns();
+  const rows: AppSubscriptionInput[] = [];
+  const days = new Set<IsoDate>();
+  return {
+    add(row) {
+      const date = cellDate(col(row, 'date'));
+      if (!date) return;
+      const owner = col(row, 'package name', 'package').trim();
+      if (owner && owner !== pkg) return;
+      days.add(date);
+      rows.push({
+        date,
+        territory: normalizeTerritory(col(row, 'country', 'territory')),
+        product,
+        basePlan: col(row, 'base plan id', 'base plan').trim().slice(0, 100),
+        newSubscriptions: num(col(row, 'new subscriptions')),
+        canceledSubscriptions: num(col(row, 'cancelled subscriptions', 'canceled subscriptions')),
+        activeSubscriptions: num(col(row, 'active subscriptions')),
+      });
+    },
+    async write(store, appId, before) {
+      const dates = coveredDays(days, before);
+      if (dates.length === 0) return { written: 0, oldest: null };
+      const written = await store.writeAppSubscriptions(appId, product, dates, keep(rows, before));
+      return { written, oldest: dates[0]! };
+    },
+  };
+}
+
 /** The Play Console report files the sync reads. */
-export type PlayFileKind = 'store_country' | 'store_traffic' | 'installs' | 'ratings' | 'ratings_overall' | 'reviews';
+export type PlayFileKind =
+  'store_country' | 'store_traffic' | 'installs' | 'ratings' | 'ratings_overall' | 'reviews' | 'subscriptions' | 'earnings';
+
+/** Kinds read only with the Play Console's "View financial data" permission. */
+export const PLAY_FINANCIAL_KINDS: readonly PlayFileKind[] = ['subscriptions', 'earnings'];
+
+export interface PlayFile {
+  kind: PlayFileKind;
+  /** yyyyMM. */
+  month: string;
+  /** Subscription product id (subscriptions files). */
+  product?: string;
+}
 
 /**
  * Bumped when a kind of Play file is read differently, so files already read are read once more.
@@ -600,13 +695,15 @@ export function playReadMark(kind: PlayFileKind, generation: string): string {
   return version ? `${generation}#${version}` : generation;
 }
 
-export const PLAY_COLLECTORS: Record<PlayFileKind, () => ReportCollector> = {
+export const PLAY_COLLECTORS: Record<PlayFileKind, (file: PlayFile, pkg: string) => ReportCollector> = {
   store_country: playCountryCollector,
   store_traffic: playTrafficCollector,
   installs: playInstallsCollector,
   ratings: () => playRatingsCollector(false),
   ratings_overall: () => playRatingsCollector(true),
   reviews: playReviewsCollector,
+  subscriptions: (file, pkg) => playSubscriptionsCollector(file.product ?? '', pkg),
+  earnings: (_file, pkg) => playEarningsCollector(pkg),
 };
 
 /** Where to list the Play Console files of a package. */
@@ -614,8 +711,13 @@ export function playPrefixes(pkg: string): string[] {
   return ['stats/store_performance/', `stats/installs/installs_${pkg}_`, `stats/ratings/ratings_${pkg}_`, `reviews/reviews_${pkg}_`];
 }
 
+/** Where to list the financial files (subscriptions of a package; earnings of the whole account). */
+export function playFinancialPrefixes(pkg: string): string[] {
+  return [`financial-stats/subscriptions/subscriptions_${pkg}_`, 'earnings/earnings_'];
+}
+
 /** What a Play Console file holds and the month it covers, or null for files the sync does not read. */
-export function classifyPlayFile(name: string, pkg: string): { kind: PlayFileKind; month: string } | null {
+export function classifyPlayFile(name: string, pkg: string): PlayFile | null {
   const base = name.slice(name.lastIndexOf('/') + 1);
   const escaped = pkg.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   let m = new RegExp(`^(?:[a-z]+_)?store_performance_${escaped}_(\\d{6})_(country|traffic_source)\\.csv$`).exec(base);
@@ -626,5 +728,9 @@ export function classifyPlayFile(name: string, pkg: string): { kind: PlayFileKin
   if (m) return { kind: m[2] === 'country' ? 'ratings' : 'ratings_overall', month: m[1]! };
   m = new RegExp(`^reviews_${escaped}_(\\d{6})\\.csv$`).exec(base);
   if (m) return { kind: 'reviews', month: m[1]! };
+  m = new RegExp(`^subscriptions_${escaped}_(.+)_(\\d{6})_country\\.csv$`).exec(base);
+  if (m && name.startsWith('financial-stats/')) return { kind: 'subscriptions', month: m[2]!, product: m[1]! };
+  m = /^earnings_(\d{6})(?:_[\w.-]+)?\.zip$/.exec(base);
+  if (m && name.startsWith('earnings/')) return { kind: 'earnings', month: m[1]! };
   return null;
 }

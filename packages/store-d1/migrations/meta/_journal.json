@@ -36,6 +36,13 @@
       "when": 1794390614380,
       "tag": "0004_app_revenue_sessions",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1794394644925,
+      "tag": "0005_app_subscriptions",
+      "breakpoints": true
     }
   ]
 }
