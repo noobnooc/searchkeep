@@ -432,6 +432,11 @@ export type AppSourceType =
  * - `installs`, `deletions`: App Store (users who share analytics only), Google Play device installs
  *   and uninstalls.
  * - `activeDevices`: devices with the app installed (Google Play), a level, not a daily count.
+ * - `purchases`, `proceedsCents`, `salesCents`, `payingUsers`: App Store Purchases (paid app and
+ *   in-app purchases, net of refunds); amounts in cents of the store's currency (App Store: USD,
+ *   Apple's estimate). Paying users are summed across rows, so they are an upper bound.
+ * - `sessions`, `sessionSeconds`, `sessionDevices`: App Sessions (users who share analytics only,
+ *   and only where Apple has at least five users); devices are summed across rows, an upper bound.
  */
 export type AppStoreMetric =
   | 'impressions'
@@ -442,7 +447,14 @@ export type AppStoreMetric =
   | 'redownloads'
   | 'installs'
   | 'deletions'
-  | 'activeDevices';
+  | 'activeDevices'
+  | 'purchases'
+  | 'proceedsCents'
+  | 'salesCents'
+  | 'payingUsers'
+  | 'sessions'
+  | 'sessionSeconds'
+  | 'sessionDevices';
 export const APP_STORE_METRICS: readonly AppStoreMetric[] = [
   'impressions',
   'impressionsUnique',
@@ -453,6 +465,13 @@ export const APP_STORE_METRICS: readonly AppStoreMetric[] = [
   'installs',
   'deletions',
   'activeDevices',
+  'purchases',
+  'proceedsCents',
+  'salesCents',
+  'payingUsers',
+  'sessions',
+  'sessionSeconds',
+  'sessionDevices',
 ];
 
 export type AppStoreMetrics = Record<AppStoreMetric, number>;

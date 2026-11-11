@@ -97,6 +97,13 @@ const APP_COLUMNS: Record<AppStoreMetric, string> = {
   installs: 'installs',
   deletions: 'deletions',
   activeDevices: 'active_devices',
+  purchases: 'purchases',
+  proceedsCents: 'proceeds_cents',
+  salesCents: 'sales_cents',
+  payingUsers: 'paying_users',
+  sessions: 'sessions',
+  sessionSeconds: 'session_seconds',
+  sessionDevices: 'session_devices',
 };
 const VITALS_COLUMNS: Record<AppVitalsMetric, string> = {
   crashRate: 'crash_rate',

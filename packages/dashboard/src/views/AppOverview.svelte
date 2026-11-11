@@ -11,7 +11,7 @@
   import Stat, { delta } from '../components/Stat.svelte';
   import { apiUrl } from '../lib/api';
   import { change, CHART_LABEL, regionName, STORE_LABEL } from '../lib/apps';
-  import { compact, eachDay, int, pctChange, percent, rangeLabel, shortDate } from '../lib/format';
+  import { compact, decimal, duration, eachDay, int, money, pctChange, percent, rangeLabel, shortDate } from '../lib/format';
   import { resource } from '../lib/resource.svelte';
   import { href } from '../lib/router.svelte';
   import { ui } from '../lib/state.svelte';
@@ -53,7 +53,19 @@
     label: string;
     key: keyof AppMetrics;
     rate?: boolean;
+    /** How the value reads: an amount in the store's currency, a duration, or a plain ratio. */
+    format?: 'money' | 'duration' | 'ratio';
   }
+  /** Revenue and sessions (ADR 0010), shown for a store once it reports any. */
+  const VALUE_KPIS: Kpi[] = [
+    { label: 'Proceeds', key: 'proceeds', format: 'money' },
+    { label: 'Paying users', key: 'payingUsers' },
+    { label: 'Proceeds per download', key: 'proceedsPerDownload', format: 'money' },
+    { label: 'Sessions', key: 'sessions' },
+    { label: 'Average session', key: 'averageSessionSeconds', format: 'duration' },
+    { label: 'Sessions per device', key: 'sessionsPerDevice', format: 'ratio' },
+  ];
+  const hasValue = (m: AppMetrics) => m.proceedsCents !== 0 || m.purchases !== 0 || m.sessions > 0;
   const KPIS: Record<AppStore, Kpi[]> = {
     apple: [
       { label: 'Impressions', key: 'impressions' },
@@ -73,9 +85,15 @@
     ],
   };
 
-  function stat(k: Kpi, cur: AppMetrics, prev: AppMetrics) {
+  function stat(k: Kpi, cur: AppMetrics, prev: AppMetrics, currency: string | null = null) {
     const c = cur[k.key];
     const p = prev[k.key];
+    if (k.format) {
+      const show = (v: number | null) =>
+        k.format === 'money' ? (currency ? money(v, currency, true) : decimal(v, 2)) : k.format === 'duration' ? duration(v) : decimal(v, 2);
+      const ch = c === null || p === null ? null : change(c as number, p as number);
+      return { value: show(c as number | null), delta: delta(ch === null ? null : ch * 100, pctChange(ch === null ? null : ch * 100), true, 0.05), sub: `vs ${show(p as number | null)}` };
+    }
     if (k.rate) {
       const pp = c !== null && p !== null ? (Number(c) - Number(p)) * 100 : null;
       return { value: percent(c as number | null), delta: delta(pp, pp === null ? '' : `${pp >= 0 ? '+' : '−'}${Math.abs(pp).toFixed(1)} pp`, true, 0.05), sub: `vs ${percent(p as number | null)}` };
@@ -141,6 +159,15 @@
             <Stat label={k.label} value={st.value} delta={st.delta} sub={st.sub} />
           {/each}
         </div>
+        {#if hasValue(s.current) || hasValue(s.previous)}
+          <h3 class="kpi-group">Revenue and usage{s.currency ? ` · ${s.currency}` : ''}</h3>
+          <div class="kpis">
+            {#each VALUE_KPIS as k (k.key)}
+              {@const st = stat(k, s.current, s.previous, s.currency)}
+              <Stat label={k.label} value={st.value} delta={st.delta} sub={st.sub} />
+            {/each}
+          </div>
+        {/if}
         {#if t}
           <div class="trend">
             <LineChart dates={t.dates} series={t.series} height={170} label="{STORE_LABEL[s.store]} per day" valueFormat={(n) => int(n)} />
@@ -208,6 +235,12 @@
   }
   .trend {
     margin-top: 16px;
+  }
+  .kpi-group {
+    margin: 18px 0 10px;
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--text-3);
   }
   .callout {
     display: flex;

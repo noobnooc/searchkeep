@@ -200,28 +200,28 @@ AGENTS.md              Instructions for AI agents working on this repository
 
 ## MCP tools
 
-| Tool                   | What it does                                                                                    |
-| ---------------------- | ----------------------------------------------------------------------------------------------- |
-| `list_sites`           | Lists configured sites, their connected sources and the date range stored per dataset.          |
-| `query_performance`    | Clicks, impressions, CTR and position by date, dimension and filter, from GSC or Bing.          |
-| `compare_periods`      | Compares two periods and surfaces the queries and pages that moved most.                        |
-| `find_quick_wins`      | Queries ranking 8–20 (by default) with high impressions, ranked by clicks available.            |
-| `find_cannibalization` | Queries where several of your pages compete for the same ranking.                               |
-| `find_ctr_anomalies`   | Queries whose CTR is clearly below what their position predicts.                                |
-| `find_content_decay`   | Pages whose clicks keep declining.                                                              |
-| `geo_funnel`           | Per page: AI crawler requests, imported Bing AI citations, AI referral visits and clicks.       |
-| `ai_crawlers`          | AI crawler requests by crawler, operator, purpose, path, status or date.                        |
-| `search_crawlers`      | Search engine crawler requests (Googlebot, Bingbot, ...): Search Console's Crawl stats, kept.   |
-| `index_coverage`       | Indexed and not-indexed sitemap URLs by coverage state, rich result issues and recent changes.  |
-| `inspect_url`          | Live Google Search Console URL inspection.                                                      |
-| `list_sitemaps`        | Lists the sitemaps Search Console knows and their status.                                       |
-| `submit_sitemap`       | Submits a sitemap to GSC. **Only registered with `ENABLE_WRITES=true`**; needs GSC Full access. |
-| `setup_status`         | Reports configuration, readiness and the last sync, so you (or an agent) can verify a deploy.   |
-| `list_apps`            | Lists configured apps, their connected stores, App Store report status and stored data.         |
-| `app_performance`      | Store funnel per store and period; by date, territory, source or referrer; chart positions.     |
-| `app_search_terms`     | Google Play search terms: visitors, acquisitions, conversion, change and low converters.        |
-| `app_reviews`          | Ratings over time, star distribution and reviews, filtered by stars, territory, version, text.  |
-| `app_stability`        | Crash and ANR rates (Google Play) and crash counts (App Store) per day or app version.          |
+| Tool                   | What it does                                                                                     |
+| ---------------------- | ------------------------------------------------------------------------------------------------ |
+| `list_sites`           | Lists configured sites, their connected sources and the date range stored per dataset.           |
+| `query_performance`    | Clicks, impressions, CTR and position by date, dimension and filter, from GSC or Bing.           |
+| `compare_periods`      | Compares two periods and surfaces the queries and pages that moved most.                         |
+| `find_quick_wins`      | Queries ranking 8–20 (by default) with high impressions, ranked by clicks available.             |
+| `find_cannibalization` | Queries where several of your pages compete for the same ranking.                                |
+| `find_ctr_anomalies`   | Queries whose CTR is clearly below what their position predicts.                                 |
+| `find_content_decay`   | Pages whose clicks keep declining.                                                               |
+| `geo_funnel`           | Per page: AI crawler requests, imported Bing AI citations, AI referral visits and clicks.        |
+| `ai_crawlers`          | AI crawler requests by crawler, operator, purpose, path, status or date.                         |
+| `search_crawlers`      | Search engine crawler requests (Googlebot, Bingbot, ...): Search Console's Crawl stats, kept.    |
+| `index_coverage`       | Indexed and not-indexed sitemap URLs by coverage state, rich result issues and recent changes.   |
+| `inspect_url`          | Live Google Search Console URL inspection.                                                       |
+| `list_sitemaps`        | Lists the sitemaps Search Console knows and their status.                                        |
+| `submit_sitemap`       | Submits a sitemap to GSC. **Only registered with `ENABLE_WRITES=true`**; needs GSC Full access.  |
+| `setup_status`         | Reports configuration, readiness and the last sync, so you (or an agent) can verify a deploy.    |
+| `list_apps`            | Lists configured apps, their connected stores, App Store report status and stored data.          |
+| `app_performance`      | Store funnel, revenue and sessions per store and period; by date, territory, source or referrer. |
+| `app_search_terms`     | Google Play search terms: visitors, acquisitions, conversion, change and low converters.         |
+| `app_reviews`          | Ratings over time, star distribution and reviews, filtered by stars, territory, version, text.   |
+| `app_stability`        | Crash and ANR rates (Google Play) and crash counts (App Store) per day or app version.           |
 
 All tools are read-only except `submit_sitemap`. Common parameters: `site`, `start` and `end`
 (`YYYY-MM-DD`), `days` (default 28), `source` (`gsc` or `bing`, default `gsc`), `searchType` (`web`,

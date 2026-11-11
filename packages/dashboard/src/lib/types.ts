@@ -576,6 +576,19 @@ export interface AppMetrics {
   activeDevices: number;
   pageConversion: number | null;
   impressionConversion: number | null;
+  purchases: number;
+  proceedsCents: number;
+  salesCents: number;
+  payingUsers: number;
+  sessions: number;
+  sessionSeconds: number;
+  sessionDevices: number;
+  /** In the store's currency (`currency` of the store). */
+  proceeds: number;
+  sales: number;
+  proceedsPerDownload: number | null;
+  averageSessionSeconds: number | null;
+  sessionsPerDevice: number | null;
 }
 
 export interface AppRow extends AppMetrics {
@@ -613,7 +626,14 @@ export interface AppPerformanceResponse {
   name: string;
   range: DateRange;
   previousRange: DateRange;
-  stores: Array<{ store: AppStore; current: AppMetrics; previous: AppMetrics; series: Array<AppMetrics & { date: string }> }>;
+  stores: Array<{
+    store: AppStore;
+    /** Currency of the store's amounts (App Store: USD); null while the store reports none. */
+    currency: string | null;
+    current: AppMetrics;
+    previous: AppMetrics;
+    series: Array<AppMetrics & { date: string }>;
+  }>;
   rows?: AppRow[];
   referrers?: AppReferrerRow[];
   charts?: AppChartRank[];

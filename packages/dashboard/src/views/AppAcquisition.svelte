@@ -11,7 +11,7 @@
   import Skeleton from '../components/Skeleton.svelte';
   import { apiUrl } from '../lib/api';
   import { regionName, sourceLabel, STORE_LABEL } from '../lib/apps';
-  import { deltaCompact, int, percent, rangeLabel } from '../lib/format';
+  import { deltaCompact, int, money, percent, rangeLabel } from '../lib/format';
   import { resource } from '../lib/resource.svelte';
   import { ui } from '../lib/state.svelte';
   import type { Column } from '../lib/table';
@@ -36,11 +36,22 @@
   /** Page views as each store counts them: product page views (App Store), unique visitors (Google Play). */
   const views = (r: AppRow) => (r.store === 'play' ? r.pageViewsUnique : r.pageViews);
 
+  /** Amounts are per store currency (App Store: USD); a column shows them only when the rows share one. */
+  const currencyOf = (r: { store?: AppStore }) => bySource.data?.stores.find((s) => s.store === r.store)?.currency ?? byTerritory.data?.stores.find((s) => s.store === r.store)?.currency ?? null;
+  const territoryCurrency = $derived.by(() => {
+    const paid = (byTerritory.data?.rows ?? []).filter((r) => r.proceedsCents !== 0);
+    const currencies = new Set(paid.map(currencyOf));
+    return currencies.size === 1 ? [...currencies][0]! : null;
+  });
+
   const sourceGroups = $derived(
     (['apple', 'play'] as const)
       .map((s) => ({
         store: s,
-        rows: (bySource.data?.rows ?? []).filter((r) => r.store === s && (r.downloads > 0 || views(r) > 0)).sort((a, b) => b.downloads - a.downloads),
+        // A source can bring revenue without new downloads in the period (purchases by earlier users).
+        rows: (bySource.data?.rows ?? [])
+          .filter((r) => r.store === s && (r.downloads > 0 || views(r) > 0 || r.proceedsCents !== 0 || r.purchases !== 0))
+          .sort((a, b) => b.downloads - a.downloads || b.proceedsCents - a.proceedsCents),
       }))
       .filter((g) => g.rows.length > 0),
   );
@@ -58,9 +69,12 @@
   const playGrouped = $derived((byTerritory.data?.rows ?? []).some((r) => r.store === 'play' && r.territory === 'OTHER' && views(r) > 0));
   const territoryCols: Column<AppRow>[] = $derived([
     { key: 'territory', label: 'Territory', grow: true, sortable: true, render: territoryCell },
-    ...(both ? [{ key: 'store', label: 'Store', sortable: true, text: (r: AppRow) => (r.store ? STORE_LABEL[r.store] : '') }] : []),
+    ...(both && store === 'all' ? [{ key: 'store', label: 'Store', sortable: true, text: (r: AppRow) => (r.store ? STORE_LABEL[r.store] : '') }] : []),
     { key: 'views', label: 'Page views', align: 'right', sortable: true, sortValue: views, text: (r) => int(views(r)), bar: (r) => ({ value: views(r), max: maxViews }) },
     { key: 'downloads', label: 'Downloads', align: 'right', sortable: true, text: (r) => int(r.downloads) },
+    ...(territoryCurrency
+      ? [{ key: 'proceeds', label: 'Proceeds', align: 'right' as const, sortable: true, text: (r: AppRow) => (r.proceedsCents !== 0 ? money(r.proceeds, territoryCurrency, true) : '') }]
+      : []),
     // Google Play's conversion means little once its visitors are grouped; its installs by country do.
     showInstalls
       ? { key: 'installs', label: 'Installs', align: 'right', sortable: true, text: (r) => int(r.installs) }
@@ -118,7 +132,11 @@
             {#if sourceGroups.length > 1}<h3 class="store">{STORE_LABEL[g.store]}</h3>{/if}
             <BarList
               label="{STORE_LABEL[g.store]} downloads by source"
-              items={g.rows.map((r) => ({ key: `${g.store}-${r.source}`, label: sourceLabel(r.source), value: r.downloads, meta: `${int(views(r))} page views · ${percent(r.pageConversion)}` }))} />
+              items={g.rows.map((r) => {
+                const cur = currencyOf(r);
+                const paid = cur && r.proceedsCents !== 0 ? ` · ${money(r.proceeds, cur, true)}` : '';
+                return { key: `${g.store}-${r.source}`, label: sourceLabel(r.source), value: r.downloads, meta: `${int(views(r))} page views · ${percent(r.pageConversion)}${paid}` };
+              })} />
           {/each}
         {/if}
       </Card>

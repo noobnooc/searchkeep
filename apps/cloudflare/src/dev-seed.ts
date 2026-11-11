@@ -304,6 +304,20 @@ export async function seedAppDemo(store: Store, app: AppConfig, siteDomain = 'ac
             redownloads: Math.round(pageViews * 0.05),
             installs: Math.round(pageViews * 0.25),
             deletions: Math.round(pageViews * 0.04),
+            // Revenue and sessions (ADR 0010): search buyers pay more often than browsers.
+            ...(() => {
+              const purchases = Math.round(pageViews * (source === 'search' ? 0.04 : 0.02) * (0.6 + r()));
+              const sessions = Math.round(pageViews * 1.8 * (0.7 + r() * 0.6));
+              return {
+                purchases,
+                proceedsCents: purchases * 489,
+                salesCents: purchases * 699,
+                payingUsers: Math.round(purchases * 0.9),
+                sessions,
+                sessionSeconds: sessions * Math.round(70 + r() * 60),
+                sessionDevices: Math.max(0, Math.round(sessions / 3)),
+              };
+            })(),
           });
         }
       referrers.push(
@@ -330,6 +344,13 @@ export async function seedAppDemo(store: Store, app: AppConfig, siteDomain = 'ac
       'redownloads',
       'installs',
       'deletions',
+      'purchases',
+      'proceedsCents',
+      'salesCents',
+      'payingUsers',
+      'sessions',
+      'sessionSeconds',
+      'sessionDevices',
     ] as const;
     n += await store.writeAppStoreDaily(app.id, 'apple', { metrics: [...metrics], shape: 'cross', dates, rows });
     n += await store.writeAppReferrers(app.id, 'apple', { metrics: ['pageViews', 'downloads'], dates, rows: referrers });
