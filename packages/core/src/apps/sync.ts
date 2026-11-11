@@ -34,6 +34,7 @@ import {
   classifyPlayFile,
   PLAY_COLLECTORS,
   playReadMark,
+  playFinancialPrefixes,
   playPrefixes,
   type AscReportSpec,
 } from './reports.js';
@@ -363,7 +364,6 @@ function planPlay(args: AppPlanArgs, app: AppConfig, place: Place): void {
   const bucket = ctx.config.play.bucket!;
   const pkg = app.playPackage!;
   const siteId = appTaskId(app.id);
-  const listing = parseJson<PlayListing>(get(syncKeys.playListing(app.id)));
   /** This month and last month are the latest data; older months are history. */
   const recentMonths = new Set([
     today.slice(0, 7).replace('-', ''),
@@ -392,7 +392,7 @@ function planPlay(args: AppPlanArgs, app: AppConfig, place: Place): void {
         key: `play.${info.kind}:${app.id}:${obj.name}:${mark}`,
         run: async () => {
           if (fresh && (await store.getMeta(key)) === mark) return null;
-          const collector = PLAY_COLLECTORS[info.kind]();
+          const collector = PLAY_COLLECTORS[info.kind](info, pkg, obj.name);
           await play.readCsv(bucket, obj.name, (row) => collector.add(row));
           const res = await collector.write(store, app.id);
           await store.setMeta(key, mark);
@@ -403,32 +403,50 @@ function planPlay(args: AppPlanArgs, app: AppConfig, place: Place): void {
     }
   };
 
-  if (!listing || listing.day !== today) {
-    const prefixes = playPrefixes(pkg);
+  /**
+   * One listing of report files per day. The financial files (ADR 0010) are listed by a unit of
+   * their own: they need "View financial data", and both units fit the smallest call budget.
+   */
+  const planListing = (kind: 'reports' | 'finance') => {
+    const key = kind === 'reports' ? syncKeys.playListing(app.id) : syncKeys.playFinanceListing(app.id);
+    const saved = parseJson<PlayListing>(get(key));
+    if (saved && saved.day === today) return planObjects(saved.objects, place, false);
+    const prefixes = kind === 'reports' ? playPrefixes(pkg) : playFinancialPrefixes(pkg);
     place({
-      task: 'play.list',
+      task: kind === 'reports' ? 'play.list' : 'play.finance_list',
       siteId,
       source: 'play',
       backfill: false,
       calls: prefixes.length,
-      key: `play.list:${app.id}:${today}`,
+      key: `play.${kind === 'reports' ? 'list' : 'finance_list'}:${app.id}:${today}`,
       run: async () => {
         const objects: PlayListing['objects'] = [];
+        let finance: PlayListing['finance'];
         for (const prefix of prefixes) {
-          for (const o of await play.listObjects(bucket, prefix)) {
-            if (classifyPlayFile(o.name, pkg)) objects.push({ name: o.name, generation: o.generation });
+          let list: Awaited<ReturnType<typeof play.listObjects>>;
+          try {
+            list = await play.listObjects(bucket, prefix);
+          } catch (err) {
+            // Without "View financial data" the financial folders answer 403; the rest goes on.
+            if (kind === 'reports' || !(err instanceof SourceError) || (err.status !== 403 && err.status !== 401)) throw err;
+            finance = 'denied';
+            continue;
           }
+          for (const o of list) if (classifyPlayFile(o.name, pkg)) objects.push({ name: o.name, generation: o.generation });
         }
+        if (kind === 'finance') finance ??= 'ok';
         // Newest months first, so the latest data lands before history.
         objects.sort((a, b) => b.name.localeCompare(a.name));
-        await store.setMeta(syncKeys.playListing(app.id), JSON.stringify({ day: today, objects } satisfies PlayListing));
-        if (objects.length === 0) ctx.log?.(`play ${app.id}: no report files for ${pkg} in the bucket yet`);
+        await store.setMeta(key, JSON.stringify({ day: today, objects, ...(finance ? { finance } : {}) } satisfies PlayListing));
+        if (kind === 'reports' && objects.length === 0) ctx.log?.(`play ${app.id}: no report files for ${pkg} in the bucket yet`);
         planObjects(objects, enqueue, true);
         return 0;
       },
-      skip: () => store.setMeta(syncKeys.playListing(app.id), JSON.stringify({ day: today, objects: [] } satisfies PlayListing)),
+      skip: () => store.setMeta(key, JSON.stringify({ day: today, objects: [] } satisfies PlayListing)),
     });
-  } else planObjects(listing.objects, place, false);
+  };
+  planListing('reports');
+  planListing('finance');
 
   // Crash and ANR rates, once a day.
   const vitals = parseJson<{ through?: IsoDate; checkedOn?: IsoDate }>(get(syncKeys.playVitals(app.id))) ?? {};

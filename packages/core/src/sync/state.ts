@@ -100,6 +100,8 @@ export const syncKeys = {
   ascReviews: (app: string) => `app:asc:reviews:${app}`,
   /** The Play Console report files of an app, listed once a day (`PlayListing`). */
   playListing: (app: string) => `app:play:list:${app}`,
+  /** The financial files of an app (earnings of the account, its subscriptions), listed once a day (`PlayListing`). */
+  playFinanceListing: (app: string) => `app:play:finlist:${app}`,
   /** Generation of a Play report file that was read. */
   playObject: (app: string, name: string) => `app:play:obj:${app}:${name}`,
   /** Newest day of Play crash and ANR rates synced. */
@@ -248,4 +250,6 @@ export interface ReviewCursor {
 export interface PlayListing {
   day: IsoDate;
   objects: Array<{ name: string; generation: string }>;
+  /** Whether the financial files could be listed ("View financial data", ADR 0010). */
+  finance?: 'ok' | 'denied';
 }

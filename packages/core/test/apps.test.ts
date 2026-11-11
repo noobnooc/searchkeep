@@ -194,3 +194,92 @@ describe('Google Play installs files', () => {
     ]);
   });
 });
+
+describe('Google Play financial files', () => {
+  /** A minimal ZIP archive with one file, stored or deflated, optionally with a data descriptor. */
+  async function zip(name: string, text: string, deflate: boolean, descriptor = false): Promise<Uint8Array> {
+    const plain = new TextEncoder().encode(text);
+    const data = deflate
+      ? new Uint8Array(
+          await new Response(
+            stream(plain).pipeThrough(new CompressionStream('deflate-raw') as unknown as ReadableWritablePair<Uint8Array, Uint8Array>),
+          ).arrayBuffer(),
+        )
+      : plain;
+    const nameBytes = new TextEncoder().encode(name);
+    const local = new DataView(new ArrayBuffer(30));
+    local.setUint32(0, 0x04034b50, true);
+    local.setUint16(6, descriptor ? 8 : 0, true);
+    local.setUint16(8, deflate ? 8 : 0, true);
+    if (!descriptor) {
+      local.setUint32(18, data.length, true);
+      local.setUint32(22, plain.length, true);
+    }
+    local.setUint16(26, nameBytes.length, true);
+    const central = new DataView(new ArrayBuffer(46));
+    central.setUint32(0, 0x02014b50, true);
+    central.setUint16(10, deflate ? 8 : 0, true);
+    central.setUint32(20, data.length, true);
+    central.setUint32(24, plain.length, true);
+    central.setUint16(28, nameBytes.length, true);
+    central.setUint32(42, 0, true);
+    const trailer = descriptor ? new Uint8Array(16) : new Uint8Array(0);
+    const centralAt = 30 + nameBytes.length + data.length + trailer.length;
+    const end = new DataView(new ArrayBuffer(22));
+    end.setUint32(0, 0x06054b50, true);
+    end.setUint16(8, 1, true);
+    end.setUint16(10, 1, true);
+    end.setUint32(12, 46 + nameBytes.length, true);
+    end.setUint32(16, centralAt, true);
+    const parts = [
+      new Uint8Array(local.buffer),
+      nameBytes,
+      data,
+      trailer,
+      new Uint8Array(central.buffer),
+      nameBytes,
+      new Uint8Array(end.buffer),
+    ];
+    const out = new Uint8Array(parts.reduce((n, p) => n + p.length, 0));
+    let at = 0;
+    for (const p of parts) {
+      out.set(p, at);
+      at += p.length;
+    }
+    return out;
+  }
+
+  it('reads the CSV inside a ZIP archive, stored or deflated, also with data descriptors', async () => {
+    const csv = 'Transaction Date,Amount (Merchant Currency)\nOct 10, 2026,9.99\n';
+    for (const [deflate, descriptor] of [
+      [false, false],
+      [true, false],
+      [true, true],
+    ] as const) {
+      const rows: Array<Record<string, string>> = [];
+      const bytes = await zip('earnings_202610.csv', csv.replace('Oct 10, 2026', '"Oct 10, 2026"'), deflate, descriptor);
+      await readDelimited(stream(bytes.subarray(0, 7), bytes.subarray(7)), (r) => rows.push(r));
+      expect(rows).toEqual([{ 'transaction date': 'Oct 10, 2026', 'amount (merchant currency)': '9.99' }]);
+    }
+    await expect(readDelimited(stream(await zip('notes.txt', 'x', false)), () => undefined)).rejects.toThrow(/no CSV file/);
+  });
+
+  it('reads month-name dates and recognizes subscription and earnings files', () => {
+    expect(cellDate('Oct 10, 2026')).toBe('2026-10-10');
+    expect(cellDate('Sept 3, 2026')).toBe('2026-09-03');
+    expect(cellDate('Foo 3, 2026')).toBeNull();
+    expect(
+      classifyPlayFile('financial-stats/subscriptions/subscriptions_com.acme.app_pro_monthly_202610_country.csv', 'com.acme.app'),
+    ).toEqual({
+      kind: 'subscriptions',
+      month: '202610',
+      product: 'pro_monthly',
+    });
+    expect(classifyPlayFile('earnings/earnings_202610_1234567890-0.zip', 'com.acme.app')).toEqual({ kind: 'earnings', month: '202610' });
+    expect(classifyPlayFile('sales/salesreport_202610.zip', 'com.acme.app')).toBeNull();
+    // Another package's file (com.acme.app.pro) is not this package's.
+    expect(
+      classifyPlayFile('financial-stats/subscriptions/subscriptions_com.acme.app.pro_x_202610_country.csv', 'com.acme.app'),
+    ).toBeNull();
+  });
+});

@@ -13,6 +13,7 @@ import {
   appReviews,
   appSearchTerms,
   appStability,
+  appSubscriptions,
   listApps,
   comparePeriods,
   findCannibalization,
@@ -126,6 +127,7 @@ export const TOOL_NAMES = [
   'app_search_terms',
   'app_reviews',
   'app_stability',
+  'app_subscriptions',
 ] as const;
 
 /** Parameters shared by the app tools (ADR 0009). */
@@ -507,6 +509,22 @@ export function createSearchkeepMcpServer(deps: McpDeps): McpServer {
       annotations: READ_ONLY,
     },
     async (args) => run(() => appStability(ctx, clean(args))),
+  );
+
+  server.registerTool(
+    'app_subscriptions',
+    {
+      title: 'App subscriptions',
+      description:
+        'Google Play subscriptions: new, canceled and active subscriptions per product and country over the period, against the previous period, with the daily trend. Needs the service account to view financial data.',
+      inputSchema: {
+        ...appCommon,
+        product: z.string().optional().describe('Only this subscription product id.'),
+        territory: z.string().optional().describe('Only this country (e.g. US).'),
+      },
+      annotations: READ_ONLY,
+    },
+    async (args) => run(() => appSubscriptions(ctx, clean(args))),
   );
 
   return server;

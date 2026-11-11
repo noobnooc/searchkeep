@@ -737,3 +737,23 @@ export interface EnableAppStoreResponse {
   snapshot: { id: string; created: boolean } | null;
   notes: string[];
 }
+
+export interface AppSubscriptionTotals {
+  newSubscriptions: number;
+  canceledSubscriptions: number;
+  /** On the last day with data (a level). */
+  activeSubscriptions: number;
+  net: number;
+}
+
+export interface AppSubscriptionsResponse {
+  app: string;
+  range: DateRange;
+  previousRange: DateRange;
+  current: AppSubscriptionTotals;
+  previous: AppSubscriptionTotals;
+  products: Array<AppSubscriptionTotals & { product: string }>;
+  territories: Array<AppSubscriptionTotals & { territory: string }>;
+  series: Array<{ date: string; newSubscriptions: number; canceledSubscriptions: number; activeSubscriptions: number }>;
+  notes: string[];
+}

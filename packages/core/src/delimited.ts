@@ -169,6 +169,76 @@ class Utf16Decoder {
  * (some servers already decompress), decodes UTF-8 or UTF-16 by byte order mark, and parses it.
  * Returns the number of data rows.
  */
+/** Largest ZIP archive read (whole, since its sizes are at its end). Google Play's earnings files are far smaller. */
+const MAX_ZIP_BYTES = 64 * 1024 * 1024;
+
+async function readAll(head: Uint8Array, reader: ReadableStreamDefaultReader<Uint8Array>): Promise<Uint8Array> {
+  const parts = [head];
+  let size = head.length;
+  for (;;) {
+    const next = await reader.read();
+    if (next.done) break;
+    size += next.value.length;
+    if (size > MAX_ZIP_BYTES) {
+      await reader.cancel().catch(() => undefined);
+      throw new Error('ZIP archive too large');
+    }
+    parts.push(next.value);
+  }
+  const out = new Uint8Array(size);
+  let at = 0;
+  for (const p of parts) {
+    out.set(p, at);
+    at += p.length;
+  }
+  return out;
+}
+
+/**
+ * The first `.csv` file of a ZIP archive (stored or deflated), as a stream. Reads the central
+ * directory, so archives written with data descriptors work too. Web standard APIs only.
+ */
+export function unzipFirstCsv(zip: Uint8Array): ReadableStream<Uint8Array> {
+  const view = new DataView(zip.buffer, zip.byteOffset, zip.byteLength);
+  // End of central directory: the last 0x06054b50 within the trailing 64 KiB comment window.
+  let eocd = -1;
+  for (let i = zip.length - 22; i >= Math.max(0, zip.length - 22 - 65_535); i--) {
+    if (view.getUint32(i, true) === 0x06054b50) {
+      eocd = i;
+      break;
+    }
+  }
+  if (eocd < 0) throw new Error('not a ZIP archive');
+  const entries = view.getUint16(eocd + 10, true);
+  let at = view.getUint32(eocd + 16, true);
+  for (let n = 0; n < entries && at + 46 <= zip.length; n++) {
+    if (view.getUint32(at, true) !== 0x02014b50) break;
+    const method = view.getUint16(at + 10, true);
+    const compressed = view.getUint32(at + 20, true);
+    const nameLength = view.getUint16(at + 28, true);
+    const extraLength = view.getUint16(at + 30, true);
+    const commentLength = view.getUint16(at + 32, true);
+    const local = view.getUint32(at + 42, true);
+    const name = new TextDecoder().decode(zip.subarray(at + 46, at + 46 + nameLength));
+    at += 46 + nameLength + extraLength + commentLength;
+    if (!/\.csv$/i.test(name)) continue;
+    if (view.getUint32(local, true) !== 0x04034b50) throw new Error('broken ZIP archive');
+    const start = local + 30 + view.getUint16(local + 26, true) + view.getUint16(local + 28, true);
+    const data = zip.subarray(start, start + compressed);
+    const raw = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(data);
+        controller.close();
+      },
+    });
+    if (method === 0) return raw;
+    if (method === 8)
+      return raw.pipeThrough(new DecompressionStream('deflate-raw') as unknown as ReadableWritablePair<Uint8Array, Uint8Array>);
+    throw new Error(`unsupported ZIP compression method ${method}`);
+  }
+  throw new Error('no CSV file in the ZIP archive');
+}
+
 export async function readDelimited(
   body: ReadableStream<Uint8Array>,
   onRow: (row: DelimitedRow) => void,
@@ -176,6 +246,17 @@ export async function readDelimited(
 ): Promise<number> {
   let reader = body.getReader();
   let first = await reader.read();
+  if (
+    !first.done &&
+    first.value.length >= 4 &&
+    first.value[0] === 0x50 &&
+    first.value[1] === 0x4b &&
+    first.value[2] === 0x03 &&
+    first.value[3] === 0x04
+  ) {
+    // A ZIP archive (Google Play's financial reports): its sizes are at the end, so read it whole.
+    return readDelimited(unzipFirstCsv(await readAll(first.value, reader)), onRow, opts);
+  }
   if (!first.done && first.value.length >= 2 && first.value[0] === 0x1f && first.value[1] === 0x8b) {
     // Re-assemble the stream with the chunk already read, then decompress it.
     const head = first.value;

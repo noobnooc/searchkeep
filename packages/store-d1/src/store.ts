@@ -60,6 +60,10 @@ import {
   type UrlInspectionInput,
   type WebAnalyticsInput,
   type WebVitalsInput,
+  type AppSubscriptionInput,
+  type AppSubscriptionQuery,
+  type AppSubscriptionRow,
+  type AppEarningsInput,
 } from '@searchkeep/core';
 import { desc, eq } from 'drizzle-orm';
 import { drizzle, type DrizzleD1Database } from 'drizzle-orm/d1';
@@ -1689,6 +1693,115 @@ export class D1Store implements Store {
     }));
   }
 
+  async writeAppEarningsFile(appId: string, file: string, rows: AppEarningsInput[]): Promise<IsoDate[]> {
+    const agg = new Map<string, { d: string; t: string; p: number; r: number; s: number }>();
+    for (const x of rows) {
+      const key = `${x.date}|${x.territory}`;
+      const e = agg.get(key) ?? { d: x.date, t: x.territory, p: 0, r: 0, s: 0 };
+      e.p += Math.round(x.purchases);
+      e.r += Math.round(x.proceedsCents);
+      e.s += Math.round(x.salesCents);
+      agg.set(key, e);
+    }
+    const before = await this.all<{ date: string }>('SELECT DISTINCT date FROM app_earnings WHERE app_id = ?1 AND file = ?2', appId, file);
+    await this.batch([
+      this.db.prepare('DELETE FROM app_earnings WHERE app_id = ?1 AND file = ?2').bind(appId, file),
+      ...chunks([...agg.values()]).map((group) =>
+        this.db
+          .prepare(
+            `INSERT INTO app_earnings (app_id, file, date, territory, purchases, proceeds_cents, sales_cents)
+             SELECT ?1, ?2, j.value->>'d', j.value->>'t', j.value->>'p', j.value->>'r', j.value->>'s' FROM json_each(?3) j WHERE true`,
+          )
+          .bind(appId, file, JSON.stringify(group)),
+      ),
+    ]);
+    return [...new Set([...before.map((x) => x.date), ...[...agg.values()].map((x) => x.d)])].sort();
+  }
+
+  async sumAppEarnings(appId: string, dates: IsoDate[]): Promise<AppEarningsInput[]> {
+    if (dates.length === 0) return [];
+    const rows = await this.all<{ date: string; territory: string; purchases: number; proceedsCents: number; salesCents: number }>(
+      `SELECT date, territory, SUM(purchases) AS purchases, SUM(proceeds_cents) AS proceedsCents, SUM(sales_cents) AS salesCents
+       FROM app_earnings WHERE app_id = ?1 AND date IN (SELECT value FROM json_each(?2)) GROUP BY date, territory`,
+      appId,
+      JSON.stringify([...new Set(dates)]),
+    );
+    return rows.map((r) => ({
+      date: r.date,
+      territory: r.territory,
+      purchases: Number(r.purchases) || 0,
+      proceedsCents: Number(r.proceedsCents) || 0,
+      salesCents: Number(r.salesCents) || 0,
+    }));
+  }
+
+  async writeAppSubscriptions(appId: string, product: string, dates: IsoDate[], rows: AppSubscriptionInput[]): Promise<number> {
+    const agg = new Map<string, { d: string; t: string; b: string; n: number; c: number; a: number }>();
+    for (const r of rows) {
+      if (r.product !== product) continue;
+      const key = `${r.date}|${r.territory}|${r.basePlan}`;
+      const e = agg.get(key) ?? { d: r.date, t: r.territory, b: r.basePlan, n: 0, c: 0, a: 0 };
+      e.n += Math.round(r.newSubscriptions);
+      e.c += Math.round(r.canceledSubscriptions);
+      e.a += Math.round(r.activeSubscriptions);
+      agg.set(key, e);
+    }
+    const days = [...new Set([...dates, ...[...agg.values()].map((x) => x.d)])];
+    if (days.length === 0) return 0;
+    // The days a file covers are replaced as a whole: a country or base plan it no longer lists goes.
+    const statements = [
+      this.db
+        .prepare('DELETE FROM app_subscriptions_daily WHERE app_id = ?1 AND product = ?2 AND date IN (SELECT value FROM json_each(?3))')
+        .bind(appId, product, JSON.stringify(days)),
+      ...chunks([...agg.values()]).map((group) =>
+        this.db
+          .prepare(
+            `INSERT INTO app_subscriptions_daily (app_id, date, territory, product, base_plan, new_subscriptions, canceled_subscriptions, active_subscriptions)
+             SELECT ?1, j.value->>'d', j.value->>'t', ?2, j.value->>'b', j.value->>'n', j.value->>'c', j.value->>'a' FROM json_each(?3) j WHERE true`,
+          )
+          .bind(appId, product, JSON.stringify(group)),
+      ),
+    ];
+    await this.batch(statements);
+    return agg.size;
+  }
+
+  async queryAppSubscriptions(q: AppSubscriptionQuery): Promise<AppSubscriptionRow[]> {
+    const dims = allow([...new Set(q.dimensions)], ['date', 'product', 'territory'] as const, 'dimension');
+    const binds: Bind[] = [q.appId, q.range.start, q.range.end];
+    const where = ['app_id = ?1', 'date >= ?2', 'date <= ?3'];
+    if (q.product) {
+      binds.push(q.product);
+      where.push(`product = ?${binds.length}`);
+    }
+    if (q.territory) {
+      binds.push(q.territory);
+      where.push(`territory = ?${binds.length}`);
+    }
+    const filter = where.join(' AND ');
+    // Active subscriptions are a level: per date that day's, otherwise the range's last day with data.
+    const active = dims.includes('date')
+      ? 'SUM(active_subscriptions)'
+      : `SUM(CASE WHEN date = (SELECT MAX(date) FROM app_subscriptions_daily WHERE ${filter}) THEN active_subscriptions ELSE 0 END)`;
+    const rows = await this.all<Record<string, string | number | null>>(
+      `SELECT ${dims.map((d) => `${d}, `).join('')}SUM(new_subscriptions) AS newSubscriptions, SUM(canceled_subscriptions) AS canceledSubscriptions, ${active} AS activeSubscriptions
+       FROM app_subscriptions_daily WHERE ${filter}
+       ${dims.length ? `GROUP BY ${dims.join(', ')}` : ''}
+       HAVING COUNT(*) > 0
+       ORDER BY ${dims.includes('date') ? 'date ASC' : 'activeSubscriptions DESC, newSubscriptions DESC'}${dims.length ? `, ${dims.join(', ')}` : ''}
+       LIMIT ${Math.max(1, Math.min(5000, Math.floor(q.limit ?? 1000)))}`,
+      ...binds,
+    );
+    return rows.map((r) => ({
+      ...(r.date != null ? { date: String(r.date) } : {}),
+      ...(r.product != null ? { product: String(r.product) } : {}),
+      ...(r.territory != null ? { territory: String(r.territory) } : {}),
+      newSubscriptions: Number(r.newSubscriptions) || 0,
+      canceledSubscriptions: Number(r.canceledSubscriptions) || 0,
+      activeSubscriptions: Number(r.activeSubscriptions) || 0,
+    }));
+  }
+
   async queryAppChartRanks(appId: string, range: DateRange): Promise<AppChartRankInput[]> {
     const rows = await this.all<AppChartRankInput>(
       `SELECT date, territory, chart, genre, rank FROM app_chart_ranks WHERE app_id = ?1 AND date >= ?2 AND date <= ?3
@@ -1716,6 +1829,7 @@ export class D1Store implements Store {
       ['ratings', 'app_ratings', true],
       ['reviews', 'app_reviews', true],
       ['vitals', 'app_vitals', true],
+      ['subscriptions', 'app_subscriptions_daily', false],
     ];
     for (const id of ids) {
       const results = await this.db.batch(

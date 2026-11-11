@@ -1,4 +1,5 @@
 import type {
+  AppEarningsInput,
   AiCitationInput,
   AppChartRankInput,
   AppConfig,
@@ -20,13 +21,16 @@ import type {
   AppStoreQuery,
   AppStoreRow,
   AppStoreWrite,
+  AppSubscriptionInput,
+  AppSubscriptionQuery,
+  AppSubscriptionRow,
   AppVitalsQuery,
   AppVitalsRow,
   AppVitalsWrite,
   AppearanceInput,
   BreakdownInput,
-  CrawlerKind,
   CrawlIssueInput,
+  CrawlerKind,
   CrawlerQuery,
   CrawlerRequestInput,
   CrawlerRow,
@@ -35,6 +39,7 @@ import type {
   GscSearchType,
   IndexCoverageQuery,
   IndexCoverageResult,
+  IsoDate,
   PageCount,
   PerformanceQuery,
   PerformanceRow,
@@ -49,7 +54,6 @@ import type {
   UrlInspectionInput,
   WebAnalyticsInput,
   WebVitalsInput,
-  IsoDate,
 } from './types.js';
 
 /**
@@ -163,6 +167,15 @@ export interface Store {
   writeAppReviews(appId: string, store: AppStore, rows: AppReviewInput[]): Promise<number>;
   writeAppVitals(appId: string, store: AppStore, w: AppVitalsWrite): Promise<number>;
   writeAppChartRanks(appId: string, rows: AppChartRankInput[]): Promise<number>;
+  /**
+   * Replaces one Google Play earnings file's sums (ADR 0010) and returns the days it covered before
+   * or covers now, whose totals then need recomputing.
+   */
+  writeAppEarningsFile(appId: string, file: string, rows: AppEarningsInput[]): Promise<IsoDate[]>;
+  /** Every earnings file's sums per day and buyer country, for those days. */
+  sumAppEarnings(appId: string, dates: IsoDate[]): Promise<AppEarningsInput[]>;
+  /** Replaces a subscription product's rows on the days in `dates` (Google Play, ADR 0010). */
+  writeAppSubscriptions(appId: string, product: string, dates: IsoDate[], rows: AppSubscriptionInput[]): Promise<number>;
 
   /**
    * Store funnel metrics grouped by the dimensions. Rows are chosen so nothing is counted twice:
@@ -180,6 +193,8 @@ export interface Store {
   /** Rates are weighted by distinct users when versions or days are combined. */
   queryAppVitals(q: AppVitalsQuery): Promise<AppVitalsRow[]>;
   queryAppChartRanks(appId: string, range: DateRange): Promise<AppChartRankInput[]>;
+  /** New and canceled subscriptions summed, active subscriptions as a level (see the row type). */
+  queryAppSubscriptions(q: AppSubscriptionQuery): Promise<AppSubscriptionRow[]>;
   /** Per app, store and dataset: first and last date. */
   appCoverage(appId?: string): Promise<AppDataCoverage[]>;
   /** Latest day with store funnel data for an app (and store). */

@@ -3,8 +3,16 @@
  * of a real store, with fake App Store Connect, Google Play and public feed clients.
  */
 import { beforeEach, describe, expect, it } from 'vitest';
-import { appPerformance, appReviews, appSearchTerms, appStability, listApps, startAppStoreReports } from '../apps/analysis.js';
-import { ASC_REPORTS, downloadReferrersCollector, engagementCollector } from '../apps/reports.js';
+import {
+  appPerformance,
+  appReviews,
+  appSearchTerms,
+  appStability,
+  appSubscriptions,
+  listApps,
+  startAppStoreReports,
+} from '../apps/analysis.js';
+import { ASC_REPORTS, downloadReferrersCollector, engagementCollector, playEarningsCollector } from '../apps/reports.js';
 import { loadConfig, withStoredApps, type SearchkeepConfig } from '../config.js';
 import { addDays, daysBetween } from '../dates.js';
 import type { DelimitedRow } from '../delimited.js';
@@ -204,9 +212,19 @@ function fakeAsc(opts: { listForbidden?: boolean; requests?: AscReportRequest[] 
   return { client, calls };
 }
 
-function fakePlay() {
+function fakePlay(opts: { financeDenied?: boolean } = {}) {
   const calls: string[] = [];
   const pkg = APP.playPackage;
+  const earning = (country: string, type: string, amount: string, product = pkg) => ({
+    description: 'GPA.0000-1111-2222-33333',
+    'transaction date': 'Oct 10, 2026',
+    'transaction type': type,
+    'package id': product,
+    'buyer country': country,
+    'buyer postal code': '94110',
+    'merchant currency': 'EUR',
+    'amount (merchant currency)': amount,
+  });
   const files: Record<string, DelimitedRow[]> = {
     [`stats/store_performance/store_performance_${pkg}_202610_country.csv`]: [
       { date: '2026-10-10', 'package name': pkg, country: 'US', 'store listing acquisitions': '10', 'store listing visitors': '40' },
@@ -264,10 +282,51 @@ function fakePlay() {
       },
     ],
     'stats/installs/installs_com.other.app_202610_country.csv': [],
+    [`financial-stats/subscriptions/subscriptions_${pkg}_pro_monthly_202610_country.csv`]: [
+      {
+        date: '2026-10-09',
+        country: 'US',
+        'base plan id': 'monthly',
+        'new subscriptions': '3',
+        'cancelled subscriptions': '1',
+        'active subscriptions': '20',
+      },
+      {
+        date: '2026-10-10',
+        country: 'US',
+        'base plan id': 'monthly',
+        'new subscriptions': '2',
+        'cancelled subscriptions': '0',
+        'active subscriptions': '22',
+      },
+      {
+        date: '2026-10-10',
+        country: 'DE',
+        'base plan id': 'monthly',
+        'new subscriptions': '1',
+        'cancelled subscriptions': '1',
+        'active subscriptions': '5',
+      },
+    ],
+    // The whole account's earnings: a charge with Google's fee and tax, a refunded charge, another app.
+    'earnings/earnings_202610_1234567890-0.zip': [
+      earning('US', 'Charge', '9.99'),
+      earning('US', 'Google fee', '-1.50'),
+      earning('US', 'Tax', '-1.60'),
+      earning('DE', 'Charge', '4.99'),
+      earning('DE', 'Google fee', '-0.75'),
+      earning('DE', 'Charge refund', '-4.99'),
+      earning('DE', 'Google fee refund', '0.75'),
+      earning('US', 'Charge', '100.00', 'com.other.app'),
+    ],
+    // An adjustment file with one more charge on the same day: it adds to the month's file.
+    'earnings/earnings_202610_1234567890-1.zip': [earning('US', 'Charge', '4.99'), earning('US', 'Google fee', '-0.75')],
   };
   const client: PlayClient = {
     async listObjects(_bucket, prefix) {
       calls.push(`list:${prefix}`);
+      if (opts.financeDenied && /^(financial-stats|earnings)\//.test(prefix))
+        throw new SourceError('play', 403, 'HTTP 403: does not have storage.objects.list access');
       return Object.keys(files)
         .filter((n) => n.startsWith(prefix))
         .map((name) => ({ name, generation: '1', size: 10, updated: '2026-10-19T00:00:00Z' }));
@@ -705,7 +764,26 @@ export function appContract(name: string, makeStore: () => Promise<Store>): void
           installs: 16,
           deletions: 3,
           activeDevices: 127,
+          // Earnings of this app only: 9.99 charged, 1.50 fee and 1.60 tax kept, the refunded charge nets
+          // out, and the adjustment file adds 4.99 charged and a 0.75 fee on the same day.
+          purchases: 2,
+          sales: 14.98,
+          proceeds: 11.13,
         });
+        expect(playPerf.stores[0]!.currency).toBe('EUR');
+        const subs = await appSubscriptions(ctx, { app: APP.id, start: '2026-10-01', end: '2026-10-19' });
+        expect(subs.current).toEqual({ newSubscriptions: 6, canceledSubscriptions: 2, activeSubscriptions: 27, net: 4 });
+        expect(subs.products).toEqual([
+          { product: 'pro_monthly', newSubscriptions: 6, canceledSubscriptions: 2, activeSubscriptions: 27, net: 4 },
+        ]);
+        expect(subs.territories.map((t) => [t.territory, t.activeSubscriptions, t.net])).toEqual([
+          ['US', 22, 4],
+          ['DE', 5, 0],
+        ]);
+        expect(subs.series.map((d) => [d.date, d.activeSubscriptions])).toEqual([
+          ['2026-10-09', 20],
+          ['2026-10-10', 27],
+        ]);
         expect(playPerf.referrers).toEqual([
           { store: 'play', kind: 'utm', referrer: 'acme.com', pageViews: 5, downloads: 6, ownSite: true },
         ]);
@@ -731,7 +809,7 @@ export function appContract(name: string, makeStore: () => Promise<Store>): void
 
         // Files of other packages are never read; the August file is history.
         expect(play.calls.some((c) => c.includes('com.other.app'))).toBe(false);
-        expect(play.calls.filter((c) => c.startsWith('read:'))).toHaveLength(6);
+        expect(play.calls.filter((c) => c.startsWith('read:'))).toHaveLength(9);
 
         const progress = await syncProgress({ store, config: cfg, clients: clients(), now: () => NOW });
         expect(progress.summary).toMatchObject({ apps: 1, appsWithRecentData: 1, issues: 0 });
@@ -907,6 +985,67 @@ export function appContract(name: string, makeStore: () => Promise<Store>): void
           pacing: {},
         });
         expect(next.calls).not.toContain('listReports:ongoing');
+      });
+
+      it('syncs the rest of Google Play when the service account may not view financial data', async () => {
+        const cfg = config({ APP_STORE_PUBLIC_DATA: 'false' });
+        const play = fakePlay({ financeDenied: true });
+        const run = await runSync({ store, config: cfg, clients: { play: play.client }, trigger: 'manual', now: NOW, pacing: {} });
+        expect(run.status).toBe('ok');
+        expect(play.calls).toContain(`read:stats/installs/installs_${APP.playPackage}_202610_country.csv`);
+        expect(play.calls.some((c) => c.startsWith('read:earnings/') || c.startsWith('read:financial-stats/'))).toBe(false);
+        expect(JSON.parse((await store.getMeta(syncKeys.playFinanceListing(APP.id)))!)).toMatchObject({ finance: 'denied', objects: [] });
+        const ctx = { store, config: cfg, clients: {}, now: () => NOW };
+        const perf = await appPerformance(ctx, { app: APP.id, store: 'play', start: '2026-10-01', end: '2026-10-19' });
+        expect(perf.stores[0]).toMatchObject({ currency: null, current: { installs: 16, proceeds: 0 } });
+        expect((await appSubscriptions(ctx, { app: APP.id, start: '2026-10-01', end: '2026-10-19' })).current.activeSubscriptions).toBe(0);
+      });
+
+      it('keeps each earnings file apart, so a file read again changes only its own part of a day', async () => {
+        const read = async (file: string, rows: DelimitedRow[]) => {
+          const c = playEarningsCollector(APP.playPackage, file);
+          for (const r of rows) c.add(r);
+          await c.write(store, APP.id);
+        };
+        const row = (country: string, amount: string): DelimitedRow => ({
+          'transaction date': 'Oct 10, 2026',
+          'transaction type': 'Charge',
+          'package id': APP.playPackage,
+          'buyer country': country,
+          'merchant currency': 'EUR',
+          'amount (merchant currency)': amount,
+        });
+        const byCountry = async () =>
+          (
+            await store.queryAppStore({
+              appId: APP.id,
+              store: 'play',
+              range: { start: '2026-10-10', end: '2026-10-10' },
+              dimensions: ['territory'],
+              orderBy: 'proceedsCents',
+            })
+          )
+            .filter((r) => r.proceedsCents !== 0)
+            .map((r) => [r.territory, r.proceedsCents]);
+        await read('earnings/earnings_202610.zip', [row('US', '9.99')]);
+        await read('earnings/earnings_202610_adjustments.zip', [row('US', '4.99')]);
+        expect(await byCountry()).toEqual([['US', 1498]]);
+        // The adjustment file changed: its US charge is gone and a German one came in.
+        await read('earnings/earnings_202610_adjustments.zip', [row('DE', '1.00')]);
+        expect(await byCountry()).toEqual([
+          ['US', 999],
+          ['DE', 100],
+        ]);
+      });
+
+      it('syncs Google Play within the smallest call budget', async () => {
+        const cfg = config({ APP_STORE_PUBLIC_DATA: 'false', SYNC_MAX_CALLS_PER_RUN: '5' });
+        const play = fakePlay();
+        for (let i = 0; i < 6; i++)
+          await runSync({ store, config: cfg, clients: { play: play.client }, trigger: 'manual', now: NOW, pacing: {} });
+        expect(play.calls).toContain('list:stats/store_performance/');
+        expect(play.calls).toContain('list:earnings/earnings_');
+        expect(play.calls).toContain(`read:stats/installs/installs_${APP.playPackage}_202610_country.csv`);
       });
 
       it('continues across runs when the call budget runs out', async () => {

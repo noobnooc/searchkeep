@@ -15,9 +15,38 @@
   import { resource } from '../lib/resource.svelte';
   import { href } from '../lib/router.svelte';
   import { ui } from '../lib/state.svelte';
-  import type { AppChartRank, AppMetrics, AppPerformanceResponse, AppStore } from '../lib/types';
+  import type { AppChartRank, AppMetrics, AppPerformanceResponse, AppStore, AppSubscriptionsResponse, AppSubscriptionTotals } from '../lib/types';
 
   const perf = resource<AppPerformanceResponse>(() => (ui.appId ? apiUrl('/api/app-performance', { app: ui.appId, ...ui.appRangeParams() }) : null));
+  // Google Play subscriptions (ADR 0010), for apps with a package; the card shows once there is data.
+  const subs = resource<AppSubscriptionsResponse>(() =>
+    ui.appId && ui.app?.playPackage ? apiUrl('/api/app-subscriptions', { app: ui.appId, ...ui.appRangeParams(), limit: 20 }) : null,
+  );
+  const subsShown = $derived(Boolean(subs.data && (subs.data.series.length > 0 || subs.data.previous.activeSubscriptions > 0)));
+  const SUB_KPIS: Array<{ label: string; key: keyof AppSubscriptionTotals; lower?: boolean; level?: boolean }> = [
+    { label: 'Active subscriptions', key: 'activeSubscriptions', level: true },
+    { label: 'New', key: 'newSubscriptions' },
+    { label: 'Canceled', key: 'canceledSubscriptions', lower: true },
+    { label: 'Net change', key: 'net' },
+  ];
+  function subStat(k: (typeof SUB_KPIS)[number], cur: AppSubscriptionTotals, prev: AppSubscriptionTotals) {
+    const ch = change(cur[k.key], prev[k.key]);
+    return {
+      value: int(cur[k.key]),
+      delta: delta(ch === null ? null : ch * 100, pctChange(ch === null ? null : ch * 100), !k.lower, 0.05),
+      sub: `${k.level ? 'at the start: ' : 'vs '}${int(prev[k.key])}`,
+    };
+  }
+  const subsTrend = $derived.by(() => {
+    const d = subs.data;
+    if (!d || d.series.length === 0) return null;
+    const by = new Map(d.series.map((r) => [r.date, r]));
+    const dates = eachDay(d.range.start, d.range.end);
+    return {
+      dates,
+      series: [{ key: 'active', label: 'Active subscriptions', values: dates.map((x) => by.get(x)?.activeSubscriptions ?? null), color: 'var(--chart)', area: true }],
+    };
+  });
   const app = $derived(ui.app);
   const reports = $derived(app?.appStoreReports);
   const needsStart = $derived(Boolean(app?.appleId && app.stores.appStore && reports && (!reports.started || reports.stopped)));
@@ -56,15 +85,29 @@
     /** How the value reads: an amount in the store's currency, a duration, or a plain ratio. */
     format?: 'money' | 'duration' | 'ratio';
   }
-  /** Revenue and sessions (ADR 0010), shown for a store once it reports any. */
-  const VALUE_KPIS: Kpi[] = [
-    { label: 'Proceeds', key: 'proceeds', format: 'money' },
-    { label: 'Paying users', key: 'payingUsers' },
-    { label: 'Proceeds per download', key: 'proceedsPerDownload', format: 'money' },
-    { label: 'Sessions', key: 'sessions' },
-    { label: 'Average session', key: 'averageSessionSeconds', format: 'duration' },
-    { label: 'Sessions per device', key: 'sessionsPerDevice', format: 'ratio' },
-  ];
+  /** Revenue and sessions (ADR 0010), shown for a store once it reports any; Google Play has no sessions or paying users. */
+  const VALUE_KPIS: Record<AppStore, { title: string; kpis: Kpi[] }> = {
+    apple: {
+      title: 'Revenue and usage',
+      kpis: [
+        { label: 'Proceeds', key: 'proceeds', format: 'money' },
+        { label: 'Paying users', key: 'payingUsers' },
+        { label: 'Proceeds per download', key: 'proceedsPerDownload', format: 'money' },
+        { label: 'Sessions', key: 'sessions' },
+        { label: 'Average session', key: 'averageSessionSeconds', format: 'duration' },
+        { label: 'Sessions per device', key: 'sessionsPerDevice', format: 'ratio' },
+      ],
+    },
+    play: {
+      title: 'Revenue',
+      kpis: [
+        { label: 'Proceeds', key: 'proceeds', format: 'money' },
+        { label: 'Sales', key: 'sales', format: 'money' },
+        { label: 'Purchases', key: 'purchases' },
+        { label: 'Proceeds per acquisition', key: 'proceedsPerDownload', format: 'money' },
+      ],
+    },
+  };
   const hasValue = (m: AppMetrics) => m.proceedsCents !== 0 || m.purchases !== 0 || m.sessions > 0;
   const KPIS: Record<AppStore, Kpi[]> = {
     apple: [
@@ -160,9 +203,9 @@
           {/each}
         </div>
         {#if hasValue(s.current) || hasValue(s.previous)}
-          <h3 class="kpi-group">Revenue and usage{s.currency ? ` · ${s.currency}` : ''}</h3>
+          <h3 class="kpi-group">{VALUE_KPIS[s.store].title}{s.currency ? ` · ${s.currency}` : ''}</h3>
           <div class="kpis">
-            {#each VALUE_KPIS as k (k.key)}
+            {#each VALUE_KPIS[s.store].kpis as k (k.key)}
               {@const st = stat(k, s.current, s.previous, s.currency)}
               <Stat label={k.label} value={st.value} delta={st.delta} sub={st.sub} />
             {/each}
@@ -179,6 +222,40 @@
         {/if}
       </Card>
     {/each}
+
+    {#if subsShown && subs.data}
+      <Card title="Google Play subscriptions" subtitle="New, canceled and active subscriptions" busy={subs.loading}>
+        <div class="kpis">
+          {#each SUB_KPIS as k (k.key)}
+            {@const st = subStat(k, subs.data.current, subs.data.previous)}
+            <Stat label={k.label} value={st.value} delta={st.delta} sub={st.sub} />
+          {/each}
+        </div>
+        {#if subsTrend}
+          <div class="trend">
+            <LineChart dates={subsTrend.dates} series={subsTrend.series} height={150} label="Active subscriptions per day" valueFormat={(n) => int(n)} />
+          </div>
+        {/if}
+        {#if subs.data.products.length > 1}
+          <table class="charts subs" aria-label="Subscriptions per product">
+            <thead>
+              <tr><th scope="col">Product</th><th scope="col">Active</th><th scope="col">New</th><th scope="col">Canceled</th><th scope="col">Net</th></tr>
+            </thead>
+            <tbody>
+              {#each subs.data.products as p (p.product)}
+                <tr>
+                  <th scope="row">{p.product}</th>
+                  <td>{int(p.activeSubscriptions)}</td>
+                  <td>{int(p.newSubscriptions)}</td>
+                  <td>{int(p.canceledSubscriptions)}</td>
+                  <td>{p.net > 0 ? '+' : ''}{int(p.net)}</td>
+                </tr>
+              {/each}
+            </tbody>
+          </table>
+        {/if}
+      </Card>
+    {/if}
 
     {#if chartTable}
       <Card title="App Store charts" subtitle="Your app's place in Apple's top 100 charts, checked {shortDate(chartTable.checked)}">
@@ -261,6 +338,9 @@
   }
   .callout span {
     color: var(--text-3);
+  }
+  .subs {
+    margin-top: 16px;
   }
   .charts-none {
     margin: 0 0 10px;

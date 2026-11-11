@@ -774,6 +774,11 @@ one of your sites (referrals from it are marked as your own).
    grant the access. Then: Play Console → **Download reports** → **Statistics** → **Copy Cloud
    Storage URI**, and set `PLAY_REPORTS_BUCKET` to it (for example
    `gs://pubsite_prod_rev_01234567890123456789/stats/installs/`; only the bucket name is used).
+   For Google Play revenue and subscriptions (ADR 0010), also turn on **View financial data,
+   orders and cancellation survey responses** under the same user's **Account permissions**. It is
+   optional: without it everything else syncs, and `setup_status` reports `probe.play_finance` as
+   `warn`. Searchkeep reads the earnings files only to sum them per day and buyer country; order
+   numbers and buyer postcodes are never stored.
 5. **Google Play crash and ANR rates.** **[Human]** In the Google Cloud project of the service
    account: **APIs & Services** → **Library** → **Google Play Developer Reporting API** → **Enable**.
 6. **Optional plugin, off by default.** `APP_STORE_PUBLIC_DATA=true` reads Apple's official public
@@ -795,7 +800,10 @@ Purchases and App Sessions reports, from the same report requests; sessions coun
 share analytics, and only where at least five people had sessions); Google Play store listing
 visitors and
 acquisitions by country and by traffic source with **search terms**, installs, uninstalls and
-active devices, ratings, reviews, and crash and ANR rates. Google groups the store listing visitors
+active devices, ratings, reviews, crash and ANR rates, and with View financial data: revenue
+(proceeds net of Google's fees, taxes and refunds, sales and purchases, per day and buyer country in
+your payout currency, from the monthly earnings files, so a month arrives early in the next one) and
+subscriptions (new, canceled and active per product and country). Google groups the store listing visitors
 and acquisitions of countries and traffic sources with few users into "Other" before it writes the
 files, so a small app may see only "Other" there and no search terms; its installs by country are
 not grouped, and Crash and ANR rates need a minimum number of users. App Store data is complete 2-5
@@ -1154,6 +1162,9 @@ an image (HTTP 200); a 404 means neither source had an icon.
   **View app information and download bulk reports**; or `PLAY_REPORTS_BUCKET` is another
   developer account's bucket (copy it again from **Download reports**).
 - Crash and ANR rates are missing: enable the Google Play Developer Reporting API (step 14a.5).
+- Revenue and subscriptions are missing and `probe.play_finance` warns: grant **View financial data,
+  orders and cancellation survey responses** to the service account (step 14a.4). Earnings of a month
+  arrive early in the next month.
 
 ### Sync is slow or units are skipped
 

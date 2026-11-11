@@ -23,6 +23,7 @@ import {
 } from '../types.js';
 import { clampLimit, round } from '../analysis/common.js';
 import { APP_STORE_GENRES } from './genres.js';
+import { playCurrencyKey } from './reports.js';
 import { appStorefronts, byStorefront } from './storefronts.js';
 import { appStoresOf, type OpsContext } from '../analysis/ops.js';
 
@@ -94,8 +95,10 @@ export interface AppFunnel extends AppStoreMetrics {
   sessionsPerDevice: number | null;
 }
 
-/** Currency of each store's amounts. */
-export const STORE_CURRENCY: Record<AppStore, string | null> = { apple: 'USD', play: null };
+/** Currency of each store's amounts: USD for the App Store, the payout currency of the Play earnings files. */
+async function storeCurrency(ctx: OpsContext, appId: string, store: AppStore): Promise<string | null> {
+  return store === 'apple' ? 'USD' : await ctx.store.getMeta(playCurrencyKey(appId));
+}
 
 function funnel(m: AppStoreMetrics): AppFunnel {
   const proceeds = m.proceedsCents / 100;
@@ -129,7 +132,7 @@ function totalOf(rows: AppStoreRow[]): AppStoreMetrics {
 const STORE_NOTES: Record<AppStore, string> = {
   apple:
     "App Store: impressions are list views (search results, charts, Today/Apps tabs), page views are product page views, downloads are first-time downloads (including those straight from search results, so page conversion can exceed 100% for search), installs and deletions count only people who share analytics with developers. Unique counts are summed across devices, so they are approximate. Proceeds and sales are Apple's estimates in USD of paid app and in-app purchases net of refunds (proceeds: after taxes and Apple's commission), attributed to the source and storefront where the buyer found the app; paying users are summed across rows, an upper bound. Sessions count only people who share analytics, and only where at least five people had sessions.",
-  play: 'Google Play: page views are store listing visitors (unique users), downloads are store listing acquisitions; Google Play reports no impressions. Google groups the visitors and acquisitions of countries and traffic sources with few users into "OTHER" / "other" (for a small app, all of them, and then it has no search terms); installs, uninstalls and active devices by country come from the installs report, which is not grouped. Data arrives 3-7 days late.',
+  play: 'Google Play: page views are store listing visitors (unique users), downloads are store listing acquisitions; Google Play reports no impressions. Proceeds (net of Google\'s fees, taxes and refunds), sales and purchases come from the monthly earnings files in the account\'s payout currency, per buyer country (no source), once the service account may view financial data; a month arrives early in the next month. Google groups the visitors and acquisitions of countries and traffic sources with few users into "OTHER" / "other" (for a small app, all of them, and then it has no search terms); installs, uninstalls and active devices by country come from the installs report, which is not grouped. Data arrives 3-7 days late.',
 };
 
 export interface AppPerformanceParams extends AppParams {
@@ -171,7 +174,7 @@ export async function appPerformance(ctx: OpsContext, p: AppPerformanceParams) {
       ]);
       return {
         store,
-        currency: STORE_CURRENCY[store],
+        currency: await storeCurrency(ctx, r.app.id, store),
         current: funnel(totalOf(cur)),
         previous: funnel(totalOf(before)),
         series: cur.map((x) => ({ date: x.date!, ...funnel(x) })),
@@ -463,6 +466,52 @@ export async function appStability(ctx: OpsContext, p: AppStabilityParams) {
     rows: groupBy === 'version' ? rows.filter((x) => x.version !== '') : rows,
     notes: [
       'Google Play rates are shares of daily users (Play Developer Reporting API); Google flags apps above 1.09% user-perceived crash rate or 0.47% user-perceived ANR rate. App Store numbers are crash counts from people who share analytics with developers.',
+    ],
+  };
+}
+
+export interface AppSubscriptionsParams extends Omit<AppParams, 'store'> {
+  product?: string;
+  territory?: string;
+}
+
+/**
+ * Google Play subscriptions (ADR 0010): new, canceled and active subscriptions per product and
+ * country over the range, against the previous period, with the daily trend.
+ */
+export async function appSubscriptions(ctx: OpsContext, p: AppSubscriptionsParams) {
+  const r = await resolveApp(ctx, { ...p, store: 'play' }, { days: 28, limit: 50 });
+  if (!r.app.playPackage)
+    throw new SearchkeepError('bad_request', 'This app has no Google Play package; subscriptions come from Google Play.');
+  const prev = previousPeriod(r.range);
+  const q = {
+    appId: r.app.id,
+    ...(p.product ? { product: p.product.trim() } : {}),
+    ...(p.territory ? { territory: p.territory.trim().toUpperCase() } : {}),
+  };
+  const [current, previous, products, territories, series] = await Promise.all([
+    ctx.store.queryAppSubscriptions({ ...q, range: r.range, dimensions: [] }),
+    ctx.store.queryAppSubscriptions({ ...q, range: prev, dimensions: [] }),
+    ctx.store.queryAppSubscriptions({ ...q, range: r.range, dimensions: ['product'], limit: r.limit }),
+    ctx.store.queryAppSubscriptions({ ...q, range: r.range, dimensions: ['territory'], limit: r.limit }),
+    ctx.store.queryAppSubscriptions({ ...q, range: r.range, dimensions: ['date'], limit: 1000 }),
+  ]);
+  const none = { newSubscriptions: 0, canceledSubscriptions: 0, activeSubscriptions: 0 };
+  const total = (x: (typeof current)[number] | undefined) => {
+    const t = x ?? none;
+    return { ...none, ...t, net: t.newSubscriptions - t.canceledSubscriptions };
+  };
+  return {
+    app: r.app.id,
+    range: r.range,
+    previousRange: prev,
+    current: total(current[0]),
+    previous: total(previous[0]),
+    products: products.map((x) => ({ ...x, net: x.newSubscriptions - x.canceledSubscriptions })),
+    territories: territories.map((x) => ({ ...x, net: x.newSubscriptions - x.canceledSubscriptions })),
+    series,
+    notes: [
+      'Google Play subscription statistics: new and canceled subscriptions are summed over the range; active subscriptions are those on the last day with data. They need the service account to view financial data.',
     ],
   };
 }

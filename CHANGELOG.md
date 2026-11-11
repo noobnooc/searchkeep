@@ -26,6 +26,16 @@ Because users sync `main` at any time, the `Unreleased` section is always accura
 
 ### Added
 
+- Google Play revenue and subscriptions ([ADR 0010](docs/adr/0010-app-revenue-and-engagement.md)).
+  With the service account allowed to view financial data, the sync reads the account's monthly
+  earnings files (ZIP) and keeps only each app's sums per day and buyer country in the payout
+  currency: proceeds net of Google's fees, taxes and refunds, sales and purchases. Order numbers,
+  postcodes and other per-order fields are never stored. It also reads the subscription statistics
+  (new, canceled and active per product, base plan and country) into a new table, shown by the new
+  `app_subscriptions` MCP tool and API and a **Google Play subscriptions** card on an app's overview.
+  Without the permission everything else syncs as before, and `setup_status` warns
+  (`probe.play_finance`).
+
 - App revenue and sessions, attributed to acquisition
   ([ADR 0010](docs/adr/0010-app-revenue-and-engagement.md)). The App Store sync also reads the
   **App Store Purchases** and **App Sessions** reports (Standard), which the existing report requests
@@ -317,6 +327,11 @@ Because users sync `main` at any time, the `Unreleased` section is always accura
   the synced data and the daily write count are kept, and the next pass continues the flags.
 
 ### Upgrade notes
+
+- Optional, for Google Play revenue and subscriptions: Play Console → **Users and permissions** → the
+  service account → **Account permissions** → turn on **View financial data, orders and
+  cancellation survey responses** → **Save**, at any time after syncing. Skipping it only leaves
+  Google Play revenue and subscriptions empty; `setup_status` reports `probe.play_finance` as `warn`.
 
 - Nothing is required. The new tables are created automatically on the first request after syncing.
   A deployment without app secrets keeps working as before and syncs no app data.
