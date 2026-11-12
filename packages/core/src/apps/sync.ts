@@ -272,12 +272,11 @@ function planAppStore(args: AppPlanArgs, app: AppConfig, asc: AscClient, place: 
       calls: 2,
       key: `${task}:${app.id}:${inst.id}`,
       run: async () => {
-        let before: IsoDate | null = null;
-        if (kind === 'snapshot') {
-          // History fills only the days before the ongoing report's first day; wait until it has one.
-          before = await store.getMeta(syncKeys.ascFrom(app.id, spec.key));
-          if (!before) return null;
-        }
+        // History fills only the days before the ongoing report's first day, so the newer numbers win.
+        // Apple may make no daily instance while a report has nothing in it (no downloads or purchases
+        // that day), so for a small app that first day can be weeks away or never come. Until then the
+        // whole history is written: an ongoing instance read later replaces every day it covers.
+        const before: IsoDate | null = kind === 'snapshot' ? await store.getMeta(syncKeys.ascFrom(app.id, spec.key)) : null;
         const segments = await asc.listSegments(inst.id);
         const collector = spec.collector();
         for (let i = 0; i < segments.length; i++) {

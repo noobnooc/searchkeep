@@ -23,6 +23,7 @@ import {
   playInstallsBreakdownCollector,
   PLAY_LISTING_VERSION,
 } from '../apps/reports.js';
+import { appStorefronts } from '../apps/storefronts.js';
 import { setupStatus } from '../analysis/ops.js';
 import { evaluateReadiness } from '../auth/readiness.js';
 import { loadConfig, withStoredApps, type SearchkeepConfig } from '../config.js';
@@ -494,6 +495,31 @@ export function appContract(name: string, makeStore: () => Promise<Store>): void
       expect(await store.queryAppStore({ appId: 'x', range: { start: '2026-09-01', end: '2026-09-02' }, dimensions: [] })).toEqual([]);
     });
 
+    it('leaves out the rows of excluded sources', async () => {
+      const day = '2026-10-05';
+      await store.writeAppStoreDaily('v', 'apple', {
+        metrics: ['downloads'],
+        shape: 'cross',
+        dates: [day],
+        rows: [
+          { date: day, territory: 'US', source: 'search', downloads: 10 },
+          { date: day, territory: 'DE', source: 'institutional', downloads: 100000 },
+          { date: day, territory: 'DE', source: 'browse', downloads: 2 },
+        ],
+      });
+      const range = { start: day, end: day };
+      const q = { appId: 'v', range, excludeSources: ['institutional'] };
+      const [total] = await store.queryAppStore({ ...q, dimensions: [] });
+      expect(total!.downloads).toBe(12);
+      const territories = await store.queryAppStore({ ...q, dimensions: ['territory'], orderBy: 'downloads' });
+      expect(territories.map((r) => [r.territory, r.downloads])).toEqual([
+        ['US', 10],
+        ['DE', 2],
+      ]);
+      const [all] = await store.queryAppStore({ appId: 'v', range, dimensions: [] });
+      expect(all!.downloads).toBe(100012);
+    });
+
     it("counts Google Play's separate territory and source breakdowns once", async () => {
       const day = '2026-10-02';
       await store.writeAppStoreDaily('p', 'play', {
@@ -716,6 +742,55 @@ export function appContract(name: string, makeStore: () => Promise<Store>): void
         expect(day!.impressions).toBe(7);
       });
 
+      it('writes App Store history while the ongoing report of that kind has no day yet', async () => {
+        const cfg = config({ APP_STORE_PUBLIC_DATA: 'false' });
+        const today = '2026-10-20';
+        await store.setMeta(syncKeys.ascRequests(APP.id), JSON.stringify({ ongoing: 'ongoing', snapshot: 'snap', checkedOn: today }));
+        await store.setMeta(syncKeys.ascReviews(APP.id), JSON.stringify({ historyDone: true, checkedOn: today }));
+        const looked = ASC_REPORTS.map((r) => r.key);
+        // Apple made the ongoing downloads report but no daily instance of it yet (nobody downloaded the app since).
+        await store.setMeta(
+          syncKeys.ascReports(APP.id, 'ongoing'),
+          JSON.stringify({ requestId: 'ongoing', checkedOn: today, reports: { downloads: 'dl' }, looked }),
+        );
+        await store.setMeta(syncKeys.ascPending(APP.id, 'ongoing', 'downloads'), JSON.stringify({ listedOn: today, instances: [] }));
+        await store.setMeta(
+          syncKeys.ascReports(APP.id, 'snapshot'),
+          JSON.stringify({ requestId: 'snap', checkedOn: today, reports: { downloads: 'snap-dl' }, looked }),
+        );
+        await store.setMeta(
+          syncKeys.ascPending(APP.id, 'snapshot', 'downloads'),
+          JSON.stringify({ listedOn: today, instances: [{ id: 'snap-dl-1', processingDate: '2026-10-19' }] }),
+        );
+        const read: string[] = [];
+        const asc = fakeAsc();
+        asc.client.listSegments = async (id) => [{ id: `${id}-0`, url: id, sizeInBytes: 1 }];
+        asc.client.readSegment = async (segment, onRow) => {
+          read.push(segment.url);
+          for (const date of ['2025-03-01', '2026-10-18'])
+            onRow({ date, 'download type': 'First-time download', 'source type': 'App Store search', territory: 'US', counts: '3' });
+          return 2;
+        };
+        await runSync({ store, config: cfg, clients: { asc: asc.client }, trigger: 'cron', now: NOW, pacing: {} });
+        expect(read).toEqual(['snap-dl-1']);
+        const days = await store.queryAppStore({
+          appId: APP.id,
+          store: 'apple',
+          range: { start: '2025-03-01', end: '2026-10-18' },
+          dimensions: ['date'],
+          orderBy: 'date',
+          order: 'asc',
+        });
+        expect(days.filter((d) => d.downloads > 0).map((d) => [d.date, d.downloads])).toEqual([
+          ['2025-03-01', 3],
+          ['2026-10-18', 3],
+        ]);
+        // The instance counts as read: a later run does not read it again.
+        expect(JSON.parse((await store.getMeta(syncKeys.ascPending(APP.id, 'snapshot', 'downloads')))!)).toMatchObject({ instances: [] });
+        await runSync({ store, config: cfg, clients: { asc: asc.client }, trigger: 'cron', now: NOW, pacing: {} });
+        expect(read).toEqual(['snap-dl-1']);
+      });
+
       it('syncs App Store reports oldest instance first, history only before them, and Google Play files once', async () => {
         const cfg = config();
         const asc = fakeAsc();
@@ -898,6 +973,41 @@ export function appContract(name: string, makeStore: () => Promise<Store>): void
         expect(play.calls.slice(reads).filter((c) => c.startsWith('read:'))).toEqual([]);
         // Instances already read are not read again.
         expect(asc.calls.filter((c) => c === 'segments:eng-2026-10-19')).toHaveLength(1);
+      });
+
+      it('leaves institutional purchases out of the funnel and the storefronts, and lists them by source', async () => {
+        const cfg = config();
+        const day = '2026-10-15';
+        await store.writeAppStoreDaily(APP.id, 'apple', {
+          metrics: ['pageViewsUnique', 'downloads'],
+          shape: 'cross',
+          dates: [day],
+          rows: [
+            { date: day, territory: 'US', source: 'search', pageViewsUnique: 40, downloads: 10 },
+            { date: day, territory: 'FR', source: 'search', pageViewsUnique: 8, downloads: 2 },
+            // An organization took 100,000 licenses through Apple Business Manager.
+            { date: day, territory: 'DE', source: 'institutional', pageViewsUnique: 0, downloads: 100000 },
+          ],
+        });
+        const ctx = { store, config: cfg, clients: {}, now: () => NOW };
+        const p = { app: APP.id, store: 'apple' as const, start: day, end: day };
+        const perf = await appPerformance(ctx, { ...p, groupBy: ['territory'] });
+        expect(perf.stores[0]!.current).toMatchObject({ downloads: 12, pageConversion: 0.25 });
+        expect(perf.stores[0]!.series.map((x) => x.downloads)).toEqual([12]);
+        expect(perf.stores[0]!.volumePurchaseDownloads).toBe(100000);
+        expect(perf.notes.some((n) => n.includes('100,000 first-time downloads from institutional purchases'))).toBe(true);
+        expect(perf.rows!.map((r) => r.territory)).toEqual(['US', 'FR']);
+        // By source, they are a row of their own; asked for by source, they are the totals.
+        const bySource = await appPerformance(ctx, { ...p, groupBy: ['source'] });
+        expect(bySource.rows!.map((r) => [r.source, r.downloads])).toEqual([
+          ['search', 12],
+          ['institutional', 100000],
+        ]);
+        const only = await appPerformance(ctx, { ...p, source: 'institutional' });
+        expect(only.stores[0]!.current.downloads).toBe(100000);
+        expect(only.stores[0]!.volumePurchaseDownloads).toBeUndefined();
+        // They do not make Germany one of the app's biggest storefronts.
+        expect(await appStorefronts(store, APP, '2026-10-20')).toEqual(['us', 'fr', 'cn', 'jp', 'gb']);
       });
 
       it("checks the app's biggest storefronts first and only the charts it can be in", async () => {

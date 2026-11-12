@@ -1540,6 +1540,7 @@ export class D1Store implements Store {
     else where.push(`territory != '${ALL_KEY}'`);
     if (q.territory !== undefined) where.push(`territory = ${arg(q.territory)}`);
     if (q.source !== undefined) where.push(`source = ${arg(q.source)}`);
+    if (q.excludeSources?.length) where.push(`source NOT IN (${q.excludeSources.map((s) => arg(s)).join(', ')})`);
     const dimExpr: Record<AppDimension, string> = {
       date: 'date',
       week: "date(date, '-6 days', 'weekday 1')",
