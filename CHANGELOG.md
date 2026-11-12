@@ -291,6 +291,19 @@ Because users sync `main` at any time, the `Unreleased` section is always accura
 
 ### Fixed
 
+- App Store history (downloads, purchases, download referrers) of an app stayed empty while Apple
+  had made no daily instance of that report since the reports were started, which for a small app
+  with no downloads or purchases on those days can take weeks or never happen. History waited for
+  the daily report's first day to know where to stop; it is now written right away, and the daily
+  report's days replace the ones they cover when they come.
+
+- A volume purchase through Apple Business Manager or Apple School Manager (an "institutional
+  purchase": an organization can take 100,000 licenses of a free app at once) counted as
+  first-time downloads, so one such day swamped the downloads trend, the conversion rates and the
+  storefronts the public feeds check. The funnel totals, trend and rows by date or territory now
+  leave institutional purchases out, `app_performance` names how many in a note (and as
+  `volumePurchaseDownloads`), and rows by source still list them.
+
 - Google Play stopped syncing when the service account could list the financial files but not read
   them (no **View financial data**): the first earnings or subscriptions file answered 403 and failed
   the whole Google Play sync. Such a file is now passed over with the other financial files until the

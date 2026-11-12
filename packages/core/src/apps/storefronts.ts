@@ -5,7 +5,7 @@
  */
 import { addDays } from '../dates.js';
 import type { Store } from '../store.js';
-import type { AppConfig, IsoDate } from '../types.js';
+import { VOLUME_PURCHASE_SOURCES, type AppConfig, type IsoDate } from '../types.js';
 import { MAX_PUBLIC_TERRITORIES } from './config.js';
 
 /** The largest App Store storefronts, used until (and besides) the app's own data says otherwise. */
@@ -19,6 +19,7 @@ export async function appStorefronts(store: Store, app: AppConfig, today: IsoDat
     store: 'apple',
     range: { start: addDays(today, -28), end: today },
     dimensions: ['territory'],
+    excludeSources: VOLUME_PURCHASE_SOURCES,
     orderBy: 'downloads',
     order: 'desc',
     limit: MAX_PUBLIC_TERRITORIES * 2,

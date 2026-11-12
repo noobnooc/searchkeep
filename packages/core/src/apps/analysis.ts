@@ -20,8 +20,10 @@ import {
   type AppStore,
   type AppStoreMetrics,
   type AppStoreRow,
+  type AppSourceType,
   type DateRange,
   type IsoDate,
+  VOLUME_PURCHASE_SOURCES,
 } from '../types.js';
 import { clampLimit, round } from '../analysis/common.js';
 import { APP_STORE_GENRES } from './genres.js';
@@ -159,6 +161,9 @@ export async function appPerformance(ctx: OpsContext, p: AppPerformanceParams) {
     ...(p.territory ? { territory: p.territory.trim().toUpperCase() } : {}),
     ...(p.source ? { source: p.source.trim().toLowerCase() } : {}),
   };
+  // Licenses bought in bulk are not people finding the app: left out unless a source is asked for.
+  const hidden = p.source ? [] : VOLUME_PURCHASE_SOURCES;
+  const exclude = hidden.length ? { excludeSources: hidden } : {};
   const perStore = await Promise.all(
     stores.map(async (store) => {
       const q = {
@@ -166,20 +171,26 @@ export async function appPerformance(ctx: OpsContext, p: AppPerformanceParams) {
         store,
         dimensions: ['date'] as AppDimension[],
         ...filters,
+        ...exclude,
         orderBy: 'date' as const,
         order: 'asc' as const,
         limit: 4000,
       };
-      const [cur, before] = await Promise.all([
+      const [cur, before, volume] = await Promise.all([
         ctx.store.queryAppStore({ ...q, range: r.range }),
         ctx.store.queryAppStore({ ...q, range: prev }),
+        hidden.length && store === 'apple'
+          ? ctx.store.queryAppStore({ appId: r.app.id, store, range: r.range, dimensions: ['source'], ...filters })
+          : [],
       ]);
+      const volumePurchaseDownloads = volume.filter((x) => hidden.includes(x.source as AppSourceType)).reduce((t, x) => t + x.downloads, 0);
       return {
         store,
         currency: await storeCurrency(ctx, r.app.id, store),
         current: funnel(totalOf(cur)),
         previous: funnel(totalOf(before)),
         series: cur.map((x) => ({ date: x.date!, ...funnel(x) })),
+        ...(volumePurchaseDownloads > 0 ? { volumePurchaseDownloads } : {}),
       };
     }),
   );
@@ -195,6 +206,7 @@ export async function appPerformance(ctx: OpsContext, p: AppPerformanceParams) {
           range: r.range,
           dimensions: groupBy,
           ...filters,
+          ...(groupBy.includes('source') ? {} : exclude),
           orderBy: groupBy.some((g) => g === 'date' || g === 'week' || g === 'month') ? 'date' : 'pageViewsUnique',
           order: groupBy.some((g) => g === 'date' || g === 'week' || g === 'month') ? 'asc' : 'desc',
           limit: r.limit,
@@ -221,6 +233,11 @@ export async function appPerformance(ctx: OpsContext, p: AppPerformanceParams) {
   }
   const charts = r.store !== 'play' && r.app.appleId ? await latestCharts(ctx, r.app, r.range) : [];
   const notes = [...r.notes, ...stores.map((s) => STORE_NOTES[s])];
+  for (const s of perStore)
+    if (s.volumePurchaseDownloads)
+      notes.push(
+        `App Store: ${s.volumePurchaseDownloads.toLocaleString('en-US')} first-time downloads from institutional purchases (licenses bought in bulk through Apple Business Manager or Apple School Manager) are left out of the totals and the trend; group by source to see them.`,
+      );
   if (p.source && stores.includes('play') && p.territory)
     notes.push('Google Play reports sources and territories separately, so it has no rows for a territory and a source together.');
   if (referrers !== undefined)

@@ -793,7 +793,9 @@ one of your sites (referrals from it are marked as your own).
    storefront and chart a day.
 
 What arrives: App Store impressions, product page views, first-time downloads, redownloads,
-installs and deletions by territory and source (search, browse, websites, other apps), referring
+installs and deletions by territory and source (search, browse, websites, other apps;
+institutional purchases, licenses bought in bulk through Apple Business Manager or Apple School
+Manager, are kept out of the totals and shown only by source), referring
 websites and apps, crash counts, customer reviews, and revenue (purchases, proceeds and sales in
 USD, paying users) and sessions attributed to the same sources and storefronts (App Store
 Purchases and App Sessions reports, from the same report requests; sessions count only people who

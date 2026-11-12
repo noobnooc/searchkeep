@@ -423,6 +423,14 @@ export type AppSourceType =
   | 'other';
 
 /**
+ * Sources whose downloads are licenses bought in bulk, not people finding the app: `institutional`,
+ * volume purchases through Apple Business Manager or Apple School Manager (an organization can take
+ * 100,000 licenses of a free app at once). Funnel totals and trends leave them out; rows by source
+ * list them.
+ */
+export const VOLUME_PURCHASE_SOURCES: readonly AppSourceType[] = ['institutional'];
+
+/**
  * Store funnel metrics per app, store, day, territory and source.
  * - `impressions`, `impressionsUnique`: the app was shown in a list (App Store only).
  * - `pageViews`, `pageViewsUnique`: product page views (App Store), store listing visitors (Google
@@ -509,6 +517,8 @@ export interface AppStoreQuery {
   dimensions: AppDimension[];
   territory?: string;
   source?: string;
+  /** Leave out the rows of these source types. */
+  excludeSources?: readonly string[];
   orderBy?: AppStoreMetric | 'date';
   order?: 'asc' | 'desc';
   limit?: number;
