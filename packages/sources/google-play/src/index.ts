@@ -15,6 +15,7 @@ import {
   type PlayVitalsRow,
   type AppListingValue,
   type PlayListingSnapshot,
+  type PlayReview,
 } from '@searchkeep/core';
 import { signServiceAccountJwt } from '@searchkeep/source-gsc';
 
@@ -34,6 +35,8 @@ export interface PlayClientOptions {
   privateKey: string;
   /** Request the Android Publisher scope (PLAY_METADATA or PLAY_REVIEWS_API). */
   publisher?: boolean;
+  /** Offer the reviews API (PLAY_REVIEWS_API; needs the "Reply to reviews" permission). */
+  reviews?: boolean;
   fetch?: typeof fetch;
 }
 
@@ -207,6 +210,49 @@ export function createPlayClient(opts: PlayClientOptions): PlayClient {
 
     vitals: queryVitals,
 
+    ...(opts.publisher && opts.reviews
+      ? {
+          async listReviews(pkg: string, pageToken?: string | null) {
+            const qs = new URLSearchParams({ maxResults: '100', ...(pageToken ? { token: pageToken } : {}) });
+            type Comment = {
+              userComment?: {
+                text?: string;
+                lastModified?: { seconds?: string };
+                starRating?: number;
+                reviewerLanguage?: string;
+                appVersionName?: string;
+              };
+              developerComment?: { text?: string };
+            };
+            const res: { reviews?: Array<{ reviewId?: string; comments?: Comment[] }>; tokenPagination?: { nextPageToken?: string } } =
+              await call(`${PUBLISHER}/${encodeURIComponent(pkg)}/reviews?${qs.toString()}`);
+            const reviews: PlayReview[] = [];
+            for (const r of res?.reviews ?? []) {
+              const user = r.comments?.find((c) => c.userComment)?.userComment;
+              if (!r.reviewId || !user) continue;
+              const seconds = Number(user.lastModified?.seconds);
+              if (!Number.isFinite(seconds)) continue;
+              // The author's name is never read.
+              reviews.push({
+                id: r.reviewId,
+                modifiedAt: new Date(seconds * 1000).toISOString(),
+                rating: Number(user.starRating ?? 0),
+                text: user.text?.trim() || null,
+                language: user.reviewerLanguage ?? null,
+                version: user.appVersionName ?? null,
+                replied: Boolean(r.comments?.some((c) => c.developerComment)),
+              });
+            }
+            return { reviews, next: res?.tokenPagination?.nextPageToken ?? null };
+          },
+          async replyToReview(pkg: string, reviewId: string, text: string) {
+            await call(`${PUBLISHER}/${encodeURIComponent(pkg)}/reviews/${encodeURIComponent(reviewId)}:reply`, {
+              method: 'POST',
+              body: { replyText: text },
+            });
+          },
+        }
+      : {}),
     ...(opts.publisher
       ? {
           async listingSnapshot(pkg: string): Promise<PlayListingSnapshot> {

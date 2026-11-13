@@ -635,6 +635,8 @@ export interface AppReviewQuery {
   version?: string;
   /** Case-insensitive substring of the title or body. */
   contains?: string;
+  /** Only this review. */
+  id?: string;
   limit?: number;
 }
 

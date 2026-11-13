@@ -385,9 +385,17 @@ export function createAscClient(opts: AscClientOptions): AscClient {
     async listReviews(appleId, o) {
       const path =
         o.cursor ??
-        `/v1/apps/${encodeURIComponent(appleId)}/customerReviews?sort=-createdDate&limit=${Math.min(200, Math.max(1, o.limit))}`;
-      const page = await call<Page<{ rating?: number; title?: string; body?: string; createdDate?: string; territory?: string }>>(path);
-      const data = Array.isArray(page?.data) ? page.data : [];
+        `/v1/apps/${encodeURIComponent(appleId)}/customerReviews?sort=-createdDate&limit=${Math.min(200, Math.max(1, o.limit))}&include=response&fields%5BcustomerReviewResponses%5D=state`;
+      const page = await call<
+        Page<{ rating?: number; title?: string; body?: string; createdDate?: string; territory?: string }> & {
+          data?: Array<{ relationships?: { response?: { data?: { id: string } | null } } }>;
+        }
+      >(path);
+      const data = (Array.isArray(page?.data) ? page.data : []) as Array<
+        Resource<{ rating?: number; title?: string; body?: string; createdDate?: string; territory?: string }> & {
+          relationships?: { response?: { data?: { id: string } | null } };
+        }
+      >;
       const reviews: AscReview[] = data
         .filter((r) => typeof r.attributes?.createdDate === 'string')
         .map((r) => ({
@@ -397,8 +405,22 @@ export function createAscClient(opts: AscClientOptions): AscClient {
           body: r.attributes?.body ?? null,
           createdDate: r.attributes!.createdDate!,
           territory: r.attributes?.territory ?? null,
+          replied: Boolean(r.relationships?.response?.data),
         }));
       return { reviews, next: page?.links?.next ?? null };
+    },
+
+    async replyToReview(reviewId, text) {
+      await call<unknown>('/v1/customerReviewResponses', {
+        method: 'POST',
+        body: {
+          data: {
+            type: 'customerReviewResponses',
+            attributes: { responseBody: text },
+            relationships: { review: { data: { type: 'customerReviews', id: reviewId } } },
+          },
+        },
+      });
     },
   };
 }

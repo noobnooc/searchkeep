@@ -40,6 +40,9 @@ export interface SearchkeepConfig {
     privateKey: string | null;
     /** Vendor number for Sales and Trends (ASC_VENDOR_NUMBER); optional, enables revenue per product in local currencies. */
     vendorNumber: string | null;
+    /** A second key only for review responses (ASC_REPLY_KEY_ID, ASC_REPLY_PRIVATE_KEY; Customer Support role), used only with ENABLE_WRITES. */
+    replyKeyId: string | null;
+    replyPrivateKey: string | null;
   };
   /** Google Play: the Search Console service account unless PLAY_CLIENT_EMAIL/PLAY_PRIVATE_KEY are set. */
   play: {
@@ -49,6 +52,8 @@ export interface SearchkeepConfig {
     bucket: string | null;
     /** Opt-in (PLAY_METADATA): daily snapshot of store listings and tracks through an uncommitted edit. */
     metadata: boolean;
+    /** Opt-in (PLAY_REVIEWS_API): reviews from the Android Publisher API every few hours (needs "Reply to reviews"). */
+    reviewsApi: boolean;
   };
   /** Opt-in plugin: Apple's public App Store feeds (own app's rating and chart position only). */
   appStorePublic: boolean;
@@ -307,12 +312,15 @@ export function loadConfig(env: RawEnv): SearchkeepConfig {
       issuerId: str(env, 'ASC_ISSUER_ID'),
       privateKey: normalizePem(str(env, 'ASC_PRIVATE_KEY')),
       vendorNumber: vendorNumber(str(env, 'ASC_VENDOR_NUMBER'), errors),
+      replyKeyId: str(env, 'ASC_REPLY_KEY_ID'),
+      replyPrivateKey: normalizePem(str(env, 'ASC_REPLY_PRIVATE_KEY')),
     },
     play: {
       clientEmail: str(env, 'PLAY_CLIENT_EMAIL') ?? str(env, 'GSC_CLIENT_EMAIL'),
       privateKey: normalizePem(str(env, 'PLAY_PRIVATE_KEY') ?? str(env, 'GSC_PRIVATE_KEY')),
       bucket: normalizeBucket(str(env, 'PLAY_REPORTS_BUCKET'), errors),
       metadata: str(env, 'PLAY_METADATA')?.toLowerCase() === 'true',
+      reviewsApi: str(env, 'PLAY_REVIEWS_API')?.toLowerCase() === 'true',
     },
     appStorePublic: str(env, 'APP_STORE_PUBLIC_DATA')?.toLowerCase() === 'true',
     brandRegex: brandRegex && compileBrandRegex(brandRegex) ? brandRegex : null,

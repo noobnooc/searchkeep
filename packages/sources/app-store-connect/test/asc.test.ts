@@ -144,7 +144,7 @@ describe('app store connect', () => {
     const asc = createAscClient({ keyId: 'K', issuerId: 'I', privateKey: pem, fetch: fetchMock });
     const page = await asc.listReviews('123', { limit: 200 });
     expect(page.reviews).toEqual([
-      { id: 'r1', rating: 4, title: 'Nice', body: 'Good', createdDate: '2026-10-18T10:00:00-07:00', territory: 'USA' },
+      { id: 'r1', rating: 4, title: 'Nice', body: 'Good', createdDate: '2026-10-18T10:00:00-07:00', territory: 'USA', replied: false },
     ]);
     expect(urls[0]).toContain('/v1/apps/123/customerReviews?sort=-createdDate&limit=200');
     await asc.listReviews('123', { limit: 200, cursor: page.next });
@@ -307,5 +307,52 @@ describe('app store connect', () => {
       { entity: 'app_info', locale: 'en-US', field: 'name', value: 'Echobell' },
       { entity: 'app_info', locale: 'en-US', field: 'subtitle', value: 'Alerts that ring' },
     ]);
+  });
+
+  it('marks reviews with a response, and posts a response only through replyToReview', async () => {
+    clearAscTokenCache();
+    const { pem } = await p8();
+    const seen: Array<{ url: string; method: string; body: unknown }> = [];
+    const fetchMock = (async (url: string, init?: RequestInit) => {
+      seen.push({ url, method: init?.method ?? 'GET', body: init?.body ? JSON.parse(String(init.body)) : null });
+      if (url.includes('/customerReviews'))
+        return Response.json({
+          data: [
+            {
+              id: 'r1',
+              attributes: { rating: 2, title: 'Meh', body: 'Slow', createdDate: '2026-11-01T00:00:00Z', territory: 'USA' },
+              relationships: { response: { data: { id: 'resp1' } } },
+            },
+            {
+              id: 'r2',
+              attributes: { rating: 5, title: 'Great', body: 'Love it', createdDate: '2026-10-31T00:00:00Z', territory: 'GBR' },
+              relationships: { response: { data: null } },
+            },
+          ],
+        });
+      if (url.endsWith('/v1/customerReviewResponses'))
+        return Response.json({ data: { id: 'resp2', type: 'customerReviewResponses' } }, { status: 201 });
+      return new Response('{}', { status: 404 });
+    }) as typeof fetch;
+    const asc = createAscClient({ keyId: 'K', issuerId: 'I', privateKey: pem, fetch: fetchMock });
+    const page = await asc.listReviews('123', { limit: 200 });
+    expect(page.reviews.map((r) => [r.id, r.replied])).toEqual([
+      ['r1', true],
+      ['r2', false],
+    ]);
+    expect(seen[0]!.url).toContain('include=response');
+    expect(seen.every((x) => x.method === 'GET')).toBe(true);
+    await asc.replyToReview!('r2', 'Thank you!');
+    expect(seen.at(-1)).toEqual({
+      url: 'https://api.appstoreconnect.apple.com/v1/customerReviewResponses',
+      method: 'POST',
+      body: {
+        data: {
+          type: 'customerReviewResponses',
+          attributes: { responseBody: 'Thank you!' },
+          relationships: { review: { data: { type: 'customerReviews', id: 'r2' } } },
+        },
+      },
+    });
   });
 });

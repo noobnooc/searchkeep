@@ -125,7 +125,7 @@ describe('apps config', () => {
       ASC_PRIVATE_KEY: '-----BEGIN PRIVATE KEY-----\\nabc\\n-----END PRIVATE KEY-----',
     });
     expect(cfg.apps[0]).toMatchObject({ id: 'acme', origin: 'secret' });
-    expect(cfg.play).toEqual({ clientEmail: 'sa@x', privateKey: 'k', bucket: 'pubsite_prod_rev_0123', metadata: false });
+    expect(cfg.play).toEqual({ clientEmail: 'sa@x', privateKey: 'k', bucket: 'pubsite_prod_rev_0123', metadata: false, reviewsApi: false });
     expect(cfg.asc.privateKey).toContain('\nabc\n');
     expect(cfg.appStorePublic).toBe(false);
     expect(findApp(cfg, 'com.acme.app').id).toBe('acme');

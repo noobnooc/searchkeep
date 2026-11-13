@@ -360,6 +360,21 @@ export const TOOLS: Tool[] = [
     params: [site, { name: 'live', type: 'boolean', description: '`true` refreshes the list from the Search Console API first.' }],
   },
   {
+    name: 'reply_review',
+    summary: 'Replies to an App Store or Google Play review, after a preview. Off by default.',
+    description:
+      'Writes to an external system: the reply is public and the reviewer is notified. Registered only with ENABLE_WRITES=true. The first call returns a preview and a confirmation token and posts nothing; the second call, with the same arguments and the token (valid 15 minutes), posts. App Store replies use their own Customer Support key (ASC_REPLY_*); Google Play replies need PLAY_REVIEWS_API and “Reply to reviews” (at most 350 characters).',
+    readOnly: false,
+    params: [
+      app,
+      { name: 'store', type: '"apple" | "play"', description: 'Required.' },
+      { name: 'reviewId', type: 'string', description: 'Required. From app_reviews.' },
+      { name: 'text', type: 'string', description: 'Required. The reply.' },
+      { name: 'confirmToken', type: 'string', description: 'From the preview, after the user confirmed.' },
+    ],
+    example: 'Draft a reply to the newest one-star review and post it after I approve.',
+  },
+  {
     name: 'submit_sitemap',
     summary: 'Submit a sitemap to Search Console. Off by default.',
     description:
@@ -556,7 +571,7 @@ export const TOOLS: Tool[] = [
   },
 ];
 
-/** Tools registered by default; `submit_sitemap` appears only with `ENABLE_WRITES=true`. */
+/** Tools registered by default; `submit_sitemap` and `reply_review` appear only with `ENABLE_WRITES=true`. */
 export const READ_ONLY_TOOLS = TOOLS.filter((t) => t.readOnly);
 
 export interface Secret {
@@ -622,7 +637,8 @@ export const SECRETS: Secret[] = [
   {
     name: 'ENABLE_WRITES',
     required: 'optional',
-    description: 'Set to `true` to register `submit_sitemap`. Requires Full permission in GSC.',
+    description:
+      'Set to `true` to register `submit_sitemap` (requires Full permission in GSC) and `reply_review` (needs ASC_REPLY_KEY_ID and ASC_REPLY_PRIVATE_KEY, or PLAY_REVIEWS_API).',
     example: 'true',
   },
   {
@@ -698,6 +714,19 @@ const APP_SECRETS: Secret[] = [
   },
   { name: 'ASC_ISSUER_ID', required: 'for apps', description: 'The Issuer ID shown above the App Store Connect API keys.' },
   { name: 'ASC_PRIVATE_KEY', required: 'for apps', description: 'Contents of the key’s `AuthKey_<KEY ID>.p8` file.' },
+  {
+    name: 'PLAY_REVIEWS_API',
+    required: 'optional',
+    description:
+      '`true` to read Google Play reviews of the last week every 4 hours through the Android Publisher API. Needs the “Reply to reviews” permission (Google offers no read-only one).',
+  },
+  {
+    name: 'ASC_REPLY_KEY_ID',
+    required: 'optional',
+    description:
+      'Key ID of a second App Store Connect API key with the Customer Support role, used only by reply_review (with ENABLE_WRITES).',
+  },
+  { name: 'ASC_REPLY_PRIVATE_KEY', required: 'optional', description: 'Contents of that key’s `.p8` file.' },
   {
     name: 'PLAY_METADATA',
     required: 'optional',

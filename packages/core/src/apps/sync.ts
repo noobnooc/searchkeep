@@ -68,6 +68,8 @@ export interface AppPlanArgs {
 export const ASC_RECENT_INSTANCES = 6;
 /** Report ids of a request are listed again after this many days. */
 const ASC_REPORT_IDS_DAYS = 7;
+/** Reviews are read again after this long (App Store; Google Play through its API when on). */
+export const REVIEWS_EVERY_MS = 4 * 3_600_000;
 /** App Store reviews read on an app's first sync (200 per page). */
 export const ASC_REVIEW_HISTORY_PAGES = 10;
 /** Play crash and ANR rates are read for this many days on the first sync; Google keeps more. */
@@ -300,16 +302,18 @@ function planAppStore(args: AppPlanArgs, app: AppConfig, asc: AscClient, place: 
     });
   } else afterRequests(state, place);
 
-  // Customer reviews, once a day.
-  const cursor = parseJson<ReviewCursor & { checkedOn?: IsoDate }>(get(syncKeys.ascReviews(app.id))) ?? {};
-  if (cursor.checkedOn !== today) {
+  // Customer reviews, every few hours.
+  const cursor = parseJson<ReviewCursor & { checkedOn?: IsoDate; checkedAt?: string }>(get(syncKeys.ascReviews(app.id))) ?? {};
+  const nowMs = args.nowMs ?? Date.now();
+  const lastReviews = cursor.checkedAt ? Date.parse(cursor.checkedAt) : cursor.checkedOn ? Date.parse(`${cursor.checkedOn}T00:00:00Z`) : 0;
+  if (nowMs - lastReviews >= REVIEWS_EVERY_MS) {
     place({
       task: 'asc.reviews',
       siteId,
       source: 'asc',
       backfill: false,
       calls: 1,
-      key: `asc.reviews:${app.id}:${today}`,
+      key: `asc.reviews:${app.id}:${new Date(nowMs).toISOString().slice(0, 13)}`,
       run: async () => {
         const maxPages = cursor.historyDone ? 5 : ASC_REVIEW_HISTORY_PAGES;
         let next: string | null = null;
@@ -336,11 +340,20 @@ function planAppStore(args: AppPlanArgs, app: AppConfig, asc: AscClient, place: 
         const historyDone = cursor.historyDone || reachedEnd || pages >= ASC_REVIEW_HISTORY_PAGES;
         await store.setMeta(
           syncKeys.ascReviews(app.id),
-          JSON.stringify({ ...(newest ? { newest } : {}), historyDone, checkedOn: today } satisfies ReviewCursor & { checkedOn: IsoDate }),
+          JSON.stringify({
+            ...(newest ? { newest } : {}),
+            historyDone,
+            checkedOn: today,
+            checkedAt: new Date(nowMs).toISOString(),
+          } satisfies ReviewCursor & { checkedOn: IsoDate; checkedAt: string }),
         );
         return written;
       },
-      skip: () => store.setMeta(syncKeys.ascReviews(app.id), JSON.stringify({ ...cursor, checkedOn: today })),
+      skip: () =>
+        store.setMeta(
+          syncKeys.ascReviews(app.id),
+          JSON.stringify({ ...cursor, checkedOn: today, checkedAt: new Date(nowMs).toISOString() }),
+        ),
     });
   }
 
@@ -667,6 +680,57 @@ function planPlay(args: AppPlanArgs, app: AppConfig, place: Place): void {
   };
   planListing('reports');
   planListing('finance');
+
+  // Reviews through the Android Publisher API (opt-in): the last week's, every few hours, ahead of the monthly files.
+  if (ctx.config.play.reviewsApi && play.listReviews) {
+    const key = syncKeys.playReviewsApi(app.id);
+    const st = parseJson<{ checkedAt?: string; problem?: string }>(get(key)) ?? {};
+    const nowMs = args.nowMs ?? Date.now();
+    const wait = st.problem ? 24 * 3_600_000 : REVIEWS_EVERY_MS;
+    if (!st.checkedAt || nowMs - Date.parse(st.checkedAt) >= wait) {
+      place({
+        task: 'play.reviews_api',
+        siteId,
+        source: 'play',
+        backfill: false,
+        calls: 1,
+        key: `play.reviews_api:${app.id}:${new Date(nowMs).toISOString().slice(0, 13)}`,
+        run: async () => {
+          let written = 0;
+          let token: string | null = null;
+          try {
+            for (let i = 0; i < 5; i++) {
+              if (i > 0) budget.spend('play');
+              const page = await play.listReviews!(pkg, token);
+              const rows = page.reviews
+                .filter((r) => r.rating >= 1 && r.rating <= 5)
+                .map((r) => ({
+                  id: r.id.slice(0, 200),
+                  createdAt: r.modifiedAt,
+                  rating: Math.round(r.rating),
+                  title: null,
+                  body: r.text?.slice(0, 4000) ?? null,
+                  territory: null,
+                  language: r.language?.slice(0, 20) ?? null,
+                  version: r.version?.slice(0, 60) ?? null,
+                  replied: r.replied,
+                }));
+              if (rows.length) written += await store.writeAppReviews(app.id, 'play', rows);
+              token = page.next;
+              if (!token) break;
+            }
+          } catch (err) {
+            if (!(err instanceof SourceError) || (err.status !== 403 && err.status !== 401)) throw err;
+            await store.setMeta(key, JSON.stringify({ checkedAt: new Date(nowMs).toISOString(), problem: safeMessage(err) }));
+            return null;
+          }
+          await store.setMeta(key, JSON.stringify({ checkedAt: new Date(nowMs).toISOString() }));
+          return written;
+        },
+        skip: () => store.setMeta(key, JSON.stringify({ checkedAt: new Date(nowMs).toISOString() })),
+      });
+    }
+  }
 
   // Crash and ANR rates, once a day.
   const vitals = parseJson<{ through?: IsoDate; checkedOn?: IsoDate }>(get(syncKeys.playVitals(app.id))) ?? {};

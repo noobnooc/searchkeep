@@ -26,6 +26,25 @@ Because users sync `main` at any time, the `Unreleased` section is always accura
 
 ### Added
 
+- Fresher reviews and review replies. App Store reviews are read every 4 hours (and marked replied
+  when they have a developer response). With the opt-in `PLAY_REVIEWS_API=true`, Google Play reviews
+  of the last week are read every 4 hours through the Android Publisher API, ahead of the monthly
+  files (no reviewer names are kept). New write tool `reply_review`, registered only with
+  `ENABLE_WRITES=true`: the first call shows a preview and returns a confirmation token, nothing is
+  posted; the second call with the token (valid 15 minutes, single use) posts. App Store replies use a
+  separate key with the Customer Support role (`ASC_REPLY_KEY_ID`, `ASC_REPLY_PRIVATE_KEY`), never the
+  Sales and Reports key; Google Play replies use the reviews API. `setup_status` gains
+  `config.play_reviews_api`, `probe.play_reviews` and, with writes on, `config.review_replies`.
+
+  #### Upgrade notes
+  - Nothing to do for App Store reviews.
+  - Optional, Google Play reviews within hours: set `PLAY_REVIEWS_API` to `true` and grant the
+    service account **Reply to reviews** for the app in the Play Console (Google offers no read-only
+    permission for this API). Skipping it keeps the monthly files.
+  - Optional, replies: with `ENABLE_WRITES=true`, create an App Store Connect API key with the
+    **Customer Support** role and set `ASC_REPLY_KEY_ID` and `ASC_REPLY_PRIVATE_KEY`; for Google Play,
+    the `PLAY_REVIEWS_API` setup above. Without them `reply_review` says what is missing.
+
 - Data quality checks. `app_performance` flags `anomalies`: days where downloads, impressions,
   unique page views or installs are at least 50 times the median of the 28 days before (and at
   least 100), with the territory and source behind most of it; volume purchases are included in

@@ -104,6 +104,10 @@ export const syncKeys = {
   ascSkus: 'app:asc:skus',
   /** Day an app's store listing was last snapshotted, per store (`{ day, problem? }`). */
   listingChecked: (app: string, store: 'apple' | 'play') => `app:listing:${store}:${app}`,
+  /** Google Play reviews read through the Android Publisher API (`{ checkedAt, problem? }`). */
+  playReviewsApi: (app: string) => `app:play:reviews-api:${app}`,
+  /** A review reply waiting for confirmation (`PendingReply`), by token. */
+  pendingReply: (token: string) => `reply:pending:${token}`,
   /** The Play Console report files of an app, listed once a day (`PlayListing`). */
   playListing: (app: string) => `app:play:list:${app}`,
   /** The financial files of an app (earnings of the account, its subscriptions), listed once a day (`PlayListing`). */

@@ -120,6 +120,7 @@ const TASKS: Record<SyncDataset, string[]> = {
     'play.finance_list',
     'play.vitals',
     'play.listing',
+    'play.reviews_api',
     ...[
       'store_country',
       'store_traffic',

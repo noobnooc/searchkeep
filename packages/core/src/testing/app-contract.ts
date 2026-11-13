@@ -12,6 +12,7 @@ import {
   appSubscriptions,
   appRevenue,
   appChanges,
+  replyReview,
   listApps,
   startAppStoreReports,
 } from '../apps/analysis.js';
@@ -387,7 +388,9 @@ function fakeAsc(
  * `financeDenied`: listing the financial folders answers 403. `financeReadDenied`: they can be
  * listed, but reading a financial file answers 403 (what an account without "View financial data" sees).
  */
-function fakePlay(opts: { financeDenied?: boolean; financeReadDenied?: boolean; vitals?: 'empty' | 'forbidden' } = {}) {
+function fakePlay(
+  opts: { financeDenied?: boolean; financeReadDenied?: boolean; vitals?: 'empty' | 'forbidden'; reviews?: 'ok' | 'forbidden' } = {},
+) {
   const financial = (name: string) => /^(financial-stats|earnings)\//.test(name);
   const calls: string[] = [];
   const pkg = APP.playPackage;
@@ -566,6 +569,31 @@ function fakePlay(opts: { financeDenied?: boolean; financeReadDenied?: boolean; 
     async listApps() {
       return [{ packageName: pkg, name: 'Acme' }];
     },
+    ...(opts.reviews
+      ? {
+          async listReviews() {
+            calls.push('listReviews');
+            if (opts.reviews === 'forbidden') throw new SourceError('play', 403, 'HTTP 403: The caller does not have permission');
+            return {
+              reviews: [
+                {
+                  id: 'gp:new1',
+                  modifiedAt: '2026-10-19T08:00:00.000Z',
+                  rating: 2,
+                  text: 'Crashes on launch',
+                  language: 'en',
+                  version: '2.4.0',
+                  replied: false,
+                },
+              ],
+              next: null,
+            };
+          },
+          async replyToReview(_pkg: string, id: string, text: string) {
+            calls.push(`reply:${id}:${text}`);
+          },
+        }
+      : {}),
   };
   return { client, calls };
 }
@@ -1934,6 +1962,139 @@ export function appContract(name: string, makeStore: () => Promise<Store>): void
         });
         const perf = await appPerformance(ctx, { app: APP.id, store: 'apple', start: '2026-10-01', end: '2026-10-18' });
         expect(perf.notes.some((n) => n.includes('only as monthly totals'))).toBe(true);
+      });
+
+      it('reads App Store reviews every 4 hours and Google Play reviews through the API when on', async () => {
+        const cfg = config({ APP_STORE_PUBLIC_DATA: 'false', PLAY_REVIEWS_API: 'true' });
+        const at = (iso: string) => new Date(iso);
+        const asc = fakeAsc();
+        const play = fakePlay({ reviews: 'ok' });
+        await runSync({ store, config: cfg, clients: clients(asc, play), trigger: 'manual', now: at('2026-10-20T04:00:00Z'), pacing: {} });
+        expect(asc.calls.filter((c) => c === 'listReviews')).toHaveLength(1);
+        expect(play.calls.filter((c) => c === 'listReviews')).toHaveLength(1);
+        // Three hours later: not yet; five hours later: again.
+        const a2 = fakeAsc();
+        const p2 = fakePlay({ reviews: 'ok' });
+        await runSync({ store, config: cfg, clients: clients(a2, p2), trigger: 'manual', now: at('2026-10-20T07:00:00Z'), pacing: {} });
+        expect(a2.calls).not.toContain('listReviews');
+        expect(p2.calls).not.toContain('listReviews');
+        const a3 = fakeAsc();
+        await runSync({ store, config: cfg, clients: { asc: a3.client }, trigger: 'manual', now: at('2026-10-20T09:00:00Z'), pacing: {} });
+        expect(a3.calls).toContain('listReviews');
+        const ctx = { store, config: cfg, clients: {}, now: () => NOW };
+        const reviews = await appReviews(ctx, { app: APP.id, store: 'play', start: '2026-10-01', end: '2026-10-20' });
+        expect(reviews.reviews.find((r) => r.id === 'gp:new1')).toMatchObject({
+          rating: 2,
+          body: 'Crashes on launch',
+          version: '2.4.0',
+          replied: false,
+        });
+        expect(reviews.notes[0]).toContain('Android Publisher API every 4 hours');
+        // Without the permission: noted, the rest goes on, setup_status says what to grant.
+        const denied = fakePlay({ reviews: 'forbidden' });
+        const run = await runSync({
+          store,
+          config: cfg,
+          clients: { play: denied.client },
+          trigger: 'manual',
+          now: at('2026-10-21T04:00:00Z'),
+          pacing: {},
+        });
+        expect(run.status).toBe('ok');
+        const readiness = evaluateReadiness({
+          configured: true,
+          identityOk: true,
+          inspection: { appFound: true, managedOAuthEnabled: true, broadPolicyReasons: [] },
+        });
+        const checks = (await setupStatus({ store, config: cfg, clients: { play: denied.client }, now: () => NOW }, { readiness })).checks;
+        expect(checks.find((c) => c.id === 'probe.play_reviews')).toMatchObject({
+          status: 'warn',
+          detail: expect.stringContaining('Reply to reviews'),
+        });
+        expect(checks.find((c) => c.id === 'config.play_reviews_api')!.status).toBe('ok');
+      });
+
+      it('replies to a review only with writes on, after a preview, with a single-use token', async () => {
+        await store.writeAppReviews(APP.id, 'apple', [
+          {
+            id: 'r9',
+            createdAt: '2026-10-18T10:00:00.000Z',
+            rating: 1,
+            title: 'Crashes',
+            body: 'Crashes on start',
+            territory: 'US',
+            language: null,
+            version: null,
+            replied: false,
+          },
+        ]);
+        await store.writeAppReviews(APP.id, 'play', [
+          {
+            id: 'gp:9',
+            createdAt: '2026-10-18T10:00:00.000Z',
+            rating: 2,
+            title: null,
+            body: 'Slow',
+            territory: null,
+            language: 'en',
+            version: null,
+            replied: false,
+          },
+        ]);
+        const posted: string[] = [];
+        const replies = { replyToReview: async (id: string, text: string) => void posted.push(`${id}:${text}`) } as unknown as AscClient;
+        const base = { app: APP.id, store: 'apple' as const, reviewId: 'r9', text: 'Sorry! Fixed in 2.1.' };
+        // Writes off: refused.
+        const off = { store, config: config({ APP_STORE_PUBLIC_DATA: 'false' }), clients: { ascReplies: replies }, now: () => NOW };
+        await expect(replyReview(off, base)).rejects.toMatchObject({ code: 'writes_disabled' });
+        // Writes on, but no reply key: says which key to create.
+        const cfg = config({ APP_STORE_PUBLIC_DATA: 'false', ENABLE_WRITES: 'true', ASC_REPLY_KEY_ID: 'R', ASC_REPLY_PRIVATE_KEY: 'pk' });
+        await expect(replyReview({ store, config: cfg, clients: {}, now: () => NOW }, base)).rejects.toMatchObject({
+          code: 'not_configured',
+        });
+        const ctx = { store, config: cfg, clients: { ascReplies: replies }, now: () => NOW };
+        // Step 1: preview only.
+        const preview = await replyReview(ctx, base);
+        expect(preview).toMatchObject({
+          status: 'preview',
+          review: { id: 'r9', rating: 1, alreadyReplied: false },
+          reply: 'Sorry! Fixed in 2.1.',
+        });
+        expect(posted).toEqual([]);
+        // A different text needs a new preview.
+        await expect(replyReview(ctx, { ...base, text: 'Other', confirmToken: preview.confirmToken })).rejects.toMatchObject({
+          code: 'bad_request',
+        });
+        // Step 2: posted, marked replied, and the token cannot be used again.
+        const done = await replyReview(ctx, { ...base, confirmToken: preview.confirmToken });
+        expect(done.status).toBe('posted');
+        expect(posted).toEqual(['r9:Sorry! Fixed in 2.1.']);
+        const after = await appReviews(ctx, { app: APP.id, store: 'apple', start: '2026-10-01', end: '2026-10-20' });
+        expect(after.reviews.find((r) => r.id === 'r9')!.replied).toBe(true);
+        await expect(replyReview(ctx, { ...base, confirmToken: preview.confirmToken })).rejects.toMatchObject({ code: 'bad_request' });
+        // An expired preview is refused.
+        const p2 = await replyReview(ctx, base);
+        const late = { ...ctx, now: () => new Date(NOW.getTime() + 16 * 60_000) };
+        await expect(replyReview(late, { ...base, confirmToken: p2.confirmToken })).rejects.toMatchObject({ code: 'bad_request' });
+        // Google Play: at most 350 characters, through the API when PLAY_REVIEWS_API is on.
+        const play = fakePlay({ reviews: 'ok' });
+        const pcfg = config({ APP_STORE_PUBLIC_DATA: 'false', ENABLE_WRITES: 'true', PLAY_REVIEWS_API: 'true' });
+        const pctx = { store, config: pcfg, clients: { play: play.client }, now: () => NOW };
+        await expect(replyReview(pctx, { app: APP.id, store: 'play', reviewId: 'gp:9', text: 'x'.repeat(351) })).rejects.toMatchObject({
+          code: 'bad_request',
+        });
+        const pp = await replyReview(pctx, { app: APP.id, store: 'play', reviewId: 'gp:9', text: 'Thanks, looking into it.' });
+        await replyReview(pctx, {
+          app: APP.id,
+          store: 'play',
+          reviewId: 'gp:9',
+          text: 'Thanks, looking into it.',
+          confirmToken: pp.confirmToken,
+        });
+        expect(play.calls).toContain('reply:gp:9:Thanks, looking into it.');
+        await expect(replyReview(pctx, { app: APP.id, store: 'play', reviewId: 'nope', text: 'Hi' })).rejects.toMatchObject({
+          code: 'not_found',
+        });
       });
 
       it('looks for report kinds added since the last listing right away', async () => {

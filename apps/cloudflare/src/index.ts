@@ -132,7 +132,15 @@ export function buildClients(config: SearchkeepConfig, browser: BrowserFetch | n
       clientEmail: config.play.clientEmail,
       privateKey: config.play.privateKey,
       // The Android Publisher API (no read-only scope) only for the opt-in features that need it.
-      publisher: config.play.metadata,
+      publisher: config.play.metadata || config.play.reviewsApi,
+      reviews: config.play.reviewsApi,
+    });
+  // Review responses only with writes on, through their own key (never the Sales and Reports key).
+  if (config.enableWrites && config.asc.replyKeyId && config.asc.issuerId && config.asc.replyPrivateKey)
+    clients.ascReplies = createAscClient({
+      keyId: config.asc.replyKeyId,
+      issuerId: config.asc.issuerId,
+      privateKey: config.asc.replyPrivateKey,
     });
   if (config.appStorePublic)
     clients.appStore = createAppStorePublicClient(

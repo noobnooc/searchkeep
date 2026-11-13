@@ -1694,6 +1694,7 @@ export class D1Store implements Store {
       where.push(`rating IN (SELECT value FROM json_each(${arg(JSON.stringify(q.ratings.map((r) => Math.round(r))))}))`);
     if (q.territory) where.push(`territory = ${arg(q.territory)}`);
     if (q.version) where.push(`version = ${arg(q.version)}`);
+    if (q.id) where.push(`id = ${arg(q.id)}`);
     if (q.contains) where.push(`instr(lower(COALESCE(title, '') || ' ' || COALESCE(body, '')), lower(${arg(q.contains)})) > 0`);
     const rows = await this.all<Record<string, string | number | null>>(
       `SELECT store, id, created_at, rating, title, body, territory, language, version, replied FROM app_reviews

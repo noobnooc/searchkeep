@@ -212,4 +212,63 @@ describe('google play', () => {
     await expect(play.listingSnapshot!('one.echobell.app')).rejects.toThrow();
     expect(seen.at(-1)).toBe('DELETE /one.echobell.app/edits/e1');
   });
+
+  it('reads the last week of reviews without author names and replies only when asked', async () => {
+    clearPlayTokenCache();
+    const pk = await pemKey();
+    const seen: Array<{ url: string; method: string; body: string | null }> = [];
+    const fetchMock = (async (url: string, init?: RequestInit) => {
+      if (url.includes('oauth2')) return Response.json({ access_token: 'tok', expires_in: 3600 });
+      seen.push({ url, method: init?.method ?? 'GET', body: init?.body ? String(init.body) : null });
+      if (url.includes('/reviews?'))
+        return Response.json({
+          reviews: [
+            {
+              reviewId: 'gp:AOq1',
+              authorName: 'Jane Doe',
+              comments: [
+                {
+                  userComment: {
+                    text: 'Love the alerts',
+                    lastModified: { seconds: '1793000000', nanos: 0 },
+                    starRating: 5,
+                    reviewerLanguage: 'en',
+                    appVersionName: '2.4.0',
+                  },
+                },
+                { developerComment: { text: 'Thanks!', lastModified: { seconds: '1793000100' } } },
+              ],
+            },
+          ],
+          tokenPagination: { nextPageToken: 'n2' },
+        });
+      if (url.includes(':reply')) return Response.json({ result: { replyText: 'Thanks', lastEdited: { seconds: '1793000200' } } });
+      return new Response('{}', { status: 404 });
+    }) as typeof fetch;
+    expect(createPlayClient({ clientEmail: 'sa@x', privateKey: pk, publisher: true, fetch: fetchMock }).listReviews).toBeUndefined();
+    const play = createPlayClient({ clientEmail: 'sa@x', privateKey: pk, publisher: true, reviews: true, fetch: fetchMock });
+    const page = await play.listReviews!('one.echobell.app');
+    expect(page).toEqual({
+      reviews: [
+        {
+          id: 'gp:AOq1',
+          modifiedAt: new Date(1793000000 * 1000).toISOString(),
+          rating: 5,
+          text: 'Love the alerts',
+          language: 'en',
+          version: '2.4.0',
+          replied: true,
+        },
+      ],
+      next: 'n2',
+    });
+    expect(JSON.stringify(page)).not.toContain('Jane');
+    expect(seen.every((x) => x.method === 'GET')).toBe(true);
+    await play.replyToReview!('one.echobell.app', 'gp:AOq1', 'Thanks');
+    expect(seen.at(-1)).toEqual({
+      url: 'https://androidpublisher.googleapis.com/androidpublisher/v3/applications/one.echobell.app/reviews/gp%3AAOq1:reply',
+      method: 'POST',
+      body: JSON.stringify({ replyText: 'Thanks' }),
+    });
+  });
 });

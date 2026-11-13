@@ -96,7 +96,7 @@ are never shown, which is expected.
 | `GSC_PRIVATE_KEY`         | for GSC  | 12          | `private_key` from the service account key JSON (real line breaks or literal `\n`)                                     |
 | `BING_API_KEY`            | for Bing | 13          | Bing Webmaster Tools API key (treat it as a password)                                                                  |
 | `BRAND_REGEX`             | optional | 14          | Default brand regex, matched case-insensitively, for example `acme\|acme\s?corp`                                       |
-| `ENABLE_WRITES`           | optional | 14          | `true` to enable `submit_sitemap` (requires GSC **Full** permission)                                                   |
+| `ENABLE_WRITES`           | optional | 14          | `true` to enable `submit_sitemap` (GSC **Full** permission) and `reply_review` (a reply key or Play permission)        |
 | `GSC_ROWS_PER_DAY`        | optional | 14          | Max query × page rows stored per day from GSC, 100–100000. Default `2500`                                              |
 | `GSC_BACKFILL_MONTHS`     | optional | 14          | Months of GSC history to backfill, 0–16. Default `16`                                                                  |
 | `SYNC_DAILY_WRITE_BUDGET` | optional | 14          | Max rows history (GSC backfill, Cloudflare lookback) writes per UTC day. Default `80000` (D1 Free allows 100000)       |
@@ -114,6 +114,9 @@ are never shown, which is expected.
 | `PLAY_CLIENT_EMAIL`       | optional | 14a         | Service account for Google Play, when it is not the Search Console one (`GSC_CLIENT_EMAIL`)                            |
 | `PLAY_PRIVATE_KEY`        | optional | 14a         | Its private key, when `PLAY_CLIENT_EMAIL` is set                                                                       |
 | `PLAY_METADATA`           | optional | 14a         | `true` to snapshot Google Play store listings and tracks daily for `app_changes` (Android Publisher API, opt-in)       |
+| `PLAY_REVIEWS_API`        | optional | 14a         | `true` to read Google Play reviews of the last week every 4 hours (needs "Reply to reviews")                           |
+| `ASC_REPLY_KEY_ID`        | optional | 14a         | Key ID of a second App Store Connect key with the **Customer Support** role, only for `reply_review`                   |
+| `ASC_REPLY_PRIVATE_KEY`   | optional | 14a         | That key's `.p8` file contents                                                                                         |
 | `APP_STORE_PUBLIC_DATA`   | optional | 14a         | `true` to turn on the opt-in plugin that reads Apple's public App Store feeds (your app's rating and chart position)   |
 
 `CLOUDFLARE_ACCOUNT_ID` and `CLOUDFLARE_API_TOKEN` are required even if you use no Cloudflare data:
@@ -713,9 +716,14 @@ The output lists your sites, including each `bingSiteUrl` from `SITES`.
 - **`BRAND_REGEX`**: a JavaScript regular expression source, matched case-insensitively, that
   identifies brand queries, for example `acme|acme\s?corp`. A site's `brandRegex` in `SITES`
   overrides it. Without it, the `brand` filter treats all queries as non-brand.
-- **`ENABLE_WRITES`**: set to `true` to enable the `submit_sitemap` tool. Also change the service
-  account's permission in Search Console to **Full** for the properties where you want to submit
-  sitemaps. Leave it unset to stay read-only.
+- **`ENABLE_WRITES`**: set to `true` to enable the `submit_sitemap` and `reply_review` tools. For
+  sitemaps, change the service account's permission in Search Console to **Full** for the
+  properties where you want to submit them. For App Store review replies, **[Human]** generate a
+  second App Store Connect API key with the **Customer Support** role and set `ASC_REPLY_KEY_ID`
+  and `ASC_REPLY_PRIVATE_KEY` (the Sales and Reports key never writes); for Google Play replies,
+  set `PLAY_REVIEWS_API=true` and grant the service account **Reply to reviews**. `reply_review`
+  always shows a preview first and posts only when called again with its confirmation token.
+  Leave `ENABLE_WRITES` unset to stay read-only. **Verify:** `setup_status` → `config.review_replies`.
 - **Sync budgets**: `GSC_ROWS_PER_DAY` (default `2500`), `GSC_BACKFILL_MONTHS` (default `16`),
   `SYNC_DAILY_WRITE_BUDGET` (default `80000`) and `SYNC_MAX_CALLS_PER_RUN` (default `35`). The
   defaults fit the free plans: D1 Free allows 100,000 rows written per day, Workers Free allows 50
@@ -780,6 +788,12 @@ one of your sites (referrals from it are marked as your own).
    edit the same service account has open, so do not share this service account with release
    tooling (use `PLAY_CLIENT_EMAIL` and `PLAY_PRIVATE_KEY` for a separate one). **Verify:**
    `probe.asc_metadata` and (when on) `probe.play_metadata` are `ok`.
+
+   Reviews: App Store reviews are read every 4 hours. Google Play reviews come from the monthly
+   files (3-7 days late); for the last week every 4 hours, set `PLAY_REVIEWS_API` to `true` and in
+   the Play Console grant the service account **Reply to reviews** for the app (Google offers no
+   read-only permission for the reviews API; Searchkeep replies only through `reply_review`, which
+   needs `ENABLE_WRITES`). **Verify:** `probe.play_reviews` is `ok`.
 
 3. **Start App Store reports, once per app.** **[Human]** Apple generates analytics reports only
    after a request made with an **Admin** key, and Searchkeep never stores one. Generate a second,

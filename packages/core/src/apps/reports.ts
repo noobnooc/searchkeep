@@ -997,6 +997,7 @@ export function ascReviewInput(r: {
   body: string | null;
   createdDate: string;
   territory: string | null;
+  replied?: boolean;
 }): AppReviewInput | null {
   const at = new Date(r.createdDate);
   if (Number.isNaN(at.getTime()) || !(r.rating >= 1 && r.rating <= 5)) return null;
@@ -1009,7 +1010,7 @@ export function ascReviewInput(r: {
     territory: r.territory?.trim().toUpperCase().slice(0, 10) || null,
     language: null,
     version: null,
-    replied: false,
+    replied: Boolean(r.replied),
   };
 }
 

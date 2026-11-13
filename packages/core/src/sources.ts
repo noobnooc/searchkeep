@@ -205,6 +205,20 @@ export interface AscReview {
   createdDate: string;
   /** App Store territory code (three letters, e.g. `USA`). */
   territory: string | null;
+  /** The developer has responded (when the response was asked for). */
+  replied?: boolean;
+}
+
+/** A Google Play review from the Android Publisher reviews API (the last week only); no author name. */
+export interface PlayReview {
+  id: string;
+  /** ISO timestamp of the review's last change. */
+  modifiedAt: string;
+  rating: number;
+  text: string | null;
+  language: string | null;
+  version: string | null;
+  replied: boolean;
 }
 
 /**
@@ -247,6 +261,8 @@ export interface AscClient {
    * `scopes` lists the entity prefixes it could read completely.
    */
   listingSnapshot?(appleId: string): Promise<{ scopes: string[]; values: AppListingValue[]; calls: number }>;
+  /** Posts a response to a customer review (needs a key with the Customer Support, App Manager or Admin role). */
+  replyToReview?(reviewId: string, text: string): Promise<void>;
 }
 
 /** A Cloud Storage object of the Play Console reports bucket. */
@@ -291,6 +307,10 @@ export interface PlayClient {
    * Android Publisher scope (PLAY_METADATA=true).
    */
   listingSnapshot?(packageName: string): Promise<PlayListingSnapshot>;
+  /** Reviews with text written or changed in the last week, newest first (Android Publisher API, "Reply to reviews"). */
+  listReviews?(packageName: string, token?: string | null): Promise<{ reviews: PlayReview[]; next: string | null }>;
+  /** Replies to a review (replaces an earlier reply). */
+  replyToReview?(packageName: string, reviewId: string, text: string): Promise<void>;
 }
 
 export interface AppStoreLookup {
@@ -321,6 +341,8 @@ export interface SourceClients {
   sitemaps?: SitemapReader;
   /** App Store Connect (Sales and Reports key). */
   asc?: AscClient;
+  /** App Store Connect key for review responses only (ASC_REPLY_*), when writes are on. */
+  ascReplies?: AscClient;
   /** Google Play Console reports and the Play Developer Reporting API. */
   play?: PlayClient;
   /** Apple's public App Store feeds, only when APP_STORE_PUBLIC_DATA is true. */

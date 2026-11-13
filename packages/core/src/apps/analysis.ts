@@ -589,7 +589,11 @@ export async function appReviews(ctx: OpsContext, p: AppReviewsParams) {
     };
   });
   const notes = [
-    'Reviews are stored without reviewer names. App Store reviews come from App Store Connect; Google Play reviews from the monthly Play Console files (3-7 days late).',
+    `Reviews are stored without reviewer names. App Store reviews come from App Store Connect every 4 hours (replied marks those with a developer response); Google Play reviews ${
+      ctx.config.play.reviewsApi
+        ? 'from the Android Publisher API every 4 hours (the last week) and from the monthly Play Console files'
+        : 'from the monthly Play Console files (3-7 days late; PLAY_REVIEWS_API=true reads the last week every 4 hours)'
+    }.${ctx.config.enableWrites ? ' reply_review replies to one (preview first, then confirm).' : ''}`,
   ];
   if (summary.some((s) => s.store === 'apple' && !s.rating))
     notes.push(
@@ -1301,6 +1305,135 @@ function historyNotes(history: Awaited<ReturnType<typeof appStoreHistory>>, requ
       `App Store history: Apple delivered the snapshot of ${monthly.join(', ')} only as monthly totals, which Searchkeep does not split into days; those numbers start where the daily reports start (${since(monthly) || 'no day yet'}).`,
     );
   return out;
+}
+
+export interface ReplyReviewParams {
+  app?: string;
+  store: AppStore;
+  reviewId: string;
+  text: string;
+  /** From the preview: posts the reply. Without it, nothing is sent. */
+  confirmToken?: string;
+}
+
+/** Longest reply each store accepts. */
+export const REPLY_MAX_CHARS: Record<AppStore, number> = { apple: 5970, play: 350 };
+/** A preview can be confirmed for this long. */
+const REPLY_TTL_MS = 15 * 60_000;
+
+interface PendingReply {
+  appId: string;
+  store: AppStore;
+  reviewId: string;
+  text: string;
+  expiresAt: string;
+}
+
+/**
+ * Replies to a review, in two steps: without `confirmToken` it only shows what would be posted
+ * and returns a token valid for 15 minutes; with the token (and the same reply) it posts. Needs
+ * ENABLE_WRITES; App Store replies use their own key (ASC_REPLY_*), Google Play replies need
+ * PLAY_REVIEWS_API and the "Reply to reviews" permission. A reply is public and the reviewer is
+ * notified.
+ */
+export async function replyReview(ctx: OpsContext, p: ReplyReviewParams) {
+  if (!ctx.config.enableWrites)
+    throw new SearchkeepError('writes_disabled', 'Writes are disabled. Set the ENABLE_WRITES secret to "true" to reply to reviews.');
+  const app = findApp(ctx.config, p.app);
+  if (!APP_STORES.includes(p.store)) throw new SearchkeepError('bad_request', 'store must be "apple" or "play".');
+  const text = (p.text ?? '').trim();
+  if (!text) throw new SearchkeepError('bad_request', 'text is empty.');
+  if (text.length > REPLY_MAX_CHARS[p.store])
+    throw new SearchkeepError(
+      'bad_request',
+      `A ${p.store === 'apple' ? 'App Store' : 'Google Play'} reply has at most ${REPLY_MAX_CHARS[p.store]} characters (this one has ${text.length}).`,
+    );
+  const post =
+    p.store === 'apple'
+      ? app.appleId && ctx.clients.ascReplies?.replyToReview
+        ? (id: string, t: string) => ctx.clients.ascReplies!.replyToReview!(id, t)
+        : null
+      : app.playPackage && ctx.config.play.reviewsApi && ctx.clients.play?.replyToReview
+        ? (id: string, t: string) => ctx.clients.play!.replyToReview!(app.playPackage!, id, t)
+        : null;
+  if (!post)
+    throw new SearchkeepError(
+      'not_configured',
+      p.store === 'apple'
+        ? 'App Store replies need their own key: create an App Store Connect API key with the Customer Support role and set ASC_REPLY_KEY_ID and ASC_REPLY_PRIVATE_KEY (see setup_status).'
+        : 'Google Play replies need PLAY_REVIEWS_API=true and the "Reply to reviews" permission for the service account (see setup_status).',
+    );
+  const review = (
+    await ctx.store.listAppReviews({
+      appId: app.id,
+      store: p.store,
+      range: { start: '2000-01-01', end: '2999-12-31' },
+      id: p.reviewId,
+      limit: 1,
+    })
+  )[0];
+  if (!review)
+    throw new SearchkeepError(
+      'not_found',
+      `No ${p.store === 'apple' ? 'App Store' : 'Google Play'} review ${p.reviewId} of ${app.name}; see app_reviews.`,
+    );
+  const summary = {
+    id: review.id,
+    rating: review.rating,
+    createdAt: review.createdAt,
+    title: review.title,
+    body: review.body && review.body.length > 500 ? `${review.body.slice(0, 500)}…` : review.body,
+    alreadyReplied: review.replied,
+  };
+  const now = ctx.now ? ctx.now() : new Date();
+
+  if (!p.confirmToken) {
+    const token = crypto.randomUUID();
+    const expiresAt = new Date(now.getTime() + REPLY_TTL_MS).toISOString();
+    const pending: PendingReply = { appId: app.id, store: p.store, reviewId: review.id, text, expiresAt };
+    await ctx.store.setMeta(syncKeys.pendingReply(token), JSON.stringify(pending));
+    return {
+      status: 'preview' as const,
+      app: app.id,
+      store: p.store,
+      review: summary,
+      reply: text,
+      confirmToken: token,
+      expiresAt,
+      notes: [
+        'Nothing was posted. Show this reply to the user and ask them to confirm; only then call reply_review again with the same app, store, reviewId and text plus confirmToken. The reply is public and the reviewer is notified.',
+        ...(review.replied ? ['This review already has a reply: posting replaces it.'] : []),
+      ],
+    };
+  }
+
+  const key = syncKeys.pendingReply(p.confirmToken);
+  const pending = parseJson<PendingReply>(await ctx.store.getMeta(key));
+  if (
+    !pending ||
+    pending.appId !== app.id ||
+    pending.store !== p.store ||
+    pending.reviewId !== review.id ||
+    pending.text !== text ||
+    Date.parse(pending.expiresAt) < now.getTime()
+  )
+    throw new SearchkeepError(
+      'bad_request',
+      'confirmToken is unknown, expired or for a different reply. Call reply_review without confirmToken to preview the reply again.',
+    );
+  // One use only, also when posting fails.
+  await ctx.store.deleteMeta(key);
+  await post(review.id, text);
+  const { store: _s, ...input } = review;
+  await ctx.store.writeAppReviews(app.id, p.store, [{ ...input, replied: true }]);
+  return {
+    status: 'posted' as const,
+    app: app.id,
+    store: p.store,
+    review: { ...summary, alreadyReplied: true },
+    reply: text,
+    notes: [] as string[],
+  };
 }
 
 /** Configured apps, which stores are connected, App Store report status and stored data. */

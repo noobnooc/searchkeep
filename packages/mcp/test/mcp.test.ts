@@ -49,10 +49,10 @@ describe('mcp', () => {
     expect(json.result.serverInfo.name).toBe('searchkeep');
   });
 
-  it('lists read-only tools and hides submit_sitemap by default', async () => {
+  it('lists read-only tools and hides the write tools by default', async () => {
     const { json } = await rpc({ jsonrpc: '2.0', id: 2, method: 'tools/list', params: {} });
     const names = json.result.tools.map((t: any) => t.name);
-    expect(names).toEqual(TOOL_NAMES.filter((n) => n !== 'submit_sitemap'));
+    expect(names).toEqual(TOOL_NAMES.filter((n) => n !== 'submit_sitemap' && n !== 'reply_review'));
     for (const t of json.result.tools) expect(t.annotations.readOnlyHint).toBe(true);
   });
 
@@ -60,6 +60,9 @@ describe('mcp', () => {
     const { json } = await rpc({ jsonrpc: '2.0', id: 3, method: 'tools/list', params: {} }, deps({ ENABLE_WRITES: 'true' }));
     const tool = json.result.tools.find((t: any) => t.name === 'submit_sitemap');
     expect(tool.annotations.readOnlyHint).toBe(false);
+    const reply = json.result.tools.find((t: any) => t.name === 'reply_review');
+    expect(reply.annotations).toMatchObject({ readOnlyHint: false, idempotentHint: false });
+    expect(reply.description).toContain('confirmToken');
   });
 
   it('calls tools and returns errors as tool errors', async () => {

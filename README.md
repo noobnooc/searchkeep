@@ -63,8 +63,8 @@ _Screenshots use the built-in demo data (`pnpm dev`, then `POST /api/dev/seed`).
   with a temporary Admin key that is never stored; the sync reads them with a Sales and Reports key.
 - **Your data stays in your account**: no telemetry, no vendor server, no third party in the path.
   It runs on the Cloudflare free tier.
-- **Read-only by default**: the only write to an external system (`submit_sitemap`) is off until
-  you turn it on.
+- **Read-only by default**: the only writes to external systems (`submit_sitemap`, `reply_review`)
+  are off until you turn them on.
 - **Secure by default**: protected by Cloudflare Access, with Managed OAuth for MCP clients
   (dynamic client registration and PKCE). The Worker re-verifies the Access JWT on every request
   and locks itself until Access is set up correctly.
@@ -227,7 +227,9 @@ AGENTS.md              Instructions for AI agents working on this repository
 | `app_changes`          | What changed on the store page and when: versions, names, keywords, texts, tracks, before/after.        |
 | `app_revenue`          | App Store revenue per product: USD estimate, or exact per currency with Sales and Trends; refunds.      |
 
-All tools are read-only except `submit_sitemap`. Common parameters: `site`, `start` and `end`
+| `reply_review` | Replies to an App Store or Google Play review, preview first. **Only with `ENABLE_WRITES=true`**. |
+
+All tools are read-only except `submit_sitemap` and `reply_review`. Common parameters: `site`, `start` and `end`
 (`YYYY-MM-DD`), `days` (default 28), `source` (`gsc` or `bing`, default `gsc`), `searchType` (`web`,
 `image`, `video`, `news`, `discover` or `googleNews`, default `web`), `brand` (`all`, `brand` or
 `non_brand`) and `limit` (at most 500). `query_performance` also groups by search `appearance`, and

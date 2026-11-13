@@ -264,8 +264,39 @@ export async function setupStatus(ctx: OpsContext, p: { readiness: ReadinessRepo
     id: 'config.writes',
     label: 'Writes to external systems',
     status: 'ok',
-    detail: config.enableWrites ? 'Enabled (submit_sitemap allowed).' : 'Disabled (read-only, default).',
+    detail: config.enableWrites ? 'Enabled (submit_sitemap and reply_review allowed).' : 'Disabled (read-only, default).',
   });
+  if (anyPlay)
+    add({
+      id: 'config.play_reviews_api',
+      label: 'Google Play reviews through the API (PLAY_REVIEWS_API, opt-in)',
+      status: config.play.reviewsApi ? 'ok' : 'skipped',
+      detail: config.play.reviewsApi
+        ? 'On: the last week of reviews every 4 hours, ahead of the monthly files.'
+        : 'Off: Google Play reviews come from the monthly files, 3-7 days late. Set PLAY_REVIEWS_API=true for the last week every 4 hours (the service account needs "Reply to reviews", which also allows replies).',
+    });
+  if (config.enableWrites && (anyApple || anyPlay)) {
+    const appleReplies = Boolean(config.asc.replyKeyId && config.asc.replyPrivateKey);
+    add({
+      id: 'config.review_replies',
+      label: 'reply_review can post',
+      status: (anyApple && !appleReplies) || (anyPlay && !config.play.reviewsApi) ? 'warn' : 'ok',
+      detail: [
+        anyApple
+          ? appleReplies
+            ? 'App Store: with the ASC_REPLY_* key.'
+            : 'App Store: no reply key. In App Store Connect → Users and Access → Integrations → App Store Connect API, generate a key with the Customer Support role and set ASC_REPLY_KEY_ID and ASC_REPLY_PRIVATE_KEY (ASC_ISSUER_ID is shared). It is used only by reply_review.'
+          : '',
+        anyPlay
+          ? config.play.reviewsApi
+            ? 'Google Play: through the Android Publisher API.'
+            : 'Google Play: set PLAY_REVIEWS_API=true and grant the service account "Reply to reviews" in the Play Console.'
+          : '',
+      ]
+        .filter(Boolean)
+        .join(' '),
+    });
+  }
 
   if (p.probe !== false) {
     const probe = async (id: string, label: string, fn: () => Promise<SetupCheck['status'] | [SetupCheck['status'], string]>) => {
@@ -320,6 +351,23 @@ export async function setupStatus(ctx: OpsContext, p: { readiness: ReadinessRepo
             return [
               'warn',
               `Crash and ANR rates stay empty: in Google Cloud, enable the "Google Play Developer Reporting API" in the service account's project, and in the Play Console → Users and permissions → ${config.play.clientEmail} make sure it has "View app information (read-only)" for the app (${safeMessage(err)}).`,
+            ];
+          throw err;
+        }
+      });
+    }
+    if (play && anyPlay && config.play.reviewsApi) {
+      await probe('probe.play_reviews', 'Service account can read Google Play reviews (PLAY_REVIEWS_API)', async () => {
+        const app = config.apps.find((a) => a.playPackage)!;
+        if (!play.listReviews) return ['warn', 'This deployment does not read Google Play reviews through the API.'];
+        try {
+          await play.listReviews(app.playPackage!);
+          return 'ok';
+        } catch (err) {
+          if (err instanceof SourceError && (err.status === 403 || err.status === 401))
+            return [
+              'warn',
+              `The service account may not read ${app.name}'s reviews. Enable the "Google Play Android Developer API" in its Google Cloud project, and in the Play Console → Users and permissions → ${config.play.clientEmail ?? 'the service account'} → App permissions turn on "Reply to reviews" (Google offers no read-only permission for this API). Reviews still come from the monthly files.`,
             ];
           throw err;
         }

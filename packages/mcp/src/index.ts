@@ -15,6 +15,7 @@ import {
   appBreakdown,
   appRevenue,
   appChanges,
+  replyReview,
   appStability,
   appSubscriptions,
   listApps,
@@ -134,6 +135,7 @@ export const TOOL_NAMES = [
   'app_breakdown',
   'app_revenue',
   'app_changes',
+  'reply_review',
 ] as const;
 
 /** Parameters shared by the app tools (ADR 0009). */
@@ -606,6 +608,26 @@ export function createSearchkeepMcpServer(deps: McpDeps): McpServer {
     },
     async (args) => run(() => appChanges(ctx, clean(args))),
   );
+
+  if (ctx.config.enableWrites) {
+    server.registerTool(
+      'reply_review',
+      {
+        title: 'Reply to a review',
+        description:
+          'Replies to an App Store or Google Play review. Writes to an external system (the reply is public and the reviewer is notified); only with ENABLE_WRITES. Two steps: call without confirmToken to get a preview and a token (nothing is posted); show the reply to the user and get their explicit confirmation; then call again with the same arguments plus confirmToken (valid 15 minutes) to post. Review ids come from app_reviews. App Store replies need ASC_REPLY_KEY_ID/ASC_REPLY_PRIVATE_KEY (Customer Support role); Google Play replies need PLAY_REVIEWS_API and "Reply to reviews" (at most 350 characters).',
+        inputSchema: {
+          app: appCommon.app,
+          store: z.enum(['apple', 'play']).describe('apple = App Store, play = Google Play.'),
+          reviewId: z.string().min(1).describe('The review id from app_reviews.'),
+          text: z.string().min(1).max(5970).describe('The reply, plain text.'),
+          confirmToken: z.string().optional().describe('From the preview, after the user confirmed. Without it nothing is posted.'),
+        },
+        annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+      },
+      async (args) => run(() => replyReview(ctx, clean(args))),
+    );
+  }
 
   return server;
 }
