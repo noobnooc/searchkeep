@@ -76,6 +76,8 @@ function fakeAsc(
     installs?: 'waiting' | 'ready' | 'monthly';
     /** Lists the Mode Activity Notifications Framework Usage report with one instance. */
     framework?: boolean;
+    /** Customer reviews come back with a developer response. */
+    replied?: boolean;
   } = {},
 ) {
   const calls: string[] = [];
@@ -398,8 +400,24 @@ function fakeAsc(
       calls.push('listReviews');
       return {
         reviews: [
-          { id: 'r1', rating: 5, title: 'Great', body: 'Love it', createdDate: '2026-10-18T10:00:00-07:00', territory: 'USA' },
-          { id: 'r2', rating: 1, title: 'Crashes', body: 'Crashes on start', createdDate: '2026-10-12T10:00:00Z', territory: 'GBR' },
+          {
+            id: 'r1',
+            rating: 5,
+            title: 'Great',
+            body: 'Love it',
+            createdDate: '2026-10-18T10:00:00-07:00',
+            territory: 'USA',
+            replied: false,
+          },
+          {
+            id: 'r2',
+            rating: 1,
+            title: 'Crashes',
+            body: 'Crashes on start',
+            createdDate: '2026-10-12T10:00:00Z',
+            territory: 'GBR',
+            replied: Boolean(opts.replied),
+          },
         ],
         next: null,
       };
@@ -1531,6 +1549,58 @@ export function appContract(name: string, makeStore: () => Promise<Store>): void
           { currency: 'EUR', newSubscriptions: 0, renewals: 10.1, newUnits: 0, renewalUnits: 2 },
           { currency: 'USD', newSubscriptions: 9.98, renewals: 24.95, newUnits: 3, renewalUnits: 5 },
         ]);
+      });
+
+      it('catches up every missed Sales and Trends day after a pause, a month per run, and starts over for a new app', async () => {
+        const cfg = config({ APP_STORE_PUBLIC_DATA: 'false', ASC_VENDOR_NUMBER: '85000000' });
+        await store.setMeta(syncKeys.ascSales, JSON.stringify({ apps: [APP.id], through: '2026-09-01', from: '2025-10-25' }));
+        const asc = fakeAsc();
+        await runSync({ store, config: cfg, clients: { asc: asc.client }, trigger: 'manual', now: NOW, pacing: {} });
+        // Sep 2 onwards, in order, no day skipped (the history unit finishes last year's days on its own).
+        const days = asc.calls.filter((c) => c.startsWith('sales:2026-'));
+        expect(days[0]).toBe('sales:2026-09-02');
+        expect(days).toHaveLength(30);
+        expect(days.at(-1)).toBe('sales:2026-10-01');
+        expect(JSON.parse((await store.getMeta(syncKeys.ascSales))!).through).toBe('2026-10-01');
+        // A newly configured app has no sales history: the cursor starts over for all apps.
+        const two = config({
+          APP_STORE_PUBLIC_DATA: 'false',
+          ASC_VENDOR_NUMBER: '85000000',
+          APPS: JSON.stringify([APP, { id: 'second', name: 'Second', appleId: '7654321' }]),
+        });
+        const again = fakeAsc();
+        await runSync({
+          store,
+          config: two,
+          clients: { asc: again.client },
+          trigger: 'manual',
+          now: new Date('2026-10-20T05:00:00Z'),
+          pacing: {},
+        });
+        expect(again.calls.filter((c) => c.startsWith('sales:'))[0]).toBe('sales:2026-10-17');
+        const st = JSON.parse((await store.getMeta(syncKeys.ascSales))!);
+        expect(st.apps).toEqual(['acme-app', 'second']);
+        expect(st.from).toBe('2026-10-17');
+      });
+
+      it('marks stored App Store reviews replied once they have a developer response', async () => {
+        const cfg = config({ APP_STORE_PUBLIC_DATA: 'false' });
+        await runSync({ store, config: cfg, clients: { asc: fakeAsc().client }, trigger: 'manual', now: NOW, pacing: {} });
+        const ctx = { store, config: cfg, clients: {}, now: () => NOW };
+        const replied = async () =>
+          (await appReviews(ctx, { app: APP.id, store: 'apple', start: '2026-10-01', end: '2026-10-20' })).reviews.find(
+            (r) => r.id === 'r2',
+          )!.replied;
+        expect(await replied()).toBe(false);
+        await runSync({
+          store,
+          config: cfg,
+          clients: { asc: fakeAsc({ replied: true }).client },
+          trigger: 'manual',
+          now: new Date('2026-10-20T09:00:00Z'),
+          pacing: {},
+        });
+        expect(await replied()).toBe(true);
       });
 
       it('warns in setup_status when Sales and Trends is not set up or the key may not read it', async () => {

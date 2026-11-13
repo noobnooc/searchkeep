@@ -248,7 +248,12 @@ function planSales(args: AppPlanArgs, asc: AscClient, vendorNumber: string, plac
   const nowMs = args.nowMs ?? Date.now();
   const appleApps = ctx.config.apps.filter((a) => a.appleId);
   const siteId = appTaskId(appleApps[0]!.id);
-  const state = parseJson<AscSalesState>(get(syncKeys.ascSales)) ?? {};
+  const saved = parseJson<AscSalesState>(get(syncKeys.ascSales)) ?? {};
+  // The cursor covers the apps it was read for: an app added since starts the year over for all
+  // (a day read again replaces each app's rows, so nothing is counted twice).
+  const ids = appleApps.map((a) => a.id).sort();
+  const reset = ids.some((id) => !(saved.apps ?? []).includes(id));
+  const state: AscSalesState = reset ? {} : saved;
   const yesterday = addDays(today, -1);
   const floor = addDays(today, -ASC_SALES_HISTORY_DAYS);
 
@@ -273,8 +278,9 @@ function planSales(args: AppPlanArgs, asc: AscClient, vendorNumber: string, plac
   };
 
   const save = async (patch: Partial<AscSalesState>) => {
-    const cur = parseJson<AscSalesState>(await store.getMeta(syncKeys.ascSales)) ?? {};
-    const next = { ...cur, ...patch };
+    const stored = parseJson<AscSalesState>(await store.getMeta(syncKeys.ascSales)) ?? {};
+    const cur: AscSalesState = reset && !stored.apps?.length ? {} : stored;
+    const next: AscSalesState = { ...cur, ...patch, apps: ids };
     // The first day read is where history starts from.
     if (patch.through && !cur.from) next.from = patch.through;
     for (const k of Object.keys(next) as Array<keyof AscSalesState>) if (next[k] === undefined) delete next[k];
@@ -294,12 +300,16 @@ function planSales(args: AppPlanArgs, asc: AscClient, vendorNumber: string, plac
       run: async () => {
         const apps = await salesApps();
         let written = 0;
-        const oldest = addDays(yesterday, -ASC_SALES_DAYS_PER_UNIT + 1);
+        if (reset) await store.setMeta(syncKeys.ascSales, JSON.stringify({ apps: ids } satisfies AscSalesState));
         // First run: from three days back, so at least one day that is surely out starts the history.
-        const start = state.through ? maxDay(addDays(state.through, 1), oldest) : addDays(today, -3);
+        // After a pause, every missed day in order (Apple keeps a year), a month per unit at most.
+        const start = state.through ? maxDay(addDays(state.through, 1), floor) : addDays(today, -3);
         let n = 0;
-        for (let day = start; day <= yesterday; day = addDays(day, 1)) {
-          if (n++ > 0) budget.spend('asc');
+        for (let day = start; day <= yesterday && n < ASC_SALES_DAYS_PER_UNIT; day = addDays(day, 1)) {
+          if (n++ > 0) {
+            if (budget.expired()) break;
+            budget.spend('asc');
+          }
           const res = await readDay(apps, day);
           written += res.written;
           // The two newest days may simply not be out yet: try again later.
@@ -404,7 +414,9 @@ function planAppStore(args: AppPlanArgs, app: AppConfig, asc: AscClient, place: 
           pages++;
           const rows = page.reviews.map(ascReviewInput).filter((r) => r !== null);
           const fresh = cursor.newest ? rows.filter((r) => r.createdAt > cursor.newest!) : rows;
-          if (fresh.length) written += await store.writeAppReviews(app.id, 'apple', fresh);
+          // Reviews already stored that have a developer response by now are written again, so they read replied.
+          const answered = cursor.newest ? rows.filter((r) => r.createdAt <= cursor.newest! && r.replied) : [];
+          if (fresh.length || answered.length) written += await store.writeAppReviews(app.id, 'apple', [...fresh, ...answered]);
           for (const r of rows) if (!newest || r.createdAt > newest) newest = r.createdAt;
           next = page.next;
           // Newest first: once a page reaches reviews already synced, the rest are too.

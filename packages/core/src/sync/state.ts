@@ -128,6 +128,8 @@ export const syncKeys = {
 } as const;
 
 export interface AscSalesState {
+  /** Ids of the apps the cursor was read for. */
+  apps?: string[];
   /** Newest day read (or found to have no sales). */
   through?: IsoDate;
   /** Oldest day read: history continues before it. */

@@ -90,7 +90,9 @@ curl -X POST localhost:8787/api/dev/seed                          # in another t
   dashboard or sources (no `D1Database`, `ExecutionContext`, `@cloudflare/workers-types`, ...).
 - **Analysis SQL lives only in `packages/store-*`.** Core calls Store methods; it never builds SQL.
 - **MCP tools call only core**, never the database or external APIs directly. Every tool declares
-  whether it is read-only; only `submit_sitemap` writes, and only when `ENABLE_WRITES` is `true`.
+  whether it is read-only; only `submit_sitemap` and `reply_review` (ADR 0011) write, and only when
+  `ENABLE_WRITES` is `true`. `reply_review` posts only on a second call with the confirmation token
+  of its preview.
 - **No stored Admin keys.** Starting App Store reports takes a temporary App Store Connect Admin key
   that is used for that one request and never stored, logged or returned (ADR 0009). Stored app
   credentials are read-only (Sales and Reports role, Play read-only scopes).
