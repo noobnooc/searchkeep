@@ -303,6 +303,28 @@ export async function setupStatus(ctx: OpsContext, p: { readiness: ReadinessRepo
         }
       });
     }
+    if (play && anyPlay && config.play.clientEmail && config.play.privateKey) {
+      await probe('probe.play_vitals', 'Service account can read Google Play crash and ANR rates', async () => {
+        const app = config.apps.find((a) => a.playPackage)!;
+        const today = toIsoDate(ctx.now ? ctx.now() : new Date());
+        try {
+          const rows = await play.vitals(app.playPackage!, 'crash', { start: addDays(today, -9), end: addDays(today, -2) });
+          return rows.length
+            ? 'ok'
+            : [
+                'ok',
+                `Readable, but Google has no crash rates for ${app.name} in the last week: the Reporting API computes them only above a minimum number of daily users. Crash counts still come from the monthly crash files.`,
+              ];
+        } catch (err) {
+          if (err instanceof SourceError && (err.status === 403 || err.status === 401))
+            return [
+              'warn',
+              `Crash and ANR rates stay empty: in Google Cloud, enable the "Google Play Developer Reporting API" in the service account's project, and in the Play Console → Users and permissions → ${config.play.clientEmail} make sure it has "View app information (read-only)" for the app (${safeMessage(err)}).`,
+            ];
+          throw err;
+        }
+      });
+    }
     if (play && anyPlay && config.play.metadata) {
       await probe('probe.play_metadata', 'Service account can read Google Play store listings (PLAY_METADATA)', async () => {
         const app = config.apps.find((a) => a.playPackage)!;

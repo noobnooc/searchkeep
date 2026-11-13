@@ -18,6 +18,8 @@ import {
 import {
   ASC_REPORTS,
   BREAKDOWN_VALUES_PER_DAY,
+  crashesCollector,
+  crashesExpandedCollector,
   downloadReferrersCollector,
   downloadsCollector,
   engagementCollector,
@@ -357,7 +359,7 @@ function fakeAsc(
  * `financeDenied`: listing the financial folders answers 403. `financeReadDenied`: they can be
  * listed, but reading a financial file answers 403 (what an account without "View financial data" sees).
  */
-function fakePlay(opts: { financeDenied?: boolean; financeReadDenied?: boolean } = {}) {
+function fakePlay(opts: { financeDenied?: boolean; financeReadDenied?: boolean; vitals?: 'empty' | 'forbidden' } = {}) {
   const financial = (name: string) => /^(financial-stats|earnings)\//.test(name);
   const calls: string[] = [];
   const pkg = APP.playPackage;
@@ -514,6 +516,8 @@ function fakePlay(opts: { financeDenied?: boolean; financeReadDenied?: boolean }
     },
     async vitals(_pkg, metric, range) {
       calls.push(`vitals:${metric}:${range.start}..${range.end}`);
+      if (opts.vitals === 'forbidden') throw new SourceError('play', 403, 'HTTP 403: PERMISSION_DENIED');
+      if (opts.vitals === 'empty') return [];
       return [
         {
           date: range.end,
@@ -1680,6 +1684,68 @@ export function appContract(name: string, makeStore: () => Promise<Store>): void
           groupBy: ['page_title'],
         });
         expect(again.pages!.find((x) => x.pageTitle === 'Alarm lovers')).toMatchObject({ pageViewsUnique: 0, downloads: 12 });
+      });
+
+      it('explains empty crash data, counts Play crashes from the monthly files and keeps App Crashes Expanded apart', async () => {
+        const cfg = config({ APP_STORE_PUBLIC_DATA: 'false' });
+        const play = fakePlay({ vitals: 'empty' });
+        const run = await runSync({ store, config: cfg, clients: { play: play.client }, trigger: 'manual', now: NOW, pacing: {} });
+        expect(run.status).toBe('ok');
+        expect(JSON.parse((await store.getMeta(syncKeys.playVitals(APP.id)))!)).toMatchObject({ checkedOn: '2026-10-20', empty: true });
+        const ctx = { store, config: cfg, clients: {}, now: () => NOW };
+        const st = await appStability(ctx, { app: APP.id, start: '2026-10-01', end: '2026-10-19' });
+        const p = st.summary.find((s) => s.store === 'play')!;
+        expect(p.crashRate).toBeNull();
+        expect(p.crashes).toBeGreaterThan(0);
+        expect(st.notes.some((n) => n.includes('minimum number of daily users'))).toBe(true);
+        // No App Crashes report from Apple yet: said plainly.
+        expect(st.notes.some((n) => n.includes('at least five people'))).toBe(true);
+
+        // App Crashes and App Crashes Expanded: each replaces the days it covers.
+        const crash = (version: string, crashes: number): DelimitedRow => ({
+          date: '2026-10-18',
+          'app version': version,
+          crashes: String(crashes),
+          'unique devices': '1',
+        });
+        const exp = (version: string, count: number): DelimitedRow => ({
+          date: '2026-10-18',
+          'app version': version,
+          count: String(count),
+          'unique devices': '1',
+          territory: 'US',
+        });
+        const write = async (c: ReturnType<typeof crashesCollector>, rows: DelimitedRow[]) => {
+          for (const r of rows) c.add(r);
+          await c.write(store, APP.id);
+        };
+        await write(crashesCollector(), [crash('2.0', 3), crash('2.1', 1)]);
+        await write(crashesExpandedCollector(), [exp('2.1', 9)]);
+        // A newer instance no longer lists 2.0: its count goes, the expanded counts stay.
+        await write(crashesCollector(), [crash('2.1', 2)]);
+        const apple = await appStability(ctx, { app: APP.id, store: 'apple', start: '2026-10-01', end: '2026-10-19', groupBy: 'version' });
+        expect(apple.summary[0]).toMatchObject({ crashes: 2, crashesExpanded: 9 });
+        expect(apple.rows.map((r) => [r.version, r.crashes, r.crashesExpanded])).toEqual([['2.1', 2, 9]]);
+
+        // setup_status: rates refused → warn with the steps; readable but empty → ok with a note.
+        const readiness = evaluateReadiness({
+          configured: true,
+          identityOk: true,
+          inspection: { appFound: true, managedOAuthEnabled: true, broadPolicyReasons: [] },
+        });
+        const probe = async (client: PlayClient) =>
+          (await setupStatus({ store, config: cfg, clients: { play: client }, now: () => NOW }, { readiness })).checks.find(
+            (c) => c.id === 'probe.play_vitals',
+          );
+        expect(await probe(fakePlay({ vitals: 'forbidden' }).client)).toMatchObject({
+          status: 'warn',
+          detail: expect.stringContaining('Reporting API'),
+        });
+        expect(await probe(fakePlay({ vitals: 'empty' }).client)).toMatchObject({
+          status: 'ok',
+          detail: expect.stringContaining('minimum number'),
+        });
+        expect(await probe(fakePlay().client)).toMatchObject({ status: 'ok' });
       });
 
       it('looks for report kinds added since the last listing right away', async () => {

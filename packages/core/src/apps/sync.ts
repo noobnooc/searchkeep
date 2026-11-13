@@ -669,7 +669,8 @@ function planPlay(args: AppPlanArgs, app: AppConfig, place: Place): void {
       siteId,
       source: 'play',
       backfill: false,
-      calls: 2,
+      // Per metric: its freshness, then the query.
+      calls: 4,
       key: `play.vitals:${app.id}:${today}`,
       run: async () => {
         if (start > end) return null;
@@ -724,7 +725,13 @@ function planPlay(args: AppPlanArgs, app: AppConfig, place: Place): void {
           metrics: ['crashRate', 'userPerceivedCrashRate', 'anrRate', 'userPerceivedAnrRate', 'distinctUsers'],
           rows: [...rows.values()],
         });
-        await store.setMeta(syncKeys.playVitals(app.id), JSON.stringify({ through: end, checkedOn: today }));
+        // Up to the newest day Google had (its freshness can lag); without rows, the window stays.
+        const newest = [...crash, ...anr].reduce<IsoDate | null>((m, r) => (!m || r.date > m ? r.date : m), null);
+        const through = newest && newest < end ? newest : newest ? end : vitals.through;
+        await store.setMeta(
+          syncKeys.playVitals(app.id),
+          JSON.stringify({ ...(through ? { through } : {}), checkedOn: today, ...(newest ? {} : { empty: true }) }),
+        );
         return written;
       },
       skip: () => store.setMeta(syncKeys.playVitals(app.id), JSON.stringify({ ...vitals, checkedOn: today })),

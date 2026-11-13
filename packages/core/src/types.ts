@@ -662,6 +662,9 @@ export interface AppVitalsInput {
   distinctUsers?: number | null;
   crashes?: number | null;
   crashDevices?: number | null;
+  /** App Store: every crash on device (App Crashes Expanded), not only those with a crash log. */
+  crashesExpanded?: number | null;
+  crashDevicesExpanded?: number | null;
 }
 
 export type AppVitalsMetric = Exclude<keyof AppVitalsInput, 'date' | 'version'>;
@@ -669,6 +672,8 @@ export type AppVitalsMetric = Exclude<keyof AppVitalsInput, 'date' | 'version'>;
 export interface AppVitalsWrite {
   metrics: AppVitalsMetric[];
   rows: AppVitalsInput[];
+  /** Days replaced as a whole: versions of these days the write does not mention get the metrics cleared. */
+  dates?: IsoDate[];
 }
 
 export interface AppVitalsQuery {
@@ -690,6 +695,8 @@ export interface AppVitalsRow {
   distinctUsers: number | null;
   crashes: number | null;
   crashDevices: number | null;
+  crashesExpanded: number | null;
+  crashDevicesExpanded: number | null;
 }
 
 /** The user's own app's position in an App Store top chart (opt-in public feeds). */

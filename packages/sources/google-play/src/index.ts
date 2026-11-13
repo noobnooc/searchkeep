@@ -104,13 +104,26 @@ export function createPlayClient(opts: PlayClientOptions): PlayClient {
     const names =
       metric === 'crash' ? ['crashRate', 'userPerceivedCrashRate', 'distinctUsers'] : ['anrRate', 'userPerceivedAnrRate', 'distinctUsers'];
     const out: PlayVitalsRow[] = [];
+    // A timeline that ends after the newest complete day is refused: end at the metric set's freshness.
+    const info: {
+      freshnessInfo?: {
+        freshnesses?: Array<{ aggregationPeriod?: string; latestEndTime?: { year?: number; month?: number; day?: number } }>;
+      };
+    } = await call(`${REPORTING}/apps/${encodeURIComponent(pkg)}/${set}`);
+    const latest = info?.freshnessInfo?.freshnesses?.find((f) => f.aggregationPeriod === 'DAILY')?.latestEndTime;
+    let endExclusive = addDay(range.end);
+    if (latest?.year) {
+      const fresh = `${latest.year}-${pad(latest.month)}-${pad(latest.day)}`;
+      if (fresh < endExclusive) endExclusive = fresh;
+    }
+    if (endExclusive <= range.start) return out;
     let pageToken: string | undefined;
     for (let i = 0; i < MAX_PAGES; i++) {
       const res: { rows?: MetricsRow[]; nextPageToken?: string } = await call(`${REPORTING}/apps/${encodeURIComponent(pkg)}/${set}:query`, {
         method: 'POST',
         body: {
           // The end of the timeline is exclusive.
-          timelineSpec: { aggregationPeriod: 'DAILY', startTime: dateTime(range.start), endTime: dateTime(addDay(range.end)) },
+          timelineSpec: { aggregationPeriod: 'DAILY', startTime: dateTime(range.start), endTime: dateTime(endExclusive) },
           dimensions: ['versionCode'],
           metrics: names,
           pageSize: 10_000,

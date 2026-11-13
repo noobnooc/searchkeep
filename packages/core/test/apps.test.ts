@@ -146,7 +146,7 @@ describe('app report recognition', () => {
     expect(match('App Downloads Standard')).toEqual(['downloads']);
     expect(match('App Store Installation and Deletion Standard')).toEqual(['installs']);
     expect(match('App Crashes')).toEqual(['crashes']);
-    expect(match('App Crashes Expanded')).toEqual([]);
+    expect(match('App Crashes Expanded')).toEqual(['crashes_expanded']);
     expect(match('App Store Purchases Standard')).toEqual(['purchases']);
     expect(match('App Store Subscription State Standard')).toEqual(['subscription_state']);
     expect(match('App Store Subscription Event Standard')).toEqual(['subscription_event']);

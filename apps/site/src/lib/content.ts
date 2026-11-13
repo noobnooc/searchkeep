@@ -460,7 +460,7 @@ export const TOOLS: Tool[] = [
     name: 'app_stability',
     summary: 'Crash and ANR rates per day or app version.',
     description:
-      'Google Play crash and ANR rates (shares of daily users, including the user-perceived rates behind Google’s bad-behavior thresholds of 1.09% and 0.47%) from the Play Developer Reporting API, and App Store crash counts from the App Crashes report, per day or per app version.',
+      'Google Play crash and ANR rates (shares of daily users, including the user-perceived rates behind Google’s bad-behavior thresholds of 1.09% and 0.47%) from the Play Developer Reporting API and crash and ANR counts from the monthly crash files, and App Store crash counts from the App Crashes and App Crashes Expanded reports, per day or per app version. The notes say why data is missing when it is (Apple’s and Google’s minimum numbers of users).',
     readOnly: true,
     params: [
       app,

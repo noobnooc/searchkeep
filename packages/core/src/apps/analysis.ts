@@ -513,6 +513,13 @@ export async function appStability(ctx: OpsContext, p: AppStabilityParams) {
     groupBy: 'version',
     limit: 500,
   });
+  // Google Play's monthly crash files count crashes and ANRs even when the Reporting API has no rates.
+  const files =
+    r.store !== 'apple' && r.app.playPackage
+      ? await ctx.store.queryAppBreakdowns({ appId: r.app.id, store: 'play', dimension: 'app_version', range: r.range, limit: 500 })
+      : [];
+  const fileCrashes = files.reduce((t, x) => t + x.crashes, 0);
+  const fileAnrs = files.reduce((t, x) => t + x.anrs, 0);
   const summary = storesOf(r.app, r.store).map((store) => {
     const all = totals.find((x) => x.store === store && x.version === '');
     return {
@@ -521,19 +528,44 @@ export async function appStability(ctx: OpsContext, p: AppStabilityParams) {
       userPerceivedCrashRate: all?.userPerceivedCrashRate ?? null,
       anrRate: all?.anrRate ?? null,
       userPerceivedAnrRate: all?.userPerceivedAnrRate ?? null,
-      crashes: all?.crashes ?? null,
+      crashes: store === 'play' ? (files.length ? fileCrashes : null) : (all?.crashes ?? null),
       crashDevices: all?.crashDevices ?? null,
+      ...(store === 'apple'
+        ? { crashesExpanded: all?.crashesExpanded ?? null, crashDevicesExpanded: all?.crashDevicesExpanded ?? null }
+        : {}),
+      ...(store === 'play' ? { anrs: files.length ? fileAnrs : null } : {}),
     };
   });
+  const notes = [
+    "Google Play rates are shares of daily users (Play Developer Reporting API); Google flags apps above 1.09% user-perceived crash rate or 0.47% user-perceived ANR rate; Google Play crash and ANR counts come from the Play Console's monthly crash files (3-7 days late). App Store crashes are those that made a crash log (App Crashes); crashesExpanded counts every crash on device (App Crashes Expanded, iOS and iPadOS 17.4 and later, up to 8 days late). Both count only people who share analytics with developers; crashing devices are summed across device models and OS versions, an upper bound.",
+  ];
+  for (const s of summary) {
+    if (s.store === 'apple' && s.crashes === null && (s.crashesExpanded ?? null) === null) {
+      const read = await ctx.store.getMeta(syncKeys.ascInstance(r.app.id, 'crashes'));
+      notes.push(
+        read
+          ? 'App Store: no crashes in this range among people who share analytics.'
+          : "App Store: Apple has not generated an App Crashes report for this app. Apple makes it only for days when at least five people who share analytics with developers had events, so a small app often has none; nothing is missing on Searchkeep's side. Use your own crash reporting (Xcode Organizer, a crash SDK) for these apps.",
+      );
+    }
+    if (s.store === 'play' && s.crashRate === null && s.anrRate === null) {
+      const st = parseJson<{ checkedOn?: string; empty?: boolean }>(await ctx.store.getMeta(syncKeys.playVitals(r.app.id)));
+      notes.push(
+        st?.empty
+          ? `Google Play: the Play Developer Reporting API answered without crash or ANR rates for this app: Google computes them only above a minimum number of daily users, so a small app has none.${files.length ? ' The crash and ANR counts above come from the monthly crash files.' : ''}`
+          : st?.checkedOn
+            ? 'Google Play: no crash or ANR rates in this range.'
+            : 'Google Play: crash and ANR rates have not been read yet; see setup_status (probe.play_vitals) if this stays so.',
+      );
+    }
+  }
   return {
     app: r.app.id,
     range: r.range,
     groupBy,
     summary,
     rows: groupBy === 'version' ? rows.filter((x) => x.version !== '') : rows,
-    notes: [
-      'Google Play rates are shares of daily users (Play Developer Reporting API); Google flags apps above 1.09% user-perceived crash rate or 0.47% user-perceived ANR rate. App Store numbers are crash counts from people who share analytics with developers.',
-    ],
+    notes,
   };
 }
 

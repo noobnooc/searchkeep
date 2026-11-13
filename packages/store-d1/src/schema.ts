@@ -425,6 +425,8 @@ export const appVitals = sqliteTable(
     distinctUsers: integer('distinct_users'),
     crashes: integer('crashes'),
     crashDevices: integer('crash_devices'),
+    crashesExpanded: integer('crashes_expanded'),
+    crashDevicesExpanded: integer('crash_devices_expanded'),
   },
   (t) => [primaryKey({ columns: [t.appId, t.store, t.date, t.version] })],
 );

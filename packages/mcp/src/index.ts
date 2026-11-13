@@ -509,7 +509,7 @@ export function createSearchkeepMcpServer(deps: McpDeps): McpServer {
     {
       title: 'App stability',
       description:
-        'Crash and ANR rates (Google Play, shares of daily users, with the user-perceived rates Google uses for its bad-behavior thresholds) and crash counts (App Store), per day or per app version.',
+        'Crash and ANR rates (Google Play, shares of daily users, with the user-perceived rates Google uses for its bad-behavior thresholds; crash and ANR counts from the monthly files) and crash counts (App Store: crashes with a crash log, and crashesExpanded for every crash on device), per day or per app version. The notes say why data is missing (minimum numbers of users).',
       inputSchema: {
         ...appCommon,
         store: appStore,

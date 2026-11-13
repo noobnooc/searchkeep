@@ -26,6 +26,16 @@ Because users sync `main` at any time, the `Unreleased` section is always accura
 
 ### Added
 
+- Stability data that says why it is empty. The App Store's App Crashes Expanded report (every crash
+  on device, not only those with a crash log) is read next to App Crashes, and each crash report now
+  replaces the days it covers. Google Play crash and ANR rates are asked only up to the newest day
+  Google has complete (the metric set's freshness), so a lagging day no longer fails the request.
+  `app_stability` returns Google Play crash and ANR counts from the monthly crash files when the
+  Reporting API has no rates, and its notes say why data is missing (Apple makes crash reports only
+  when at least five people who share analytics had events; Google computes rates only above a
+  minimum number of daily users). `setup_status` gains `probe.play_vitals` with the steps when the
+  Reporting API is not enabled or not allowed.
+
 - App Store funnel per product page. The Discovery and Engagement and App Downloads reports are now
   also kept per page type (Standard: product page, list views, store sheet, in-app event, ...) and
   per page title (Detailed: custom product pages, in-app events, "Default Product Page"). New

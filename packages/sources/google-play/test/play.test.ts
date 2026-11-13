@@ -50,6 +50,17 @@ describe('google play', () => {
       }
       if (url.includes('alt=media'))
         return new Response(utf16le('Date,Package Name,Country,Daily Device Installs\n2026-10-01,com.a,US,5\n'));
+      // The metric set's freshness: data is complete up to (not including) Oct 3.
+      if (url.endsWith('/apps/com.a/crashRateMetricSet'))
+        return Response.json({
+          name: 'apps/com.a/crashRateMetricSet',
+          freshnessInfo: {
+            freshnesses: [
+              { aggregationPeriod: 'DAILY', latestEndTime: { year: 2026, month: 10, day: 3, timeZone: { id: 'America/Los_Angeles' } } },
+              { aggregationPeriod: 'HOURLY', latestEndTime: { year: 2026, month: 10, day: 4, hours: 5, timeZone: { id: 'UTC' } } },
+            ],
+          },
+        });
       if (url.includes('crashRateMetricSet:query')) {
         const body = JSON.parse(String(init?.body));
         expect(body.timelineSpec).toEqual({
@@ -88,9 +99,14 @@ describe('google play', () => {
     await play.readCsv('pubsite_prod_rev_1', 'stats/installs/installs_com.a_202610_country.csv', (r) => rows.push(r));
     expect(rows).toEqual([{ date: '2026-10-01', 'package name': 'com.a', country: 'US', 'daily device installs': '5' }]);
     expect(urls.find((u) => u.includes('alt=media'))).toContain('/o/stats%2Finstalls%2Finstalls_com.a_202610_country.csv?alt=media');
-    expect(await play.vitals('com.a', 'crash', { start: '2026-10-01', end: '2026-10-02' })).toEqual([
+    // Asked up to Oct 5, but Google is complete only through Oct 2: the timeline ends there.
+    expect(await play.vitals('com.a', 'crash', { start: '2026-10-01', end: '2026-10-05' })).toEqual([
       { date: '2026-10-02', version: '31', rate: 0.0123, userPerceivedRate: 0.01, distinctUsers: 412 },
     ]);
+    // Nothing complete in the range: no query.
+    const before = urls.length;
+    expect(await play.vitals('com.a', 'crash', { start: '2026-10-03', end: '2026-10-05' })).toEqual([]);
+    expect(urls.slice(before).some((u) => u.includes(':query'))).toBe(false);
     expect(await play.listApps()).toEqual([{ packageName: 'com.a', name: 'A' }]);
     expect(scope).toBe(PLAY_SCOPES);
     expect(urls.filter((u) => u.includes('oauth2'))).toHaveLength(1);

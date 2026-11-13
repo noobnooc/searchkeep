@@ -152,6 +152,8 @@ const VITALS_COLUMNS: Record<AppVitalsMetric, string> = {
   distinctUsers: 'distinct_users',
   crashes: 'crashes',
   crashDevices: 'crash_devices',
+  crashesExpanded: 'crashes_expanded',
+  crashDevicesExpanded: 'crash_devices_expanded',
 };
 /** Rows a write of each shape replaces. */
 const SHAPE_WHERE = {
@@ -1496,8 +1498,33 @@ export class D1Store implements Store {
   async writeAppVitals(appId: string, store: AppStore, w: AppVitalsWrite): Promise<number> {
     appStore(store);
     const metrics = allow([...new Set(w.metrics)], Object.keys(VITALS_COLUMNS) as AppVitalsMetric[], 'metric');
-    if (metrics.length === 0 || w.rows.length === 0) return 0;
+    if (metrics.length === 0 || (w.rows.length === 0 && !w.dates?.length)) return 0;
     const cols = metrics.map((m) => VITALS_COLUMNS[m]);
+    let cleared = 0;
+    if (w.dates?.length) {
+      // Replaced days: versions the write no longer mentions lose these metrics.
+      const res = await this.db
+        .prepare(
+          `UPDATE app_vitals SET ${cols.map((c) => `${c} = NULL`).join(', ')}
+           WHERE app_id = ?1 AND store = ?2 AND date IN (SELECT value FROM json_each(?3))
+             AND (${cols.map((c) => `${c} IS NOT NULL`).join(' OR ')})
+             AND (date || '|' || version) NOT IN (SELECT value FROM json_each(?4))`,
+        )
+        .bind(appId, store, JSON.stringify([...new Set(w.dates)]), JSON.stringify(w.rows.map((r) => `${r.date}|${r.version}`)))
+        .run();
+      cleared = res.meta?.changes ?? 0;
+      // Rows left with no value at all go.
+      if (cleared)
+        await this.db
+          .prepare(
+            `DELETE FROM app_vitals WHERE app_id = ?1 AND store = ?2 AND date IN (SELECT value FROM json_each(?3))
+               AND ${Object.values(VITALS_COLUMNS)
+                 .map((c) => `${c} IS NULL`)
+                 .join(' AND ')}`,
+          )
+          .bind(appId, store, JSON.stringify([...new Set(w.dates)]))
+          .run();
+    }
     const items = w.rows.map((r) => {
       const e: Record<string, string | number | null> = { d: r.date, v: r.version };
       metrics.forEach((m, i) => {
@@ -1506,18 +1533,21 @@ export class D1Store implements Store {
       });
       return e;
     });
-    return this.batch(
-      chunks(items).map((group) =>
-        this.db
-          .prepare(
-            `INSERT INTO app_vitals (app_id, store, date, version, ${cols.join(', ')})
+    return (
+      cleared +
+      (await this.batch(
+        chunks(items).map((group) =>
+          this.db
+            .prepare(
+              `INSERT INTO app_vitals (app_id, store, date, version, ${cols.join(', ')})
              SELECT ?1, ?2, j.value->>'d', j.value->>'v', ${cols.map((_c, i) => `j.value->>'m${i}'`).join(', ')}
              FROM json_each(?3) j WHERE true
              ON CONFLICT (app_id, store, date, version) DO UPDATE SET ${cols.map((c) => `${c} = excluded.${c}`).join(', ')}
              WHERE ${cols.map((c) => `app_vitals.${c} IS NOT excluded.${c}`).join(' OR ')}`,
-          )
-          .bind(appId, store, JSON.stringify(group)),
-      ),
+            )
+            .bind(appId, store, JSON.stringify(group)),
+        ),
+      ))
     );
   }
 
@@ -1707,7 +1737,8 @@ export class D1Store implements Store {
       `SUM(CASE WHEN ${c} IS NOT NULL THEN ${c} * COALESCE(distinct_users, 1) END) / NULLIF(SUM(CASE WHEN ${c} IS NOT NULL THEN COALESCE(distinct_users, 1) END), 0)`;
     const metrics = `${rate('crash_rate')} AS crashRate, ${rate('user_perceived_crash_rate')} AS userPerceivedCrashRate,
       ${rate('anr_rate')} AS anrRate, ${rate('user_perceived_anr_rate')} AS userPerceivedAnrRate,
-      SUM(distinct_users) AS distinctUsers, SUM(crashes) AS crashes, SUM(crash_devices) AS crashDevices`;
+      SUM(distinct_users) AS distinctUsers, SUM(crashes) AS crashes, SUM(crash_devices) AS crashDevices,
+      SUM(crashes_expanded) AS crashesExpanded, SUM(crash_devices_expanded) AS crashDevicesExpanded`;
     const sql =
       q.groupBy === 'version'
         ? `SELECT store, version, ${metrics} FROM app_vitals WHERE ${where.join(' AND ')} GROUP BY store, version
@@ -1726,6 +1757,8 @@ export class D1Store implements Store {
       distinctUsers: n(r.distinctUsers),
       crashes: n(r.crashes),
       crashDevices: n(r.crashDevices),
+      crashesExpanded: n(r.crashesExpanded),
+      crashDevicesExpanded: n(r.crashDevicesExpanded),
     }));
   }
 

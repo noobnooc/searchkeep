@@ -592,36 +592,48 @@ class PageCollector implements ReportCollector {
   }
 }
 
-/** App Crashes: crashes and crashing devices per day and app version (and for all versions). */
-export function crashesCollector(): ReportCollector {
+/**
+ * App Crashes (crash logs) or App Crashes Expanded (every crash on device): crashes and crashing
+ * devices per day and app version, and for all versions. Devices are summed across device models
+ * and OS versions, an upper bound. Every day the file covers is replaced.
+ */
+function crashCounts(expanded: boolean): ReportCollector {
   const rows = new Map<string, AppVitalsInput>();
+  const days = new Set<IsoDate>();
   const col = columns();
+  const [m, d] = expanded ? (['crashesExpanded', 'crashDevicesExpanded'] as const) : (['crashes', 'crashDevices'] as const);
   const bump = (date: IsoDate, version: string, crashes: number, devices: number) => {
     const key = `${date}|${version}`;
-    const e = rows.get(key) ?? { date, version, crashes: 0, crashDevices: 0 };
-    e.crashes = (e.crashes ?? 0) + crashes;
-    e.crashDevices = (e.crashDevices ?? 0) + devices;
+    const e = rows.get(key) ?? { date, version, [m]: 0, [d]: 0 };
+    e[m] = (e[m] ?? 0) + crashes;
+    e[d] = (e[d] ?? 0) + devices;
     rows.set(key, e);
   };
   return {
     add(row) {
       const date = cellDate(col(row, 'date'));
       if (!date) return;
-      const crashes = num(col(row, 'crashes', 'counts'));
+      days.add(date);
+      const crashes = num(col(row, 'crashes', 'counts', 'count'));
       const devices = num(col(row, 'unique devices'));
       bump(date, col(row, 'app version').slice(0, 60) || '-', crashes, devices);
       bump(date, '', crashes, devices);
     },
     async write(store, appId, before) {
-      const list = keep(rows.values(), before);
-      if (list.length === 0) return { written: 0, oldest: null };
+      const dates = coveredDays(days, before);
+      if (dates.length === 0) return { written: 0, oldest: null };
       return {
-        written: await store.writeAppVitals(appId, 'apple', { metrics: ['crashes', 'crashDevices'], rows: list }),
-        oldest: oldestOf(list),
+        written: await store.writeAppVitals(appId, 'apple', { metrics: [m, d], rows: keep(rows.values(), before), dates }),
+        oldest: dates[0]!,
       };
     },
   };
 }
+
+/** App Crashes: crashes that made a crash log, per day and app version (and for all versions). */
+export const crashesCollector = (): ReportCollector => crashCounts(false);
+/** App Crashes Expanded: every crash on device (iOS and iPadOS 17.4 and later), per day and app version. */
+export const crashesExpandedCollector = (): ReportCollector => crashCounts(true);
 
 /** `Free Trial Starts` → `free_trial_starts` (Apple's metric names, offer types and groupings). */
 export function slug(value: string): string {
@@ -1011,6 +1023,12 @@ export const ASC_REPORTS: readonly AscReportSpec[] = [
     label: 'App Crashes',
     match: (n) => /^app crashes$/i.test(n.trim()),
     collector: crashesCollector,
+  },
+  {
+    key: 'crashes_expanded',
+    label: 'App Crashes Expanded',
+    match: (n) => /^app crashes expanded$/i.test(n.trim()),
+    collector: crashesExpandedCollector,
   },
   {
     key: 'purchases',
