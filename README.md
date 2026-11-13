@@ -224,6 +224,7 @@ AGENTS.md              Instructions for AI agents working on this repository
 | `app_stability`        | Crash and ANR rates (Google Play) and crash counts (App Store) per day or app version.             |
 | `app_subscriptions`    | Subscriptions: Google Play new, canceled and active; App Store states, trials, renewals, churn.    |
 | `app_breakdown`        | Per app version, device or OS version: installs, ratings, sessions, crashes and ANRs.              |
+| `app_changes`          | What changed on the store page and when: versions, names, keywords, texts, tracks, before/after.   |
 | `app_revenue`          | App Store revenue per product: USD estimate, or exact per currency with Sales and Trends; refunds. |
 
 All tools are read-only except `submit_sitemap`. Common parameters: `site`, `start` and `end`

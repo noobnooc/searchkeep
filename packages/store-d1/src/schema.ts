@@ -546,6 +546,40 @@ export const appSalesDaily = sqliteTable(
   ],
 );
 
+/** The latest snapshot of an app's store fields (versions, listings, app info, tracks), one row per field. */
+export const appListingValues = sqliteTable(
+  'app_listing_values',
+  {
+    appId: text('app_id').notNull(),
+    store: text('store').notNull(),
+    entity: text('entity').notNull(),
+    locale: text('locale').notNull().default(''),
+    field: text('field').notNull(),
+    value: text('value').notNull(),
+    seenOn: text('seen_on').notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.appId, t.store, t.entity, t.locale, t.field] })],
+);
+
+/** Changes of an app's store fields between daily snapshots: the value before and after. */
+export const appListingChanges = sqliteTable(
+  'app_listing_changes',
+  {
+    appId: text('app_id').notNull(),
+    store: text('store').notNull(),
+    date: text('date').notNull(),
+    entity: text('entity').notNull(),
+    locale: text('locale').notNull().default(''),
+    field: text('field').notNull(),
+    before: text('before'),
+    after: text('after'),
+  },
+  (t) => [
+    primaryKey({ columns: [t.appId, t.store, t.date, t.entity, t.locale, t.field] }),
+    index('app_listing_changes_date').on(t.appId, t.date),
+  ],
+);
+
 /**
  * Google Play earnings per file (ADR 0010): each earnings file's sums per day and buyer country, so a
  * file read again (or an adjustment file) changes only its own part of a day's revenue.

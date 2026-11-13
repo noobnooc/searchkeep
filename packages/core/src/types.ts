@@ -971,6 +971,42 @@ export interface AppSalesRow {
   salesCents: number;
 }
 
+/**
+ * One field of an app's store presence as seen today: e.g. entity `listing:IOS`, locale `en-US`,
+ * field `keywords`; entity `version:IOS`, field `live` (the version on sale).
+ */
+export interface AppListingValue {
+  entity: string;
+  /** Locale or language code, or empty for fields without one. */
+  locale: string;
+  field: string;
+  value: string;
+}
+
+/** A change of a store field between two daily snapshots. */
+export interface AppChangeRow {
+  store: AppStore;
+  /** The day the change was first seen. */
+  date: IsoDate;
+  entity: string;
+  locale: string;
+  field: string;
+  /** Null when the field did not exist before (added) or no longer exists (removed). */
+  before: string | null;
+  after: string | null;
+}
+
+export interface AppChangeQuery {
+  appId: string;
+  store?: AppStore;
+  range: DateRange;
+  /** Entity prefix, e.g. `listing`, `version`, `app_info`, `track`. */
+  entity?: string;
+  field?: string;
+  locale?: string;
+  limit?: number;
+}
+
 export interface AppDataCoverage {
   appId: string;
   store: AppStore;

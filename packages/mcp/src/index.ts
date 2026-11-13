@@ -14,6 +14,7 @@ import {
   appSearchTerms,
   appBreakdown,
   appRevenue,
+  appChanges,
   appStability,
   appSubscriptions,
   listApps,
@@ -132,6 +133,7 @@ export const TOOL_NAMES = [
   'app_subscriptions',
   'app_breakdown',
   'app_revenue',
+  'app_changes',
 ] as const;
 
 /** Parameters shared by the app tools (ADR 0009). */
@@ -455,6 +457,7 @@ export function createSearchkeepMcpServer(deps: McpDeps): McpServer {
           .string()
           .optional()
           .describe('Only this source: search, browse, app_referrer, web_referrer, referral, app_clip, notification, other.'),
+        includeChanges: z.boolean().optional().describe('Attach the store changes of each day to the series (default true).'),
         referrerKind: z.enum(['web', 'app', 'utm']).optional().describe('With groupBy referrer: only websites, apps or UTM sources.'),
       },
       annotations: READ_ONLY,
@@ -570,6 +573,32 @@ export function createSearchkeepMcpServer(deps: McpDeps): McpServer {
       annotations: READ_ONLY,
     },
     async (args) => run(() => appRevenue(ctx, clean(args))),
+  );
+
+  server.registerTool(
+    'app_changes',
+    {
+      title: 'App store changes',
+      description:
+        "What changed on the app's store presence and when, from daily snapshots: App Store versions going on sale or into review, phased releases, names, subtitles, keywords, descriptions, promotional text and release notes per locale; Google Play titles, descriptions, track releases, rollouts and release notes (opt-in). Each change has the value before and after. Use it to explain a jump or drop in app_performance (whose series also lists each day's changes).",
+      inputSchema: {
+        ...appCommon,
+        end: date.optional().describe('End date (YYYY-MM-DD). Defaults to today.'),
+        days: z.number().int().min(1).max(3660).optional().describe('Days back from end. Default 90.'),
+        store: appStore,
+        entity: z
+          .string()
+          .optional()
+          .describe('version, listing, app_info (App Store), listing, track (Google Play), or an exact entity such as listing:IOS.'),
+        field: z
+          .string()
+          .optional()
+          .describe('e.g. keywords, subtitle, name, description, promotional_text, whats_new, live, title, releases.'),
+        locale: z.string().optional().describe('Locale or language, e.g. en-US.'),
+      },
+      annotations: READ_ONLY,
+    },
+    async (args) => run(() => appChanges(ctx, clean(args))),
   );
 
   return server;

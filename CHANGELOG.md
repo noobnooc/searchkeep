@@ -26,6 +26,24 @@ Because users sync `main` at any time, the `Unreleased` section is always accura
 
 ### Added
 
+- Store change timeline. Once a day the sync snapshots each app's App Store presence with the
+  existing key (the version on sale and the one in the works with state, release type and phased
+  release; the on-sale version's description, keywords, promotional text and release notes per
+  locale; names and subtitles) and, with the opt-in `PLAY_METADATA=true`, Google Play listings
+  and tracks through an edit that is deleted, never committed. Fields that changed are recorded with
+  the value before and after. New MCP tool and API `app_changes` (`/api/app-changes`);
+  `app_performance` lists each day's changes in its series (`includeChanges: false` leaves them
+  out). `setup_status` gains `probe.asc_metadata`, `config.play_metadata` and
+  `probe.play_metadata`.
+
+  #### Upgrade notes
+  - Nothing to do for the App Store. If `probe.asc_metadata` warns, the key's role may not read app
+    information and only this feature stays empty.
+  - Optional, for Google Play: set `PLAY_METADATA` to `true`, enable the Google Play Android
+    Developer API in the service account's Google Cloud project and grant it **View app information
+    (read-only)** in the Play Console. Use a service account your release tooling does not use:
+    opening an edit closes that account's other open edits.
+
 - App Store revenue per product. The App Store Purchases report's Content Name is now kept per
   product, purchase type and storefront (Apple's USD estimate, refunds kept apart), and with the
   optional `ASC_VENDOR_NUMBER` secret the sync reads the daily Sales and Trends Summary Sales report

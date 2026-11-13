@@ -126,4 +126,74 @@ describe('google play', () => {
     await expect(play.canRead('b', 'missing.csv')).rejects.toThrow('play: could not read missing.csv (HTTP 404)');
     expect(seen.every((s) => s.range === 'bytes=0-0' && s.url.endsWith('?alt=media'))).toBe(true);
   });
+
+  it('reads listings and tracks through an edit it deletes, never commits, and asks for the publisher scope only when on', async () => {
+    clearPlayTokenCache();
+    const pk = await pemKey();
+    const seen: string[] = [];
+    let scope = '';
+    let failTracks = false;
+    const fetchMock = (async (url: string, init?: RequestInit) => {
+      const method = init?.method ?? 'GET';
+      seen.push(`${method} ${url.replace('https://androidpublisher.googleapis.com/androidpublisher/v3/applications', '')}`);
+      if (url.includes('oauth2')) {
+        const assertion = new URLSearchParams(String(init?.body)).get('assertion')!;
+        scope = JSON.parse(atob(assertion.split('.')[1]!.replace(/-/g, '+').replace(/_/g, '/'))).scope;
+        return Response.json({ access_token: 'tok', expires_in: 3600 });
+      }
+      if (method === 'POST' && url.endsWith('/edits')) return Response.json({ id: 'e1', expiryTimeSeconds: '1800000000' });
+      if (url.endsWith('/edits/e1/listings'))
+        return Response.json({
+          kind: 'androidpublisher#listingsListResponse',
+          listings: [{ language: 'en-US', title: 'Echobell', shortDescription: 'Alerts that ring', fullDescription: 'Long text' }],
+        });
+      if (url.endsWith('/edits/e1/tracks')) {
+        if (failTracks) return Response.json({ error: { code: 500, message: 'boom' } }, { status: 500 });
+        return Response.json({
+          tracks: [
+            {
+              track: 'production',
+              releases: [
+                {
+                  name: '2.4.0',
+                  versionCodes: ['125'],
+                  status: 'inProgress',
+                  userFraction: 0.2,
+                  releaseNotes: [{ language: 'en-US', text: 'Faster alerts' }],
+                },
+                { name: '2.3.0', versionCodes: ['123'], status: 'completed' },
+              ],
+            },
+          ],
+        });
+      }
+      if (method === 'DELETE') return new Response(null, { status: 204 });
+      return new Response('not found', { status: 404 });
+    }) as typeof fetch;
+    const off = createPlayClient({ clientEmail: 'sa@x.iam.gserviceaccount.com', privateKey: pk, fetch: fetchMock });
+    expect(off.listingSnapshot).toBeUndefined();
+    const play = createPlayClient({ clientEmail: 'sa@x.iam.gserviceaccount.com', privateKey: pk, publisher: true, fetch: fetchMock });
+    const snap = await play.listingSnapshot!('one.echobell.app');
+    expect(scope.split(' ')).toContain('https://www.googleapis.com/auth/androidpublisher');
+    expect(snap.scopes).toEqual(['listing', 'track']);
+    expect(snap.values).toEqual([
+      { entity: 'listing', locale: 'en-US', field: 'title', value: 'Echobell' },
+      { entity: 'listing', locale: 'en-US', field: 'short_description', value: 'Alerts that ring' },
+      { entity: 'listing', locale: 'en-US', field: 'full_description', value: 'Long text' },
+      { entity: 'track:production', locale: '', field: 'releases', value: '2.4.0 [125] inProgress 20%; 2.3.0 [123] completed' },
+      { entity: 'track:production', locale: 'en-US', field: 'release_notes', value: 'Faster alerts' },
+    ]);
+    expect(seen.filter((x) => !x.includes('oauth2'))).toEqual([
+      'POST /one.echobell.app/edits',
+      'GET /one.echobell.app/edits/e1/listings',
+      'GET /one.echobell.app/edits/e1/tracks',
+      'DELETE /one.echobell.app/edits/e1',
+    ]);
+    expect(seen.some((x) => x.includes(':commit'))).toBe(false);
+    // The edit is deleted also when reading fails.
+    failTracks = true;
+    seen.length = 0;
+    await expect(play.listingSnapshot!('one.echobell.app')).rejects.toThrow();
+    expect(seen.at(-1)).toBe('DELETE /one.echobell.app/edits/e1');
+  });
 });

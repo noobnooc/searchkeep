@@ -222,4 +222,90 @@ describe('app store connect', () => {
     expect((err as SourceError).status).toBe(403);
     expect((err as SourceError).message).toContain('FORBIDDEN_ERROR');
   });
+
+  it('snapshots the versions, the on-sale version text and the live app info read-only', async () => {
+    clearAscTokenCache();
+    const { pem } = await p8();
+    const methods: string[] = [];
+    const fetchMock = (async (url: string, init?: RequestInit) => {
+      methods.push(init?.method ?? 'GET');
+      if (url.includes('/v1/apps/123/appStoreVersions'))
+        return Response.json({
+          data: [
+            {
+              id: 'v-live',
+              attributes: {
+                platform: 'IOS',
+                versionString: '2.3',
+                appStoreState: 'READY_FOR_SALE',
+                appVersionState: 'READY_FOR_DISTRIBUTION',
+                releaseType: 'AFTER_APPROVAL',
+                createdDate: '2026-10-01T00:00:00Z',
+              },
+              relationships: { appStoreVersionPhasedRelease: { data: { id: 'pr1' } } },
+            },
+            {
+              id: 'v-next',
+              attributes: {
+                platform: 'IOS',
+                versionString: '2.4',
+                appStoreState: 'WAITING_FOR_REVIEW',
+                appVersionState: 'WAITING_FOR_REVIEW',
+                releaseType: 'MANUAL',
+                createdDate: '2026-11-05T00:00:00Z',
+              },
+              relationships: { appStoreVersionPhasedRelease: { data: null } },
+            },
+            {
+              id: 'v-old',
+              attributes: {
+                platform: 'IOS',
+                versionString: '2.2',
+                appStoreState: 'REPLACED_WITH_NEW_VERSION',
+                appVersionState: 'REPLACED_WITH_NEW_BUILD',
+                createdDate: '2026-09-01T00:00:00Z',
+              },
+            },
+          ],
+          included: [{ id: 'pr1', type: 'appStoreVersionPhasedReleases', attributes: { phasedReleaseState: 'ACTIVE' } }],
+        });
+      if (url.includes('/v1/appStoreVersions/v-live/appStoreVersionLocalizations'))
+        return Response.json({
+          data: [
+            {
+              id: 'l1',
+              attributes: { locale: 'en-US', description: 'Ring me', keywords: 'alert,bell', promotionalText: 'New!', whatsNew: 'Fixes' },
+            },
+          ],
+        });
+      if (url.includes('/v1/apps/123/appInfos'))
+        return Response.json({
+          data: [
+            { id: 'info-live', attributes: { state: 'READY_FOR_DISTRIBUTION' } },
+            { id: 'info-edit', attributes: { state: 'PREPARE_FOR_SUBMISSION' } },
+          ],
+        });
+      if (url.includes('/v1/appInfos/info-live/appInfoLocalizations'))
+        return Response.json({ data: [{ id: 'i1', attributes: { locale: 'en-US', name: 'Echobell', subtitle: 'Alerts that ring' } }] });
+      return Response.json({ errors: [{ status: '404', code: 'NOT_FOUND' }] }, { status: 404 });
+    }) as typeof fetch;
+    const asc = createAscClient({ keyId: 'K', issuerId: 'I', privateKey: pem, fetch: fetchMock });
+    const snap = await asc.listingSnapshot!('123');
+    expect(snap.calls).toBe(4);
+    expect(methods.every((m) => m === 'GET')).toBe(true);
+    expect(snap.scopes).toEqual(['version:IOS', 'listing:IOS', 'app_info']);
+    expect(snap.values).toEqual([
+      { entity: 'version:IOS', locale: '', field: 'live', value: '2.3' },
+      { entity: 'version:IOS', locale: '', field: 'live_phased_release', value: 'ACTIVE' },
+      { entity: 'version:IOS', locale: '', field: 'next', value: '2.4' },
+      { entity: 'version:IOS', locale: '', field: 'next_state', value: 'WAITING_FOR_REVIEW' },
+      { entity: 'version:IOS', locale: '', field: 'next_release_type', value: 'MANUAL' },
+      { entity: 'listing:IOS', locale: 'en-US', field: 'description', value: 'Ring me' },
+      { entity: 'listing:IOS', locale: 'en-US', field: 'keywords', value: 'alert,bell' },
+      { entity: 'listing:IOS', locale: 'en-US', field: 'promotional_text', value: 'New!' },
+      { entity: 'listing:IOS', locale: 'en-US', field: 'whats_new', value: 'Fixes' },
+      { entity: 'app_info', locale: 'en-US', field: 'name', value: 'Echobell' },
+      { entity: 'app_info', locale: 'en-US', field: 'subtitle', value: 'Alerts that ring' },
+    ]);
+  });
 });

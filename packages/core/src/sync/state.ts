@@ -102,6 +102,8 @@ export const syncKeys = {
   ascSales: 'app:asc:sales',
   /** App SKUs by Apple ID, refreshed daily (`{ day, skus }`), to split Sales and Trends rows between apps. */
   ascSkus: 'app:asc:skus',
+  /** Day an app's store listing was last snapshotted, per store (`{ day, problem? }`). */
+  listingChecked: (app: string, store: 'apple' | 'play') => `app:listing:${store}:${app}`,
   /** The Play Console report files of an app, listed once a day (`PlayListing`). */
   playListing: (app: string) => `app:play:list:${app}`,
   /** The financial files of an app (earnings of the account, its subscriptions), listed once a day (`PlayListing`). */

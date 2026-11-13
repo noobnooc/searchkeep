@@ -64,6 +64,13 @@
       "when": 1794575737772,
       "tag": "0008_app_products_sales",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "6",
+      "when": 1794576596018,
+      "tag": "0009_app_listing_changes",
+      "breakpoints": true
     }
   ]
 }

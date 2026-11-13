@@ -491,6 +491,29 @@ export const TOOLS: Tool[] = [
     example: 'Which countries gained the most subscribers this month?',
   },
   {
+    name: 'app_changes',
+    summary: 'What changed on the app’s store presence and when, with the values before and after.',
+    description:
+      'Daily snapshots of the App Store version on sale and the one in the works (state, release type, phased release), the on-sale version’s description, keywords, promotional text and release notes per locale, and the app’s name and subtitle; with PLAY_METADATA=true also Google Play titles, descriptions, track releases, rollouts and release notes (read through an edit that is deleted, never committed). Each changed field is listed on the day it was first seen; app_performance’s series lists the same changes per day.',
+    readOnly: true,
+    params: [
+      app,
+      appStore,
+      start,
+      { name: 'end', type: 'YYYY-MM-DD', description: 'Defaults to today.' },
+      days(90),
+      {
+        name: 'entity',
+        type: 'string',
+        description: '`version`, `listing`, `app_info`, `track`, or an exact entity such as `listing:IOS`.',
+      },
+      { name: 'field', type: 'string', description: 'e.g. `keywords`, `subtitle`, `promotional_text`, `live`.' },
+      { name: 'locale', type: 'string', description: 'e.g. `en-US`.' },
+      limit(100),
+    ],
+    example: 'What did we change on the store page the week downloads dropped?',
+  },
+  {
     name: 'app_revenue',
     summary: 'App Store revenue per product, with refunds, against the previous period.',
     description:
@@ -669,6 +692,12 @@ const APP_SECRETS: Secret[] = [
   },
   { name: 'ASC_ISSUER_ID', required: 'for apps', description: 'The Issuer ID shown above the App Store Connect API keys.' },
   { name: 'ASC_PRIVATE_KEY', required: 'for apps', description: 'Contents of the key’s `AuthKey_<KEY ID>.p8` file.' },
+  {
+    name: 'PLAY_METADATA',
+    required: 'optional',
+    description:
+      '`true` to snapshot Google Play store listings and tracks daily for app_changes. Needs the Android Publisher API and View app information (read-only); the edit used is deleted, never committed.',
+  },
   {
     name: 'ASC_VENDOR_NUMBER',
     required: 'optional',

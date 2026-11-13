@@ -244,6 +244,15 @@ export async function setupStatus(ctx: OpsContext, p: { readiness: ReadinessRepo
           ? { detail: 'Set GSC_CLIENT_EMAIL and GSC_PRIVATE_KEY (or PLAY_CLIENT_EMAIL and PLAY_PRIVATE_KEY).' }
           : {}),
   });
+  if (anyPlay)
+    add({
+      id: 'config.play_metadata',
+      label: 'Google Play store listing snapshots (PLAY_METADATA, opt-in)',
+      status: config.play.metadata ? 'ok' : 'skipped',
+      detail: config.play.metadata
+        ? 'On: titles, descriptions, tracks and release notes are read daily through an edit that is deleted, never committed.'
+        : 'Off: app_changes has no Google Play changes. Set PLAY_METADATA=true to read store listings and tracks daily (needs the Android Publisher API; see probe.play_metadata once on).',
+    });
   if (config.appStorePublic)
     add({
       id: 'config.app_store_public',
@@ -276,6 +285,39 @@ export async function setupStatus(ctx: OpsContext, p: { readiness: ReadinessRepo
         if (missing.length)
           return ['error', `Not visible to the App Store Connect key: ${missing.map((a) => `${a.name} (${a.appleId})`).join(', ')}.`];
         return 'ok';
+      });
+    }
+    if (asc?.listingSnapshot && anyApple) {
+      await probe('probe.asc_metadata', 'App Store Connect key can read app versions and listings', async () => {
+        const app = config.apps.find((a) => a.appleId)!;
+        try {
+          await asc.listingSnapshot!(app.appleId!);
+          return 'ok';
+        } catch (err) {
+          if (err instanceof SourceError && (err.status === 403 || err.status === 401))
+            return [
+              'warn',
+              `The App Store Connect key may not read ${app.name}'s versions and listings, so app_changes has no App Store changes. Apple offers no read-only role for app metadata: in App Store Connect → Users and Access → Integrations → App Store Connect API, the key's role must give access to App Information for this app (check the key's role and app access). Everything else syncs without it.`,
+            ];
+          throw err;
+        }
+      });
+    }
+    if (play && anyPlay && config.play.metadata) {
+      await probe('probe.play_metadata', 'Service account can read Google Play store listings (PLAY_METADATA)', async () => {
+        const app = config.apps.find((a) => a.playPackage)!;
+        if (!play.listingSnapshot) return ['warn', 'This deployment does not read Google Play store listings.'];
+        try {
+          await play.listingSnapshot(app.playPackage!);
+          return 'ok';
+        } catch (err) {
+          if (err instanceof SourceError && (err.status === 403 || err.status === 401))
+            return [
+              'warn',
+              `The service account may not read ${app.name}'s store listing through the Android Publisher API. In Google Cloud, enable the "Google Play Android Developer API" for the service account's project; in the Play Console → Users and permissions → ${config.play.clientEmail ?? 'the service account'} → App permissions, grant "View app information (read-only)" for the app. Searchkeep opens an edit, reads it and deletes it, never committing it; opening an edit closes any other edit the same service account has open, so use a service account your release tooling does not use (PLAY_CLIENT_EMAIL).`,
+            ];
+          throw err;
+        }
       });
     }
     if (asc?.salesReport && anyApple && config.asc.vendorNumber) {

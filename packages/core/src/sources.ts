@@ -4,7 +4,7 @@
  * normalization lives in core.
  */
 import type { DelimitedRow } from './delimited.js';
-import type { DateRange, GscSearchType, IsoDate, RichResultIssue, SitemapRecord } from './types.js';
+import type { AppListingValue, DateRange, GscSearchType, IsoDate, RichResultIssue, SitemapRecord } from './types.js';
 
 /**
  * Rows of a query over several days. `complete` is false when the result hit
@@ -240,6 +240,13 @@ export interface AscClient {
    * separated). Returns null when Apple has no report for that day (no sales, or not out yet).
    */
   salesReport?(vendorNumber: string, date: IsoDate, onRow: (row: DelimitedRow) => void): Promise<number | null>;
+  /**
+   * Today's store presence (read-only): per platform the version on sale and the newest one in the
+   * works with their state, release type and phased release; the on-sale version's localizations
+   * (description, keywords, promotional text, what's new); the live app info's names and subtitles.
+   * `scopes` lists the entity prefixes it could read completely.
+   */
+  listingSnapshot?(appleId: string): Promise<{ scopes: string[]; values: AppListingValue[]; calls: number }>;
 }
 
 /** A Cloud Storage object of the Play Console reports bucket. */
@@ -260,6 +267,13 @@ export interface PlayVitalsRow {
   distinctUsers: number | null;
 }
 
+/** A Google Play listing snapshot read through an edit that is never committed. */
+export interface PlayListingSnapshot {
+  scopes: string[];
+  values: AppListingValue[];
+  calls: number;
+}
+
 export interface PlayClient {
   /** Objects whose name starts with `prefix`. */
   listObjects(bucket: string, prefix: string): Promise<PlayObject[]>;
@@ -271,6 +285,12 @@ export interface PlayClient {
   vitals(packageName: string, metric: 'crash' | 'anr', range: DateRange): Promise<PlayVitalsRow[]>;
   /** Apps the service account can see (for suggestions in the dashboard). */
   listApps(): Promise<Array<{ packageName: string; name: string }>>;
+  /**
+   * Store listings (title, short and full description per language) and tracks (releases, rollout,
+   * release notes), read through an edit that is deleted right after and never committed. Needs the
+   * Android Publisher scope (PLAY_METADATA=true).
+   */
+  listingSnapshot?(packageName: string): Promise<PlayListingSnapshot>;
 }
 
 export interface AppStoreLookup {

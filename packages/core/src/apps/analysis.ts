@@ -146,6 +146,8 @@ export interface AppPerformanceParams extends AppParams {
   /** An app source type: search, browse, app_referrer, web_referrer, referral, ... */
   source?: string;
   referrerKind?: AppReferrerKind;
+  /** Attach the store changes of each day to the series (default true). */
+  includeChanges?: boolean;
 }
 
 /**
@@ -164,6 +166,16 @@ export async function appPerformance(ctx: OpsContext, p: AppPerformanceParams) {
   // Licenses bought in bulk are not people finding the app: left out unless a source is asked for.
   const hidden = p.source ? [] : VOLUME_PURCHASE_SOURCES;
   const exclude = hidden.length ? { excludeSources: hidden } : {};
+  const changes =
+    p.includeChanges === false
+      ? []
+      : await ctx.store.queryAppChanges({ appId: r.app.id, ...(r.store ? { store: r.store } : {}), range: r.range, limit: 2000 });
+  const changesOn = (store: AppStore, date: IsoDate) => {
+    const list = changes
+      .filter((c) => c.store === store && c.date === date)
+      .map((c) => ({ entity: c.entity, locale: c.locale, field: c.field }));
+    return list.length ? { changes: list } : {};
+  };
   const perStore = await Promise.all(
     stores.map(async (store) => {
       const q = {
@@ -189,7 +201,7 @@ export async function appPerformance(ctx: OpsContext, p: AppPerformanceParams) {
         currency: await storeCurrency(ctx, r.app.id, store),
         current: funnel(totalOf(cur)),
         previous: funnel(totalOf(before)),
-        series: cur.map((x) => ({ date: x.date!, ...funnel(x) })),
+        series: cur.map((x) => ({ date: x.date!, ...funnel(x), ...changesOn(store, x.date!) })),
         ...(volumePurchaseDownloads > 0 ? { volumePurchaseDownloads } : {}),
       };
     }),
@@ -240,6 +252,10 @@ export async function appPerformance(ctx: OpsContext, p: AppPerformanceParams) {
       );
   if (p.source && stores.includes('play') && p.territory)
     notes.push('Google Play reports sources and territories separately, so it has no rows for a territory and a source together.');
+  if (changes.length)
+    notes.push(
+      `Store changes: ${changes.length} change(s) to versions, listings or app info in this range are attached to the series days they were first seen (see app_changes for the values before and after).`,
+    );
   if (referrers !== undefined)
     notes.push(
       'Referrers: App Store web and app referrers come from the Detailed reports (small numbers are left out or noised by Apple); Google Play lists UTM sources of third-party referrals.',
@@ -968,6 +984,78 @@ export async function appRevenue(ctx: OpsContext, p: AppRevenueParams) {
     );
   if (!aCur.length && !sCur.length) notes.push('No App Store revenue in this range.');
   return { app: r.app.id, range: r.range, previousRange: prev, groupBy, analytics, sales, refunds, notes };
+}
+
+export interface AppChangesParams extends AppParams {
+  /** Entity: `version`, `listing`, `app_info` (App Store) or `listing`, `track` (Google Play), or an exact one like `listing:IOS`. */
+  entity?: string;
+  field?: string;
+  locale?: string;
+}
+
+const CHANGE_TEXT = 1500;
+const clip = (v: string | null) => (v === null || v.length <= CHANGE_TEXT ? v : `${v.slice(0, CHANGE_TEXT)}…`);
+
+/**
+ * What changed on the app's store presence and when: versions going on sale or into review,
+ * phased releases, names, subtitles, keywords, descriptions, promotional text, release notes, and
+ * on Google Play titles, descriptions, track releases and rollouts. One change per field and day
+ * it was first seen, with the value before and after, newest first.
+ */
+export async function appChanges(ctx: OpsContext, p: AppChangesParams) {
+  // Snapshots are taken today, ahead of the store reports: the range ends today by default.
+  const today = toIsoDate(ctx.now ? ctx.now() : new Date());
+  const r = await resolveApp(ctx, { ...p, ...(p.end === undefined ? { end: today } : {}) }, { days: 90, limit: 100 });
+  const rows = await ctx.store.queryAppChanges({
+    appId: r.app.id,
+    ...(r.store ? { store: r.store } : {}),
+    range: r.range,
+    ...(p.entity ? { entity: p.entity.trim() } : {}),
+    ...(p.field ? { field: p.field.trim() } : {}),
+    ...(p.locale ? { locale: p.locale.trim() } : {}),
+    limit: 2000,
+  });
+  const days = new Map<string, number>();
+  for (const x of rows) days.set(`${x.store}|${x.date}`, (days.get(`${x.store}|${x.date}`) ?? 0) + 1);
+  const changes = rows.slice(0, r.limit).map((x) => ({
+    ...x,
+    kind: x.before === null ? 'added' : x.after === null ? 'removed' : 'changed',
+    before: clip(x.before),
+    after: clip(x.after),
+  }));
+  const notes = [
+    'Changes are found by comparing daily snapshots, so a change is dated the day it was first seen (up to a day late) and changes before the first snapshot are not known. Long texts are cut at 1,500 characters. Version fields: live (the version on sale), live_phased_release, next, next_state, next_release_type, next_earliest_release.',
+  ];
+  const stores = storesOf(r.app, r.store);
+  const status = await Promise.all(
+    stores.map(
+      async (s) =>
+        [s, parseJson<{ day?: string; problem?: string }>(await ctx.store.getMeta(syncKeys.listingChecked(r.app.id, s)))] as const,
+    ),
+  );
+  for (const [s, st] of status) {
+    if (st?.problem)
+      notes.push(
+        s === 'apple'
+          ? `App Store: the App Store Connect key may not read the app's versions and listings (${st.problem}); see setup_status.`
+          : `Google Play: the service account may not read the store listing through the Android Publisher API (${st.problem}); see setup_status.`,
+      );
+    else if (!st?.day)
+      notes.push(
+        s === 'apple'
+          ? 'App Store: no snapshot yet; the first one is taken with the next sync and is the baseline changes are measured against.'
+          : ctx.config.play.metadata
+            ? 'Google Play: no snapshot yet; the first one is taken with the next sync.'
+            : 'Google Play: store listing snapshots are off. Set PLAY_METADATA=true to turn them on (see setup_status).',
+      );
+  }
+  return {
+    app: r.app.id,
+    range: r.range,
+    days: [...days].map(([k, n]) => ({ store: k.split('|')[0] as AppStore, date: k.split('|')[1]!, changes: n })),
+    changes,
+    notes,
+  };
 }
 
 /** Configured apps, which stores are connected, App Store report status and stored data. */

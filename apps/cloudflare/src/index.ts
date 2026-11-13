@@ -17,6 +17,7 @@ import {
   appStability,
   appSubscriptions,
   appRevenue,
+  appChanges,
   listApps,
   startAppStoreReports,
   validateApp,
@@ -127,7 +128,12 @@ export function buildClients(config: SearchkeepConfig, browser: BrowserFetch | n
   if (config.asc.keyId && config.asc.issuerId && config.asc.privateKey)
     clients.asc = createAscClient({ keyId: config.asc.keyId, issuerId: config.asc.issuerId, privateKey: config.asc.privateKey });
   if (config.play.clientEmail && config.play.privateKey && config.play.bucket)
-    clients.play = createPlayClient({ clientEmail: config.play.clientEmail, privateKey: config.play.privateKey });
+    clients.play = createPlayClient({
+      clientEmail: config.play.clientEmail,
+      privateKey: config.play.privateKey,
+      // The Android Publisher API (no read-only scope) only for the opt-in features that need it.
+      publisher: config.play.metadata,
+    });
   if (config.appStorePublic)
     clients.appStore = createAppStorePublicClient(
       // Apple's public feeds refuse Workers' egress IPs (HTTP 403) but accept Browser Run's.
@@ -742,6 +748,13 @@ app.get(
   handle((c) => {
     const { x, common } = appParams(c);
     return appStability(opsContext(c), x.strip({ ...common, groupBy: x.get('groupBy') as 'date' | 'version' | undefined }));
+  }),
+);
+app.get(
+  '/api/app-changes',
+  handle((c) => {
+    const { x, common } = appParams(c);
+    return appChanges(opsContext(c), x.strip({ ...common, entity: x.get('entity'), field: x.get('field'), locale: x.get('locale') }));
   }),
 );
 app.get(

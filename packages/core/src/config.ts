@@ -47,6 +47,8 @@ export interface SearchkeepConfig {
     privateKey: string | null;
     /** Cloud Storage bucket of the Play Console reports (`pubsite_prod_…`). */
     bucket: string | null;
+    /** Opt-in (PLAY_METADATA): daily snapshot of store listings and tracks through an uncommitted edit. */
+    metadata: boolean;
   };
   /** Opt-in plugin: Apple's public App Store feeds (own app's rating and chart position only). */
   appStorePublic: boolean;
@@ -310,6 +312,7 @@ export function loadConfig(env: RawEnv): SearchkeepConfig {
       clientEmail: str(env, 'PLAY_CLIENT_EMAIL') ?? str(env, 'GSC_CLIENT_EMAIL'),
       privateKey: normalizePem(str(env, 'PLAY_PRIVATE_KEY') ?? str(env, 'GSC_PRIVATE_KEY')),
       bucket: normalizeBucket(str(env, 'PLAY_REPORTS_BUCKET'), errors),
+      metadata: str(env, 'PLAY_METADATA')?.toLowerCase() === 'true',
     },
     appStorePublic: str(env, 'APP_STORE_PUBLIC_DATA')?.toLowerCase() === 'true',
     brandRegex: brandRegex && compileBrandRegex(brandRegex) ? brandRegex : null,

@@ -113,6 +113,7 @@ are never shown, which is expected.
 | `PLAY_REPORTS_BUCKET`     | for apps | 14a         | Cloud Storage bucket of your Play Console reports, `pubsite_prod_rev_…` (the full `gs://` URI is accepted)             |
 | `PLAY_CLIENT_EMAIL`       | optional | 14a         | Service account for Google Play, when it is not the Search Console one (`GSC_CLIENT_EMAIL`)                            |
 | `PLAY_PRIVATE_KEY`        | optional | 14a         | Its private key, when `PLAY_CLIENT_EMAIL` is set                                                                       |
+| `PLAY_METADATA`           | optional | 14a         | `true` to snapshot Google Play store listings and tracks daily for `app_changes` (Android Publisher API, opt-in)       |
 | `APP_STORE_PUBLIC_DATA`   | optional | 14a         | `true` to turn on the opt-in plugin that reads Apple's public App Store feeds (your app's rating and chart position)   |
 
 `CLOUDFLARE_ACCOUNT_ID` and `CLOUDFLARE_API_TOKEN` are required even if you use no Cloudflare data:
@@ -767,6 +768,18 @@ one of your sites (referrals from it are marked as your own).
    product, country, currency and price. Without it, revenue per product is Apple's USD estimate
    from the App Store Purchases report. **Verify:** `setup_status` shows `config.asc_vendor` and
    `probe.asc_sales` as `ok`.
+
+   Store changes (`app_changes`): once a day the sync reads the App Store version on sale and the one
+   in the works, the on-sale version's texts and the app's names and subtitles per locale with the
+   same key (read only), and records the fields that changed. Apple has no read-only role for app
+   metadata; if the key's role may not read it, `probe.asc_metadata` warns and only this feature is
+   off. Google Play listings and tracks are opt-in: set `PLAY_METADATA` to `true`, enable the
+   **Google Play Android Developer API** in the service account's Google Cloud project, and in the
+   Play Console grant the service account **View app information (read-only)** for the app. The
+   sync opens an edit, reads it and deletes it without committing; opening an edit closes any other
+   edit the same service account has open, so do not share this service account with release
+   tooling (use `PLAY_CLIENT_EMAIL` and `PLAY_PRIVATE_KEY` for a separate one). **Verify:**
+   `probe.asc_metadata` and (when on) `probe.play_metadata` are `ok`.
 
 3. **Start App Store reports, once per app.** **[Human]** Apple generates analytics reports only
    after a request made with an **Admin** key, and Searchkeep never stores one. Generate a second,

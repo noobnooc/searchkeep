@@ -14,7 +14,7 @@ import { safeMessage } from '../errors.js';
 import { SourceError } from '../http.js';
 import type { AscClient, AscReportRequest, SourceClients } from '../sources.js';
 import type { Store } from '../store.js';
-import type { AppChartRankInput, AppConfig, AppRatingInput, AppVitalsInput, IsoDate } from '../types.js';
+import type { AppChartRankInput, AppConfig, AppListingValue, AppRatingInput, AppVitalsInput, IsoDate } from '../types.js';
 import {
   appTaskId,
   parseJson,
@@ -89,6 +89,8 @@ export function planAppUnits(args: AppPlanArgs): { daily: Unit[][]; history: Uni
     if (ctx.clients.asc && app.appleId) planAppStore(args, app, ctx.clients.asc, place);
     if (ctx.clients.play && app.playPackage && ctx.config.play.bucket) planPlay(args, app, place);
     if (ctx.clients.appStore && app.appleId) planPublic(args, app, list);
+    if (ctx.clients.asc?.listingSnapshot && app.appleId) planListing(args, app, 'apple', list);
+    if (ctx.clients.play?.listingSnapshot && app.playPackage && ctx.config.play.metadata) planListing(args, app, 'play', list);
   }
   const salesOwner = ctx.config.apps.find((a) => a.appleId);
   if (ctx.clients.asc?.salesReport && ctx.config.asc.vendorNumber && salesOwner) {
@@ -96,6 +98,55 @@ export function planAppUnits(args: AppPlanArgs): { daily: Unit[][]; history: Uni
     planSales(args, ctx.clients.asc, ctx.config.asc.vendorNumber, (u) => (u.backfill ? history.push(u) : daily[i]!.push(u)));
   }
   return { daily, history };
+}
+
+// ------------------------------------------------------------------ Store changes
+
+/**
+ * Once a day, a snapshot of the app's store presence (versions, listings, app info; Google Play
+ * listings and tracks through an edit that is never committed); fields that differ from the last
+ * snapshot are recorded as changes. A key that may not read them is noted, not retried all day.
+ */
+function planListing(args: AppPlanArgs, app: AppConfig, storeId: 'apple' | 'play', list: Unit[]): void {
+  const { ctx, today, get, budget } = args;
+  const key = syncKeys.listingChecked(app.id, storeId);
+  const saved = parseJson<{ day?: IsoDate; problem?: string }>(get(key));
+  if (saved?.day === today) return;
+  const calls = 4;
+  list.push({
+    task: storeId === 'apple' ? 'asc.listing' : 'play.listing',
+    siteId: appTaskId(app.id),
+    source: storeId === 'apple' ? 'asc' : 'play',
+    backfill: false,
+    calls,
+    key: `${storeId}.listing:${app.id}:${today}`,
+    run: async () => {
+      let snap: { scopes: string[]; values: AppListingValue[]; calls: number };
+      try {
+        snap =
+          storeId === 'apple'
+            ? await ctx.clients.asc!.listingSnapshot!(app.appleId!)
+            : await ctx.clients.play!.listingSnapshot!(app.playPackage!);
+      } catch (err) {
+        if (!(err instanceof SourceError) || (err.status !== 403 && err.status !== 401)) throw err;
+        await ctx.store.setMeta(key, JSON.stringify({ day: today, problem: safeMessage(err) }));
+        ctx.log?.(`${storeId} ${app.id}: the key may not read the store listing (${err.status})`);
+        return null;
+      }
+      // Calls beyond the reserved ones (more platforms) were made already; take them from the budget.
+      for (let i = calls; i < snap.calls; i++) {
+        try {
+          budget.spend(storeId === 'apple' ? 'asc' : 'play');
+        } catch {
+          break;
+        }
+      }
+      const changes = await ctx.store.snapshotAppListing(app.id, storeId, today, snap.scopes, snap.values);
+      await ctx.store.setMeta(key, JSON.stringify({ day: today }));
+      return changes;
+    },
+    skip: () => ctx.store.setMeta(key, JSON.stringify({ day: today })),
+  });
 }
 
 // ------------------------------------------------------------------ App Store Sales and Trends

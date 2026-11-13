@@ -25,6 +25,7 @@ export interface Env {
   ASC_ISSUER_ID?: string;
   ASC_PRIVATE_KEY?: string;
   ASC_VENDOR_NUMBER?: string;
+  PLAY_METADATA?: string;
   /** Google Play: Cloud Storage bucket of the Play Console reports; the service account defaults to GSC's. */
   PLAY_REPORTS_BUCKET?: string;
   PLAY_CLIENT_EMAIL?: string;

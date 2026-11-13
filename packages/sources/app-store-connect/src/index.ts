@@ -18,6 +18,7 @@ import {
   type AscReportRequest,
   type AscReview,
   type AscSegment,
+  type AppListingValue,
   type DelimitedRow,
 } from '@searchkeep/core';
 
@@ -277,6 +278,108 @@ export function createAscClient(opts: AscClientOptions): AscClient {
         throw new SourceError('asc', res.status, `sales report: ${describe(res.status, text)}`, { rateLimited: res.status === 429 });
       }
       return readDelimited(res.body, onRow);
+    },
+
+    async listingSnapshot(appleId) {
+      const values: AppListingValue[] = [];
+      const scopes: string[] = [];
+      let calls = 0;
+      const get = async <T>(path: string) => {
+        calls++;
+        return call<T>(path);
+      };
+      const text = (v: unknown) => (typeof v === 'string' ? v.trim() : '');
+      const put = (entity: string, locale: string, field: string, v: unknown) => {
+        const value = text(v).slice(0, 4000);
+        if (value) values.push({ entity, locale, field, value });
+      };
+
+      // Versions: the newest few per platform, with their phased release.
+      type V = {
+        platform?: string;
+        versionString?: string;
+        appStoreState?: string;
+        appVersionState?: string;
+        releaseType?: string;
+        earliestReleaseDate?: string;
+        createdDate?: string;
+      };
+      const versions = await get<{
+        data?: Array<Resource<V> & { relationships?: { appStoreVersionPhasedRelease?: { data?: { id: string } | null } } }>;
+        included?: Array<Resource<{ phasedReleaseState?: string }>>;
+      }>(
+        `/v1/apps/${encodeURIComponent(appleId)}/appStoreVersions?limit=20&fields%5BappStoreVersions%5D=platform,versionString,appStoreState,appVersionState,releaseType,earliestReleaseDate,createdDate,appStoreVersionPhasedRelease&include=appStoreVersionPhasedRelease&fields%5BappStoreVersionPhasedReleases%5D=phasedReleaseState`,
+      );
+      const phased = new Map((versions.included ?? []).map((x) => [x.id, x.attributes?.phasedReleaseState ?? '']));
+      const live = (v: V) => v.appVersionState === 'READY_FOR_DISTRIBUTION' || v.appStoreState === 'READY_FOR_SALE';
+      const onSale = new Map<string, string>();
+      const byPlatform = new Map<string, Array<(typeof versions.data & object)[number]>>();
+      for (const v of versions.data ?? []) {
+        const platform = v.attributes?.platform ?? 'IOS';
+        byPlatform.set(platform, [...(byPlatform.get(platform) ?? []), v]);
+      }
+      for (const [platform, list] of byPlatform) {
+        const entity = `version:${platform}`;
+        const created = (v: (typeof list)[number]) => v.attributes?.createdDate ?? '';
+        list.sort((a, b) => created(b).localeCompare(created(a)));
+        const current = list.find((v) => live(v.attributes ?? {}));
+        // The newest version created after the one on sale is the one in the works.
+        const next = list.find((v) => v !== current && !live(v.attributes ?? {}) && (!current || created(v) > created(current)));
+        if (current) {
+          onSale.set(platform, current.id);
+          put(entity, '', 'live', current.attributes?.versionString);
+          const pr = current.relationships?.appStoreVersionPhasedRelease?.data?.id;
+          if (pr && phased.get(pr)) put(entity, '', 'live_phased_release', phased.get(pr));
+        }
+        if (next) {
+          put(entity, '', 'next', next.attributes?.versionString);
+          put(entity, '', 'next_state', next.attributes?.appVersionState ?? next.attributes?.appStoreState);
+          put(entity, '', 'next_release_type', next.attributes?.releaseType);
+          put(entity, '', 'next_earliest_release', next.attributes?.earliestReleaseDate);
+        }
+        scopes.push(entity);
+      }
+
+      // The on-sale version's text per locale.
+      for (const [platform, id] of onSale) {
+        const locs = await get<
+          Page<{ locale?: string; description?: string; keywords?: string; promotionalText?: string; whatsNew?: string }>
+        >(
+          `/v1/appStoreVersions/${encodeURIComponent(id)}/appStoreVersionLocalizations?limit=50&fields%5BappStoreVersionLocalizations%5D=locale,description,keywords,promotionalText,whatsNew`,
+        );
+        const entity = `listing:${platform}`;
+        for (const l of Array.isArray(locs.data) ? locs.data : []) {
+          const locale = text(l.attributes?.locale);
+          if (!locale) continue;
+          put(entity, locale, 'description', l.attributes?.description);
+          put(entity, locale, 'keywords', l.attributes?.keywords);
+          put(entity, locale, 'promotional_text', l.attributes?.promotionalText);
+          put(entity, locale, 'whats_new', l.attributes?.whatsNew);
+        }
+        scopes.push(entity);
+      }
+
+      // The live app info's name and subtitle per locale.
+      const infos = await get<Page<{ state?: string; appStoreState?: string }>>(
+        `/v1/apps/${encodeURIComponent(appleId)}/appInfos?limit=10&fields%5BappInfos%5D=state,appStoreState`,
+      );
+      const infoList = Array.isArray(infos.data) ? infos.data : [];
+      const liveInfo =
+        infoList.find((x) => x.attributes?.state === 'READY_FOR_DISTRIBUTION' || x.attributes?.appStoreState === 'READY_FOR_SALE') ??
+        infoList.at(-1);
+      if (liveInfo) {
+        const locs = await get<Page<{ locale?: string; name?: string; subtitle?: string }>>(
+          `/v1/appInfos/${encodeURIComponent(liveInfo.id)}/appInfoLocalizations?limit=50&fields%5BappInfoLocalizations%5D=locale,name,subtitle`,
+        );
+        for (const l of Array.isArray(locs.data) ? locs.data : []) {
+          const locale = text(l.attributes?.locale);
+          if (!locale) continue;
+          put('app_info', locale, 'name', l.attributes?.name);
+          put('app_info', locale, 'subtitle', l.attributes?.subtitle);
+        }
+        scopes.push('app_info');
+      }
+      return { scopes, values, calls };
     },
 
     async listReviews(appleId, o) {

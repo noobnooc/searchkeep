@@ -26,6 +26,9 @@ import type {
   AppStoreRow,
   AppStoreWrite,
   AppSubscriptionInput,
+  AppChangeQuery,
+  AppChangeRow,
+  AppListingValue,
   AppProductInput,
   AppProductQuery,
   AppProductRow,
@@ -210,6 +213,13 @@ export interface Store {
   writeAppSubscriptionMetrics(appId: string, w: AppSubscriptionMetricWrite): Promise<number>;
   /** Replaces the App Store purchases per product (Analytics Reports) on the days in `dates`. */
   writeAppProducts(appId: string, dates: IsoDate[], rows: AppProductInput[]): Promise<number>;
+  /**
+   * Compares today's snapshot of a store's fields (only entities starting with one of `scopes`)
+   * with the stored one, records a change per field that differs (added, changed or removed) on
+   * `date`, and keeps the snapshot. The first snapshot of a scope records no changes. Returns the
+   * number of changes.
+   */
+  snapshotAppListing(appId: string, store: AppStore, date: IsoDate, scopes: string[], values: AppListingValue[]): Promise<number>;
   /** Replaces the Sales and Trends rows of the days in `dates`. */
   writeAppSales(appId: string, dates: IsoDate[], rows: AppSalesInput[]): Promise<number>;
 
@@ -235,6 +245,8 @@ export interface Store {
   queryAppSubscriptionMetrics(q: AppSubscriptionMetricQuery): Promise<AppSubscriptionMetricRow[]>;
   /** Purchases per product summed over the range. */
   queryAppProducts(q: AppProductQuery): Promise<AppProductRow[]>;
+  /** Store changes in the range, newest first. */
+  queryAppChanges(q: AppChangeQuery): Promise<AppChangeRow[]>;
   /** Sales and Trends rows summed over the range. */
   queryAppSales(q: AppSalesQuery): Promise<AppSalesRow[]>;
   /** Per app, store and dataset: first and last date. */

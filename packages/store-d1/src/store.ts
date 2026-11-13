@@ -61,6 +61,9 @@ import {
   type WebAnalyticsInput,
   type WebVitalsInput,
   type AppSubscriptionInput,
+  type AppChangeQuery,
+  type AppChangeRow,
+  type AppListingValue,
   type AppProductInput,
   type AppProductQuery,
   type AppProductRow,
@@ -2242,6 +2245,92 @@ export class D1Store implements Store {
       }
       return out;
     });
+  }
+
+  async snapshotAppListing(appId: string, store: AppStore, date: IsoDate, scopes: string[], values: AppListingValue[]): Promise<number> {
+    const st = appStore(store);
+    if (scopes.length === 0) return 0;
+    const inScope = (entity: string) => scopes.some((s) => entity === s || entity.startsWith(`${s}:`));
+    const key = (x: { entity: string; locale: string; field: string }) => `${x.entity}\u0000${x.locale}\u0000${x.field}`;
+    const now = new Map<string, AppListingValue>();
+    for (const v of values) if (inScope(v.entity)) now.set(key(v), v);
+    const stored = (
+      await this.all<{ entity: string; locale: string; field: string; value: string }>(
+        'SELECT entity, locale, field, value FROM app_listing_values WHERE app_id = ?1 AND store = ?2',
+        appId,
+        st,
+      )
+    ).filter((r) => inScope(r.entity));
+    const before = new Map(stored.map((r) => [key(r), r]));
+    // The first snapshot of a scope is the baseline: no changes recorded.
+    const baseline = new Set(scopes.filter((s) => !stored.some((r) => r.entity === s || r.entity.startsWith(`${s}:`))));
+    const changes: Array<{ e: string; l: string; f: string; b: string | null; a: string | null }> = [];
+    for (const [k, v] of now) {
+      const old = before.get(k);
+      if (old?.value === v.value) continue;
+      if (!old && baseline.has(scopes.find((s) => v.entity === s || v.entity.startsWith(`${s}:`))!)) continue;
+      changes.push({ e: v.entity, l: v.locale, f: v.field, b: old?.value ?? null, a: v.value });
+    }
+    for (const [k, old] of before) if (!now.has(k)) changes.push({ e: old.entity, l: old.locale, f: old.field, b: old.value, a: null });
+    const upserts = [...now.values()].filter((v) => before.get(key(v))?.value !== v.value);
+    const removed = [...before.entries()].filter(([k]) => !now.has(k)).map(([, r]) => r);
+    await this.batch([
+      ...chunks(removed).map((group) =>
+        this.db
+          .prepare(
+            `DELETE FROM app_listing_values WHERE app_id = ?1 AND store = ?2 AND (entity, locale, field) IN
+               (SELECT j.value->>'entity', j.value->>'locale', j.value->>'field' FROM json_each(?3) j)`,
+          )
+          .bind(appId, st, JSON.stringify(group)),
+      ),
+      ...chunks(upserts, 50).map((group) =>
+        this.db
+          .prepare(
+            `INSERT INTO app_listing_values (app_id, store, entity, locale, field, value, seen_on)
+             SELECT ?1, ?2, j.value->>'entity', j.value->>'locale', j.value->>'field', j.value->>'value', ?3 FROM json_each(?4) j WHERE true
+             ON CONFLICT (app_id, store, entity, locale, field) DO UPDATE SET value = excluded.value, seen_on = excluded.seen_on`,
+          )
+          .bind(appId, st, date, JSON.stringify(group)),
+      ),
+      // A field changed twice the same day keeps the first value before and the last after.
+      ...chunks(changes, 50).map((group) =>
+        this.db
+          .prepare(
+            `INSERT INTO app_listing_changes (app_id, store, date, entity, locale, field, before, after)
+             SELECT ?1, ?2, ?3, j.value->>'e', j.value->>'l', j.value->>'f', j.value->>'b', j.value->>'a' FROM json_each(?4) j WHERE true
+             ON CONFLICT (app_id, store, date, entity, locale, field) DO UPDATE SET after = excluded.after`,
+          )
+          .bind(appId, st, date, JSON.stringify(group)),
+      ),
+    ]);
+    return changes.length;
+  }
+
+  async queryAppChanges(q: AppChangeQuery): Promise<AppChangeRow[]> {
+    const binds: Bind[] = [q.appId, q.range.start, q.range.end];
+    const where = ['app_id = ?1', 'date >= ?2', 'date <= ?3'];
+    if (q.store) {
+      binds.push(appStore(q.store));
+      where.push(`store = ?${binds.length}`);
+    }
+    if (q.entity) {
+      binds.push(q.entity, `${q.entity}:%`);
+      where.push(`(entity = ?${binds.length - 1} OR entity LIKE ?${binds.length})`);
+    }
+    if (q.field) {
+      binds.push(q.field);
+      where.push(`field = ?${binds.length}`);
+    }
+    if (q.locale) {
+      binds.push(q.locale);
+      where.push(`locale = ?${binds.length}`);
+    }
+    const rows = await this.all<AppChangeRow>(
+      `SELECT store, date, entity, locale, field, before, after FROM app_listing_changes WHERE ${where.join(' AND ')}
+       ORDER BY date DESC, store, entity, locale, field LIMIT ${Math.max(1, Math.min(2000, Math.floor(q.limit ?? 200)))}`,
+      ...binds,
+    );
+    return rows.map((r) => ({ ...r, before: r.before ?? null, after: r.after ?? null }));
   }
 
   async queryAppChartRanks(appId: string, range: DateRange): Promise<AppChartRankInput[]> {

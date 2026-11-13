@@ -11,6 +11,7 @@ import {
   appStability,
   appSubscriptions,
   appRevenue,
+  appChanges,
   listApps,
   startAppStoreReports,
 } from '../apps/analysis.js';
@@ -30,6 +31,7 @@ import { evaluateReadiness } from '../auth/readiness.js';
 import { loadConfig, withStoredApps, type SearchkeepConfig } from '../config.js';
 import { addDays, daysBetween } from '../dates.js';
 import type { DelimitedRow } from '../delimited.js';
+import type { AppListingValue } from '../types.js';
 import { SourceError } from '../http.js';
 import type { AscClient, AscReportRequest, PlayClient, AppStorePublicClient, SourceClients } from '../sources.js';
 import type { Store } from '../store.js';
@@ -57,7 +59,14 @@ function config(extra: Record<string, string> = {}): SearchkeepConfig {
 }
 
 /** App Store Connect with an ongoing request (three daily instances) and a snapshot. */
-function fakeAsc(opts: { listForbidden?: boolean; requests?: AscReportRequest[]; salesForbidden?: boolean } = {}) {
+function fakeAsc(
+  opts: {
+    listForbidden?: boolean;
+    requests?: AscReportRequest[];
+    salesForbidden?: boolean;
+    listing?: AppListingValue[] | 'forbidden';
+  } = {},
+) {
   const calls: string[] = [];
   const requests: AscReportRequest[] = opts.requests ?? [
     { id: 'ongoing', accessType: 'ONGOING', stoppedDueToInactivity: false },
@@ -221,6 +230,16 @@ function fakeAsc(opts: { listForbidden?: boolean; requests?: AscReportRequest[];
     async listApps() {
       calls.push('listApps');
       return [{ id: APP.appleId, name: 'Acme', bundleId: 'com.acme.app', sku: 'ACME' }];
+    },
+    async listingSnapshot() {
+      calls.push('listingSnapshot');
+      if (opts.listing === 'forbidden') throw new SourceError('asc', 403, 'HTTP 403: FORBIDDEN_ERROR');
+      const values = opts.listing ?? [
+        { entity: 'version:IOS', locale: '', field: 'live', value: '2.0' },
+        { entity: 'listing:IOS', locale: 'en-US', field: 'keywords', value: 'alert,bell' },
+        { entity: 'app_info', locale: 'en-US', field: 'subtitle', value: 'Alerts that ring' },
+      ];
+      return { scopes: ['version:IOS', 'listing:IOS', 'app_info'], values, calls: 4 };
     },
     async salesReport(vendor, date, onRow) {
       calls.push(`sales:${date}`);
@@ -1419,6 +1438,147 @@ export function appContract(name: string, makeStore: () => Promise<Store>): void
           detail: expect.stringContaining('Sales and Reports'),
         });
         expect(config({ ASC_VENDOR_NUMBER: 'abc' }).errors.join(' ')).toContain('ASC_VENDOR_NUMBER');
+      });
+
+      it('records store changes between daily snapshots, from a baseline, and attaches them to the funnel', async () => {
+        const v = (entity: string, locale: string, field: string, value: string): AppListingValue => ({ entity, locale, field, value });
+        // The first snapshot of a scope is the baseline: nothing changed.
+        expect(
+          await store.snapshotAppListing(
+            APP.id,
+            'apple',
+            '2026-10-16',
+            ['version:IOS', 'listing:IOS'],
+            [
+              v('version:IOS', '', 'live', '2.0'),
+              v('listing:IOS', 'en-US', 'keywords', 'alert,bell'),
+              v('listing:IOS', 'de-DE', 'keywords', 'alarm'),
+            ],
+          ),
+        ).toBe(0);
+        // Changed, added and removed fields; a scope not read today keeps its values.
+        expect(
+          await store.snapshotAppListing(
+            APP.id,
+            'apple',
+            '2026-10-18',
+            ['listing:IOS'],
+            [v('listing:IOS', 'en-US', 'keywords', 'alert,bell,ring'), v('listing:IOS', 'en-US', 'promotional_text', 'New!')],
+          ),
+        ).toBe(3);
+        // Twice the same day: the first value before, the last after.
+        await store.snapshotAppListing(
+          APP.id,
+          'apple',
+          '2026-10-18',
+          ['listing:IOS'],
+          [v('listing:IOS', 'en-US', 'keywords', 'alert,ring'), v('listing:IOS', 'en-US', 'promotional_text', 'New!')],
+        );
+        // Another store is separate; its first snapshot is its baseline.
+        expect(await store.snapshotAppListing(APP.id, 'play', '2026-10-18', ['listing'], [v('listing', 'en-US', 'title', 'Acme')])).toBe(0);
+        // Unchanged: nothing recorded.
+        expect(await store.snapshotAppListing(APP.id, 'apple', '2026-10-18', ['version:IOS'], [v('version:IOS', '', 'live', '2.0')])).toBe(
+          0,
+        );
+
+        const cfg = config({ APP_STORE_PUBLIC_DATA: 'false' });
+        const ctx = { store, config: cfg, clients: {}, now: () => NOW };
+        const res = await appChanges(ctx, { app: APP.id, store: 'apple' });
+        expect(res.range.end).toBe('2026-10-20');
+        expect(res.changes.map((c) => [c.date, c.locale, c.field, c.kind, c.before, c.after])).toEqual([
+          ['2026-10-18', 'de-DE', 'keywords', 'removed', 'alarm', null],
+          ['2026-10-18', 'en-US', 'keywords', 'changed', 'alert,bell', 'alert,ring'],
+          ['2026-10-18', 'en-US', 'promotional_text', 'added', null, 'New!'],
+        ]);
+        expect(res.days).toEqual([{ store: 'apple', date: '2026-10-18', changes: 3 }]);
+        expect((await appChanges(ctx, { app: APP.id, field: 'keywords', locale: 'en-US' })).changes).toHaveLength(1);
+        expect((await appChanges(ctx, { app: APP.id, entity: 'version' })).changes).toHaveLength(0);
+
+        // The funnel's series lists the day's changes (and can leave them out).
+        await store.writeAppStoreDaily(APP.id, 'apple', {
+          metrics: ['impressions'],
+          shape: 'cross',
+          dates: ['2026-10-17', '2026-10-18'],
+          rows: [
+            { date: '2026-10-17', territory: 'US', source: 'search', impressions: 100 },
+            { date: '2026-10-18', territory: 'US', source: 'search', impressions: 160 },
+          ],
+        });
+        const perf = await appPerformance(ctx, { app: APP.id, store: 'apple', start: '2026-10-17', end: '2026-10-18' });
+        expect(perf.stores[0]!.series.map((x) => [x.date, x.changes?.length ?? 0])).toEqual([
+          ['2026-10-17', 0],
+          ['2026-10-18', 3],
+        ]);
+        expect(perf.notes.some((n) => n.startsWith('Store changes'))).toBe(true);
+        const without = await appPerformance(ctx, {
+          app: APP.id,
+          store: 'apple',
+          start: '2026-10-17',
+          end: '2026-10-18',
+          includeChanges: false,
+        });
+        expect(without.stores[0]!.series.some((x) => 'changes' in x)).toBe(false);
+      });
+
+      it('snapshots the store listing once a day in the sync, and notes a key that may not read it', async () => {
+        const cfg = config({ APP_STORE_PUBLIC_DATA: 'false' });
+        const asc = fakeAsc();
+        await runSync({ store, config: cfg, clients: { asc: asc.client }, trigger: 'manual', now: NOW, pacing: {} });
+        expect(asc.calls.filter((c) => c === 'listingSnapshot')).toHaveLength(1);
+        const next = fakeAsc({
+          listing: [
+            { entity: 'version:IOS', locale: '', field: 'live', value: '2.1' },
+            { entity: 'listing:IOS', locale: 'en-US', field: 'keywords', value: 'alert,bell' },
+            { entity: 'app_info', locale: 'en-US', field: 'subtitle', value: 'Alerts that ring' },
+          ],
+        });
+        // Same day: not read again. Next day: the new version on sale is a change.
+        await runSync({ store, config: cfg, clients: { asc: next.client }, trigger: 'manual', now: NOW, pacing: {} });
+        expect(next.calls).not.toContain('listingSnapshot');
+        await runSync({
+          store,
+          config: cfg,
+          clients: { asc: next.client },
+          trigger: 'manual',
+          now: new Date('2026-10-21T04:00:00Z'),
+          pacing: {},
+        });
+        const ctx = { store, config: cfg, clients: {}, now: () => new Date('2026-10-21T04:00:00Z') };
+        const res = await appChanges(ctx, { app: APP.id, store: 'apple' });
+        expect(res.changes).toEqual([
+          expect.objectContaining({
+            date: '2026-10-21',
+            entity: 'version:IOS',
+            field: 'live',
+            before: '2.0',
+            after: '2.1',
+            kind: 'changed',
+          }),
+        ]);
+        // A key that may not read app metadata: noted, the sync goes on, setup_status warns.
+        const denied = fakeAsc({ listing: 'forbidden' });
+        const run = await runSync({
+          store,
+          config: cfg,
+          clients: { asc: denied.client },
+          trigger: 'manual',
+          now: new Date('2026-10-22T04:00:00Z'),
+          pacing: {},
+        });
+        expect(run.status).toBe('ok');
+        const noted = await appChanges({ ...ctx, now: () => new Date('2026-10-22T04:00:00Z') }, { app: APP.id, store: 'apple' });
+        expect(noted.notes.some((n) => n.includes('may not read'))).toBe(true);
+        const readiness = evaluateReadiness({
+          configured: true,
+          identityOk: true,
+          inspection: { appFound: true, managedOAuthEnabled: true, broadPolicyReasons: [] },
+        });
+        const checks = (await setupStatus({ store, config: cfg, clients: { asc: denied.client }, now: () => NOW }, { readiness })).checks;
+        expect(checks.find((c) => c.id === 'probe.asc_metadata')).toMatchObject({
+          status: 'warn',
+          detail: expect.stringContaining('App Information'),
+        });
+        expect(checks.find((c) => c.id === 'config.play_metadata')).toMatchObject({ status: 'skipped' });
       });
 
       it('looks for report kinds added since the last listing right away', async () => {
