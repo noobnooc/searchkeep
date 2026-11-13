@@ -826,7 +826,8 @@ share analytics, and only where at least five people had sessions), and subscrip
 subscriptions, free trials, paid offers, billing retry and grace period, and trial starts, trial
 conversions, paid starts, renewals, voluntary and involuntary churn and refunds, per subscription,
 offer type, storefront and download source, from the App Store Subscription State and Event
-reports; history from January 1, 2025); Google Play store listing
+reports; history from January 1, 2025), and the share of first-time downloaders who share analytics
+(App Store Opt-in); Google Play store listing
 visitors and
 acquisitions by country and by traffic source with **search terms**, installs, uninstalls and
 active devices, ratings, reviews, crash and ANR rates; installs, ratings, crashes and ANRs per app

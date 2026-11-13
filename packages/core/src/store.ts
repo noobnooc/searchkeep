@@ -26,6 +26,7 @@ import type {
   AppStoreRow,
   AppStoreWrite,
   AppSubscriptionInput,
+  AppOptInInput,
   AppPageLevel,
   AppPageRow,
   AppPageWrite,
@@ -216,6 +217,10 @@ export interface Store {
   writeAppSubscriptionMetrics(appId: string, w: AppSubscriptionMetricWrite): Promise<number>;
   /** Replaces the App Store purchases per product (Analytics Reports) on the days in `dates`. */
   writeAppProducts(appId: string, dates: IsoDate[], rows: AppProductInput[]): Promise<number>;
+  /** Replaces the App Store opt-in counts of the days in `dates`. */
+  writeAppOptIn(appId: string, dates: IsoDate[], rows: AppOptInInput[]): Promise<number>;
+  /** First-time downloaders and those sharing analytics, summed over the range (with the days that had data). */
+  queryAppOptIn(appId: string, range: DateRange): Promise<{ downloadingUsers: number; optingInUsers: number; days: number }>;
   /** Sets `w.metrics` of the App Store funnel per page; for the days in `w.dates`, pages not mentioned get 0. */
   writeAppPages(appId: string, w: AppPageWrite): Promise<number>;
   /**

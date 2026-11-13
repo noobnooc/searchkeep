@@ -26,6 +26,12 @@ Because users sync `main` at any time, the `Unreleased` section is always accura
 
 ### Added
 
+- Analytics sharing rate. The App Store Opt-in report (first-time downloaders and how many share
+  analytics with developers) is read from the same report requests. `app_performance` returns
+  `analyticsSharing` (downloading users, users opting in, rate) for the App Store, and its notes
+  say how to scale installs, deletions, sessions and crashes, which count only people who share.
+  Nothing to set up.
+
 - Stability data that says why it is empty. The App Store's App Crashes Expanded report (every crash
   on device, not only those with a crash log) is read next to App Crashes, and each crash report now
   replaces the days it covers. Google Play crash and ANR rates are asked only up to the newest day

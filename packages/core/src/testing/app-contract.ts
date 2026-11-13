@@ -1748,6 +1748,38 @@ export function appContract(name: string, makeStore: () => Promise<Store>): void
         expect(await probe(fakePlay().client)).toMatchObject({ status: 'ok' });
       });
 
+      it('reads the App Store Opt-in report and gives the analytics sharing rate with the funnel', async () => {
+        const cfg = config({ APP_STORE_PUBLIC_DATA: 'false' });
+        const ctx = { store, config: cfg, clients: {}, now: () => NOW };
+        expect(ASC_REPORTS.filter((s) => s.match('App Store Opt-in')).map((s) => s.key)).toEqual(['opt_in']);
+        const c = ASC_REPORTS.find((s) => s.key === 'opt_in')!.collector();
+        // Columns of the App Store Opt-in report.
+        for (const [date, users, opting] of [
+          ['2026-10-17', 40, 10],
+          ['2026-10-18', 60, 15],
+        ] as const)
+          c.add({
+            date,
+            'app name': 'Acme',
+            'app apple identifier': APP.appleId,
+            'downloading users': String(users),
+            'users opting-in': String(opting),
+          });
+        await c.write(store, APP.id);
+        await store.writeAppStoreDaily(APP.id, 'apple', {
+          metrics: ['downloads', 'installs'],
+          shape: 'cross',
+          dates: ['2026-10-18'],
+          rows: [{ date: '2026-10-18', territory: 'US', source: 'search', downloads: 100, installs: 25 }],
+        });
+        const perf = await appPerformance(ctx, { app: APP.id, store: 'apple', start: '2026-10-12', end: '2026-10-18' });
+        expect(perf.stores[0]!.analyticsSharing).toEqual({ downloadingUsers: 100, optingInUsers: 25, rate: 0.25 });
+        expect(perf.notes.some((n) => n.includes('25% of first-time downloaders') && n.includes('divide those by 0.25'))).toBe(true);
+        // A range without opt-in data has no rate.
+        const old = await appPerformance(ctx, { app: APP.id, store: 'apple', start: '2026-09-01', end: '2026-09-07' });
+        expect(old.stores[0]).not.toHaveProperty('analyticsSharing');
+      });
+
       it('looks for report kinds added since the last listing right away', async () => {
         const cfg = config({ APP_STORE_PUBLIC_DATA: 'false' });
         const today = '2026-10-20';

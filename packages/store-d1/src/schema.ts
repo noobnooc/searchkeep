@@ -569,6 +569,18 @@ export const appStorePagesDaily = sqliteTable(
   ],
 );
 
+/** App Store Opt-in: first-time downloaders per day and how many share analytics with developers. */
+export const appOptInDaily = sqliteTable(
+  'app_optin_daily',
+  {
+    appId: text('app_id').notNull(),
+    date: text('date').notNull(),
+    downloadingUsers: integer('downloading_users').notNull().default(0),
+    optingInUsers: integer('opting_in_users').notNull().default(0),
+  },
+  (t) => [primaryKey({ columns: [t.appId, t.date] })],
+);
+
 /** The latest snapshot of an app's store fields (versions, listings, app info, tracks), one row per field. */
 export const appListingValues = sqliteTable(
   'app_listing_values',

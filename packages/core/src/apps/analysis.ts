@@ -196,6 +196,16 @@ export async function appPerformance(ctx: OpsContext, p: AppPerformanceParams) {
           : [],
       ]);
       const volumePurchaseDownloads = volume.filter((x) => hidden.includes(x.source as AppSourceType)).reduce((t, x) => t + x.downloads, 0);
+      // Share of first-time downloaders who share analytics (App Store Opt-in report).
+      const optIn = store === 'apple' ? await ctx.store.queryAppOptIn(r.app.id, r.range) : null;
+      const analyticsSharing =
+        optIn && optIn.days > 0
+          ? {
+              downloadingUsers: optIn.downloadingUsers,
+              optingInUsers: optIn.optingInUsers,
+              rate: optIn.downloadingUsers > 0 ? round(optIn.optingInUsers / optIn.downloadingUsers, 4) : null,
+            }
+          : undefined;
       return {
         store,
         currency: await storeCurrency(ctx, r.app.id, store),
@@ -203,6 +213,7 @@ export async function appPerformance(ctx: OpsContext, p: AppPerformanceParams) {
         previous: funnel(totalOf(before)),
         series: cur.map((x) => ({ date: x.date!, ...funnel(x), ...changesOn(store, x.date!) })),
         ...(volumePurchaseDownloads > 0 ? { volumePurchaseDownloads } : {}),
+        ...(analyticsSharing ? { analyticsSharing } : {}),
       };
     }),
   );
@@ -277,6 +288,11 @@ export async function appPerformance(ctx: OpsContext, p: AppPerformanceParams) {
       );
   if (p.source && stores.includes('play') && p.territory)
     notes.push('Google Play reports sources and territories separately, so it has no rows for a territory and a source together.');
+  for (const s of perStore)
+    if (s.analyticsSharing?.rate)
+      notes.push(
+        `App Store: ${Math.round(s.analyticsSharing.rate * 1000) / 10}% of first-time downloaders in this range share analytics with developers (App Store Opt-in report). Installs, deletions, sessions and crashes count only them: divide those by ${s.analyticsSharing.rate} for a rough estimate of all users (an estimate, assuming people who share behave like those who do not; Apple's five-user thresholds still apply). Impressions, page views, downloads and purchases count everyone.`,
+      );
   if (changes.length)
     notes.push(
       `Store changes: ${changes.length} change(s) to versions, listings or app info in this range are attached to the series days they were first seen (see app_changes for the values before and after).`,

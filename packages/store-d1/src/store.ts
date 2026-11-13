@@ -61,6 +61,7 @@ import {
   type WebAnalyticsInput,
   type WebVitalsInput,
   type AppSubscriptionInput,
+  type AppOptInInput,
   type AppPageLevel,
   type AppPageRow,
   type AppPageWrite,
@@ -2358,6 +2359,42 @@ export class D1Store implements Store {
       pageViewsUnique: Number(r.pageViewsUnique) || 0,
       downloads: Number(r.downloads) || 0,
     }));
+  }
+
+  async writeAppOptIn(appId: string, dates: IsoDate[], rows: AppOptInInput[]): Promise<number> {
+    const agg = new Map<string, { d: string; u: number; o: number }>();
+    for (const r of rows) {
+      const e = agg.get(r.date) ?? { d: r.date, u: 0, o: 0 };
+      e.u += Math.round(r.downloadingUsers);
+      e.o += Math.round(r.optingInUsers);
+      agg.set(r.date, e);
+    }
+    const days = [...new Set([...dates, ...agg.keys()])];
+    if (days.length === 0) return 0;
+    await this.batch([
+      this.db
+        .prepare('DELETE FROM app_optin_daily WHERE app_id = ?1 AND date IN (SELECT value FROM json_each(?2))')
+        .bind(appId, JSON.stringify(days)),
+      ...chunks([...agg.values()]).map((group) =>
+        this.db
+          .prepare(
+            `INSERT INTO app_optin_daily (app_id, date, downloading_users, opting_in_users)
+             SELECT ?1, j.value->>'d', j.value->>'u', j.value->>'o' FROM json_each(?2) j WHERE true`,
+          )
+          .bind(appId, JSON.stringify(group)),
+      ),
+    ]);
+    return agg.size;
+  }
+
+  async queryAppOptIn(appId: string, range: DateRange): Promise<{ downloadingUsers: number; optingInUsers: number; days: number }> {
+    const r = await this.first<{ u: number | null; o: number | null; n: number }>(
+      `SELECT SUM(downloading_users) AS u, SUM(opting_in_users) AS o, COUNT(*) AS n FROM app_optin_daily WHERE app_id = ?1 AND date >= ?2 AND date <= ?3`,
+      appId,
+      range.start,
+      range.end,
+    );
+    return { downloadingUsers: Number(r?.u) || 0, optingInUsers: Number(r?.o) || 0, days: Number(r?.n) || 0 };
   }
 
   async snapshotAppListing(appId: string, store: AppStore, date: IsoDate, scopes: string[], values: AppListingValue[]): Promise<number> {

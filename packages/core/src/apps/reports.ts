@@ -22,6 +22,7 @@ import {
   type AppSubscriptionMetricInput,
   type AppProductInput,
   type AppSalesInput,
+  type AppOptInInput,
   type AppPageInput,
   type AppPageLevel,
   type AppPageMetric,
@@ -776,6 +777,29 @@ export function salesSummaryCollector(apps: SalesApp[]) {
   };
 }
 
+/** App Store Opt-in: first-time downloaders per day and how many of them share analytics with developers. */
+export function optInCollector(): ReportCollector {
+  const rows = new Map<IsoDate, AppOptInInput>();
+  const days = new Set<IsoDate>();
+  const col = columns();
+  return {
+    add(row) {
+      const date = cellDate(col(row, 'date'));
+      if (!date) return;
+      days.add(date);
+      const e = rows.get(date) ?? { date, downloadingUsers: 0, optingInUsers: 0 };
+      e.downloadingUsers += num(col(row, 'downloading users'));
+      e.optingInUsers += num(col(row, 'users opting-in', 'users opting in'));
+      rows.set(date, e);
+    },
+    async write(store, appId, before) {
+      const dates = coveredDays(days, before);
+      if (dates.length === 0) return { written: 0, oldest: null };
+      return { written: await store.writeAppOptIn(appId, dates, keep(rows.values(), before)), oldest: dates[0]! };
+    },
+  };
+}
+
 // ------------------------------------------------------------------ Google Play
 
 /** Store performance by country: store listing visitors and acquisitions per territory. */
@@ -1023,6 +1047,12 @@ export const ASC_REPORTS: readonly AscReportSpec[] = [
     label: 'App Crashes',
     match: (n) => /^app crashes$/i.test(n.trim()),
     collector: crashesCollector,
+  },
+  {
+    key: 'opt_in',
+    label: 'App Store Opt-in',
+    match: (n) => /opt-?in/i.test(n) && !/detailed/i.test(n),
+    collector: optInCollector,
   },
   {
     key: 'crashes_expanded',

@@ -1046,6 +1046,13 @@ export interface AppPageRow extends AppPageMetrics {
   pageTitle: string;
 }
 
+/** App Store Opt-in: first-time downloaders per day and how many of them share analytics with developers. */
+export interface AppOptInInput {
+  date: IsoDate;
+  downloadingUsers: number;
+  optingInUsers: number;
+}
+
 export interface AppDataCoverage {
   appId: string;
   store: AppStore;
