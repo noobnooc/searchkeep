@@ -11,6 +11,8 @@ import {
   findApp,
   cellDate,
   playInstallsCollector,
+  subscriptionMetricsCollector,
+  type AppSubscriptionMetricWrite,
   type AppStoreWrite,
   type Store,
 } from '../src/index.js';
@@ -141,6 +143,10 @@ describe('app report recognition', () => {
     expect(match('App Store Installation and Deletion Standard')).toEqual(['installs']);
     expect(match('App Crashes')).toEqual(['crashes']);
     expect(match('App Crashes Expanded')).toEqual([]);
+    expect(match('App Store Purchases Standard')).toEqual(['purchases']);
+    expect(match('App Store Subscription State Standard')).toEqual(['subscription_state']);
+    expect(match('App Store Subscription Event Standard')).toEqual(['subscription_event']);
+    expect(match('App Store Subscription Event Detailed')).toEqual([]);
     expect(match('Streaming Downloads Performance')).toEqual([]);
     expect(classifyPlayFile('stats/store_performance/store_performance_com.acme.app_202610_traffic_source.csv', 'com.acme.app')).toEqual({
       kind: 'store_traffic',
@@ -291,5 +297,81 @@ describe('Google Play financial files', () => {
     expect(
       classifyPlayFile('financial-stats/subscriptions/subscriptions_com.acme.app.pro_x_202610_country.csv', 'com.acme.app'),
     ).toBeNull();
+  });
+});
+
+describe('App Store subscription reports', () => {
+  /** A Subscription Event report (Standard) as Apple delivers it: tab separated, columns read by name. */
+  const EVENT_TSV = [
+    'Event Date\tApp Name\tApp Apple Identifier\tEvent Sub Type\tEvent Grouping\tSubscription Name\tSubscription Identifier\tSubscription Duration\tBilling Frequency\tBilling Period\tSubscription Group\tSubscription Group Identifier\tOffer Type\tOffer Name\tOffer ID\tVanity Code\tOffer Pricing\tOffer Duration\tPlan Change Type\tPrevious Subscription Name\tPrevious Subscription Identifier\tFamily Sharing\tCancellation Reason\tPaid Service Days Recovered\tApp Download Source Type\tPage Type\tPre-Order\tOriginal Purchase Device\tTerritory\tCounts',
+    '2026-11-08\tEchobell\t6400000000\tFree Trial Starts\tOffer Starts\tPro Monthly\t6450000001\t1 Month\tMonthly\t\tPro\t21000000\tFree Trial\tLaunch\tL1\t\tFree\t1 Week\t\t\t\tIndividual\t\t\tApp Store search\tProduct page\tNo\tiPhone\tUS\t2',
+    '2026-11-08\tEchobell\t6400000000\tFree Trial Starts\tOffer Starts\tPro Monthly\t6450000001\t1 Month\tMonthly\t\tPro\t21000000\tFree Trial\tLaunch\tL1\t\tFree\t1 Week\t\t\t\tIndividual\t\t\tApp Store search\tProduct page\tNo\tiPad\tUS\t1',
+    '2026-11-08\tEchobell\t6400000000\tVoluntary Churn from Full Price\tVoluntary Churn\tPro Monthly\t6450000001\t1 Month\tMonthly\t\tPro\t21000000\t\t\t\t\t\t\t\t\t\tIndividual\tTurned off auto-renew\t\tUnavailable\tNo Page\tNo\tiPhone\tde\t1',
+    '2026-11-09\tEchobell\t6400000000\tFull Price Renewals\tRenewals\tPro Annual\t6450000002\t1 Year\tYearly\t\tPro\t21000000\t\t\t\t\t\t\t\t\t\tShared with family\t\t\tInstitutional purchase\tProduct page\tNo\tMac\tJP\t0',
+  ].join('\n');
+
+  it('aggregates event rows per day, metric, subscription, offer, storefront and source, and replaces every covered day', async () => {
+    const writes: AppSubscriptionMetricWrite[] = [];
+    const store = {
+      writeAppSubscriptionMetrics: async (_id: string, w: AppSubscriptionMetricWrite) => (writes.push(w), w.rows.length),
+    } as unknown as Store;
+    const c = subscriptionMetricsCollector('event');
+    await readDelimited(stream(new TextEncoder().encode(EVENT_TSV)), (r) => c.add(r));
+    const res = await c.write(store, 'echobell');
+    expect(res).toEqual({ written: 2, oldest: '2026-11-08' });
+    expect(writes[0]!.kind).toBe('event');
+    // 2026-11-09 only had a zero row: still replaced, so older numbers for it go.
+    expect(writes[0]!.dates).toEqual(['2026-11-08', '2026-11-09']);
+    expect(writes[0]!.rows).toEqual([
+      {
+        date: '2026-11-08',
+        metric: 'free_trial_starts',
+        metricGroup: 'offer_starts',
+        product: 'Pro Monthly',
+        offerType: 'free_trial',
+        territory: 'US',
+        source: 'search',
+        count: 3,
+      },
+      {
+        date: '2026-11-08',
+        metric: 'voluntary_churn_from_full_price',
+        metricGroup: 'voluntary_churn',
+        product: 'Pro Monthly',
+        offerType: '',
+        territory: 'DE',
+        source: 'unavailable',
+        count: 1,
+      },
+    ]);
+  });
+
+  it('keeps states without the download source, and only days before the snapshot limit', async () => {
+    const tsv = [
+      'Date\tApp Name\tApp Apple Identifier\tState Metric\tState Metric Grouping\tSubscription Name\tSubscription Identifier\tOffer Type\tAuto-Renew Status\tApp Download Source Type\tTerritory\tCounts',
+      '2026-11-05\tEchobell\t6400000000\tFull price\tPaid plans\tPro Monthly\t6450000001\t\tAuto-renew on\tApp Store search\tUS\t7',
+      '2026-11-05\tEchobell\t6400000000\tFull price\tPaid plans\tPro Monthly\t6450000001\t\tAuto-renew off\tWeb referrer\tUS\t2',
+      '2026-11-06\tEchobell\t6400000000\tGrace period\tBilling issue\tPro Monthly\t6450000001\t\tAuto-renew on\tApp Store search\tUS\t1',
+    ].join('\n');
+    const writes: AppSubscriptionMetricWrite[] = [];
+    const store = {
+      writeAppSubscriptionMetrics: async (_id: string, w: AppSubscriptionMetricWrite) => (writes.push(w), w.rows.length),
+    } as unknown as Store;
+    const c = subscriptionMetricsCollector('state');
+    await readDelimited(stream(new TextEncoder().encode(tsv)), (r) => c.add(r));
+    await c.write(store, 'echobell', '2026-11-06');
+    expect(writes[0]!.dates).toEqual(['2026-11-05']);
+    expect(writes[0]!.rows).toEqual([
+      {
+        date: '2026-11-05',
+        metric: 'full_price',
+        metricGroup: 'paid_plans',
+        product: 'Pro Monthly',
+        offerType: '',
+        territory: 'US',
+        source: '*',
+        count: 9,
+      },
+    ]);
   });
 });

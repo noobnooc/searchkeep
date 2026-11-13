@@ -799,7 +799,11 @@ Manager, are kept out of the totals and shown only by source), referring
 websites and apps, crash counts, customer reviews, and revenue (purchases, proceeds and sales in
 USD, paying users) and sessions attributed to the same sources and storefronts (App Store
 Purchases and App Sessions reports, from the same report requests; sessions count only people who
-share analytics, and only where at least five people had sessions); Google Play store listing
+share analytics, and only where at least five people had sessions), and subscriptions (active
+subscriptions, free trials, paid offers, billing retry and grace period, and trial starts, trial
+conversions, paid starts, renewals, voluntary and involuntary churn and refunds, per subscription,
+offer type, storefront and download source, from the App Store Subscription State and Event
+reports; history from January 1, 2025); Google Play store listing
 visitors and
 acquisitions by country and by traffic source with **search terms**, installs, uninstalls and
 active devices, ratings, reviews, crash and ANR rates; installs, ratings, crashes and ANRs per app

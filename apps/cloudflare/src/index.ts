@@ -754,8 +754,10 @@ app.get(
   '/api/app-subscriptions',
   handle((c) => {
     const { x, common } = appParams(c);
-    const { store: _store, ...rest } = common;
-    return appSubscriptions(opsContext(c), x.strip({ ...rest, product: x.get('product'), territory: x.get('territory') }));
+    return appSubscriptions(
+      opsContext(c),
+      x.strip({ ...common, product: x.get('product'), territory: x.get('territory'), offerType: x.get('offerType') }),
+    );
   }),
 );
 app.get(

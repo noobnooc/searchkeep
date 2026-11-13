@@ -50,6 +50,13 @@
       "when": 1794400390012,
       "tag": "0006_app_breakdowns",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "6",
+      "when": 1794575008114,
+      "tag": "0007_app_subscription_metrics",
+      "breakpoints": true
     }
   ]
 }

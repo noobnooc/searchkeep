@@ -518,11 +518,16 @@ export function createSearchkeepMcpServer(deps: McpDeps): McpServer {
     {
       title: 'App subscriptions',
       description:
-        'Google Play subscriptions: new, canceled and active subscriptions per product and country over the period, against the previous period, with the daily trend. Needs the service account to view financial data.',
+        "Subscriptions per store against the previous period, with the daily trend. Google Play (top-level fields): new, canceled and active subscriptions per product and country; needs the service account to view financial data. App Store (appStore): active subscriptions, free trials, paid offers, billing retry and grace period (levels), and trial starts, trial conversions, paid starts, renewals, voluntary and involuntary churn and refunds (counts), per subscription, offer type, storefront and download source; from Apple's subscription reports, no extra permission.",
       inputSchema: {
         ...appCommon,
-        product: z.string().optional().describe('Only this subscription product id.'),
+        store: appStore,
+        product: z.string().optional().describe('Only this subscription: Google Play product id or App Store subscription name.'),
         territory: z.string().optional().describe('Only this country (e.g. US).'),
+        offerType: z
+          .string()
+          .optional()
+          .describe('App Store only: offer type, e.g. free_trial, pay_up_front, pay_as_you_go; empty string for no offer.'),
       },
       annotations: READ_ONLY,
     },

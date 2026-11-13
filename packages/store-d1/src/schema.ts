@@ -460,6 +460,31 @@ export const appSubscriptionsDaily = sqliteTable(
 );
 
 /**
+ * App Store subscription states and events per day (Analytics Reports, Standard): one row per kind,
+ * metric, subscription, offer type, territory and download source (`*` for states).
+ */
+export const appSubscriptionMetricsDaily = sqliteTable(
+  'app_subscription_metrics_daily',
+  {
+    appId: text('app_id').notNull(),
+    store: text('store').notNull(),
+    kind: text('kind').notNull(),
+    date: text('date').notNull(),
+    metric: text('metric').notNull(),
+    metricGroup: text('metric_group').notNull().default(''),
+    product: text('product').notNull(),
+    offerType: text('offer_type').notNull().default(''),
+    territory: text('territory').notNull(),
+    source: text('source').notNull(),
+    count: integer('count').notNull().default(0),
+  },
+  (t) => [
+    primaryKey({ columns: [t.appId, t.store, t.kind, t.date, t.metric, t.metricGroup, t.product, t.offerType, t.territory, t.source] }),
+    index('app_subscription_metrics_daily_date').on(t.appId, t.kind, t.date),
+  ],
+);
+
+/**
  * Google Play earnings per file (ADR 0010): each earnings file's sums per day and buyer country, so a
  * file read again (or an adjustment file) changes only its own part of a day's revenue.
  */

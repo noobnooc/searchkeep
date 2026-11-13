@@ -26,6 +26,9 @@ import type {
   AppStoreRow,
   AppStoreWrite,
   AppSubscriptionInput,
+  AppSubscriptionMetricQuery,
+  AppSubscriptionMetricRow,
+  AppSubscriptionMetricWrite,
   AppSubscriptionQuery,
   AppSubscriptionRow,
   AppVitalsQuery,
@@ -197,6 +200,8 @@ export interface Store {
   queryAppBreakdowns(q: AppBreakdownQuery): Promise<AppBreakdownRow[]>;
   /** Replaces a subscription product's rows on the days in `dates` (Google Play, ADR 0010). */
   writeAppSubscriptions(appId: string, product: string, dates: IsoDate[], rows: AppSubscriptionInput[]): Promise<number>;
+  /** Replaces App Store subscription states or events (one kind) on the days in `w.dates`. */
+  writeAppSubscriptionMetrics(appId: string, w: AppSubscriptionMetricWrite): Promise<number>;
 
   /**
    * Store funnel metrics grouped by the dimensions. Rows are chosen so nothing is counted twice:
@@ -216,6 +221,8 @@ export interface Store {
   queryAppChartRanks(appId: string, range: DateRange): Promise<AppChartRankInput[]>;
   /** New and canceled subscriptions summed, active subscriptions as a level (see the row type). */
   queryAppSubscriptions(q: AppSubscriptionQuery): Promise<AppSubscriptionRow[]>;
+  /** App Store subscription states (levels, see the row type) or events (summed). */
+  queryAppSubscriptionMetrics(q: AppSubscriptionMetricQuery): Promise<AppSubscriptionMetricRow[]>;
   /** Per app, store and dataset: first and last date. */
   appCoverage(appId?: string): Promise<AppDataCoverage[]>;
   /** Latest day with store funnel data for an app (and store). */

@@ -15,6 +15,7 @@ import {
   type AppReviewInput,
   type AppSearchTermInput,
   type AppStoreDailyInput,
+  type AppSubscriptionMetricInput,
   type AppVitalsInput,
   type SearchFactInput,
   type Store,
@@ -372,6 +373,31 @@ export async function seedAppDemo(store: Store, app: AppConfig, siteDomain = 'ac
         ]),
       ),
     );
+  }
+  if (app.appleId) {
+    // App Store subscription states and events (Analytics Reports).
+    let paid = 300;
+    const states: AppSubscriptionMetricInput[] = [];
+    const events: AppSubscriptionMetricInput[] = [];
+    for (const date of dates) {
+      const trials = Math.round(8 * (0.5 + r()));
+      const converted = Math.round(trials * 0.45);
+      const churned = Math.round(3 * (0.5 + r()));
+      paid += converted - churned;
+      const ev = (metric: string, metricGroup: string, offerType: string, source: string, count: number) =>
+        events.push({ date, metric, metricGroup, product: 'Pro Monthly', offerType, territory: 'US', source, count });
+      ev('free_trial_starts', 'offer_starts', 'free_trial', 'search', trials);
+      ev('full_price_from_free_trial', 'paid_subscriptions_from_offers', 'free_trial', 'search', converted);
+      ev('full_price_renewals', 'renewals', '', 'search', Math.round(paid / 30));
+      ev('voluntary_churn_from_full_price', 'voluntary_churn', '', 'search', churned);
+      const st = (metric: string, metricGroup: string, offerType: string, count: number) =>
+        states.push({ date, metric, metricGroup, product: 'Pro Monthly', offerType, territory: 'US', source: '*', count });
+      st('full_price', 'paid_plans', '', paid);
+      st('free_trials', 'subscription_offers', 'free_trial', trials * 7);
+      st('billing_retry', 'billing_issue', '', Math.round(paid * 0.02));
+    }
+    n += await store.writeAppSubscriptionMetrics(app.id, { kind: 'state', dates, rows: states });
+    n += await store.writeAppSubscriptionMetrics(app.id, { kind: 'event', dates, rows: events });
   }
   if (app.playPackage) {
     const byTerritory: AppStoreDailyInput[] = [];

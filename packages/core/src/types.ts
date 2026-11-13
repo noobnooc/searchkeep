@@ -813,6 +813,62 @@ export interface AppSubscriptionRow {
   activeSubscriptions: number;
 }
 
+/**
+ * App Store subscription states (levels per day) and events (counts per day) from the Analytics
+ * Reports "App Store Subscription State" and "App Store Subscription Event" (Standard).
+ */
+export type AppSubscriptionMetricKind = 'state' | 'event';
+
+export interface AppSubscriptionMetricInput {
+  date: IsoDate;
+  /** Apple's State Metric or Event Sub Type as a slug, e.g. `free_trial_starts`, `billing_retry`. */
+  metric: string;
+  /** Apple's State Metric Grouping or Event Grouping as a slug, e.g. `subscription_offers`, `voluntary_churn`. */
+  metricGroup: string;
+  /** Subscription name as set in App Store Connect. */
+  product: string;
+  /** Offer type slug (`free_trial`, `pay_up_front`, ...), or empty for no offer. */
+  offerType: string;
+  /** Upper-case territory code. */
+  territory: string;
+  /** App download source type (events only; `*` for states). */
+  source: string;
+  count: number;
+}
+
+export interface AppSubscriptionMetricWrite {
+  kind: AppSubscriptionMetricKind;
+  /** Days replaced as a whole. */
+  dates: IsoDate[];
+  rows: AppSubscriptionMetricInput[];
+}
+
+export type AppSubscriptionMetricDimension = 'date' | 'metric' | 'metricGroup' | 'product' | 'offerType' | 'territory' | 'source';
+
+export interface AppSubscriptionMetricQuery {
+  appId: string;
+  kind: AppSubscriptionMetricKind;
+  range: DateRange;
+  dimensions: AppSubscriptionMetricDimension[];
+  product?: string;
+  territory?: string;
+  offerType?: string;
+  source?: string;
+  limit?: number;
+}
+
+export interface AppSubscriptionMetricRow {
+  date?: IsoDate;
+  metric?: string;
+  metricGroup?: string;
+  product?: string;
+  offerType?: string;
+  territory?: string;
+  source?: string;
+  /** Events: summed over the range. States: per date that day's level, otherwise the level on the range's last day with data. */
+  count: number;
+}
+
 export interface AppDataCoverage {
   appId: string;
   store: AppStore;

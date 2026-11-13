@@ -68,6 +68,8 @@ function fakeAsc(opts: { listForbidden?: boolean; requests?: AscReportRequest[] 
     crash: [{ id: 'crash-2026-10-19', processingDate: '2026-10-19' }],
     pur: [{ id: 'pur-2026-10-19', processingDate: '2026-10-19' }],
     ses: [{ id: 'ses-2026-10-19', processingDate: '2026-10-19' }],
+    subst: [{ id: 'subst-2026-10-19', processingDate: '2026-10-19' }],
+    subev: [{ id: 'subev-2026-10-19', processingDate: '2026-10-19' }],
     'snap-eng': [{ id: 'snap-eng-1', processingDate: '2026-10-19' }],
   };
   const rowsFor = (instanceId: string): DelimitedRow[] => {
@@ -117,6 +119,61 @@ function fakeAsc(opts: { listForbidden?: boolean; requests?: AscReportRequest[] 
         pur('App Store search', 'US', 3, '20.97', '29.97', 2),
         pur('App Store search', 'US', -1, '-6.99', '-9.99', 0),
         pur('Web referrer', 'GB', 1, '4.99', '6.99', 1),
+      ];
+    }
+    if (kind === 'subst') {
+      // Columns of the App Store Subscription State report (Standard).
+      const st = (date: string, metric: string, group: string, product: string, offer: string, territory: string, counts: number) => ({
+        date,
+        'app name': 'Acme',
+        'app apple identifier': APP.appleId,
+        'state metric': metric,
+        'state metric grouping': group,
+        'subscription name': product,
+        'subscription identifier': product === 'Pro Monthly' ? '6450000001' : '6450000002',
+        'subscription duration': product === 'Pro Monthly' ? '1 Month' : '1 Year',
+        'offer type': offer,
+        'auto-renew status': 'Auto-renew on',
+        'family sharing': 'Individual',
+        'app download source type': 'App Store search',
+        'page type': 'Product page',
+        territory,
+        counts: String(counts),
+      });
+      return [
+        st('2026-10-17', 'Full price', 'Paid plans', 'Pro Monthly', '', 'US', 10),
+        st('2026-10-18', 'Full price', 'Paid plans', 'Pro Monthly', '', 'US', 11),
+        st('2026-10-18', 'Full price', 'Paid plans', 'Pro Annual', '', 'DE', 4),
+        st('2026-10-18', 'Free trials', 'Subscription offers', 'Pro Monthly', 'Free Trial', 'US', 3),
+        st('2026-10-18', 'Billing retry', 'Billing issue', 'Pro Monthly', '', 'US', 1),
+        st('2026-10-18', 'Voluntarily churned', 'Churned', 'Pro Monthly', '', 'US', 40),
+      ];
+    }
+    if (kind === 'subev') {
+      // Columns of the App Store Subscription Event report (Standard).
+      const ev = (sub: string, group: string, offer: string, source: string, territory: string, counts: number) => ({
+        'event date': '2026-10-18',
+        'app name': 'Acme',
+        'app apple identifier': APP.appleId,
+        'event sub type': sub,
+        'event grouping': group,
+        'subscription name': 'Pro Monthly',
+        'subscription identifier': '6450000001',
+        'offer type': offer,
+        'app download source type': source,
+        'page type': 'Product page',
+        territory,
+        counts: String(counts),
+      });
+      return [
+        ev('Free Trial Starts', 'Offer Starts', 'Free Trial', 'App Store search', 'US', 3),
+        ev('Free Trial Starts', 'Offer Starts', 'Free Trial', 'Web referrer', 'US', 1),
+        ev('Full Price from Free Trial', 'Paid Subscriptions from Offers', 'Free Trial', 'App Store search', 'US', 2),
+        ev('Full Price Subscription Starts', 'Paid Subscription Starts', '', 'App Store browse', 'GB', 1),
+        ev('Full Price Renewals', 'Renewals', '', 'App Store search', 'US', 5),
+        ev('Voluntary Churn from Full Price', 'Voluntary Churn', '', 'App Store search', 'US', 2),
+        ev('Involuntary Churn from Full Price', 'Involuntary Churn', '', 'App Store search', 'US', 1),
+        ev('Refunds from Full Price', 'Refunds', '', 'App Store search', 'US', 1),
       ];
     }
     if (kind === 'ses') {
@@ -196,6 +253,9 @@ function fakeAsc(opts: { listForbidden?: boolean; requests?: AscReportRequest[] 
             { id: 'pur', name: 'App Store Purchases Standard', category: 'APP_STORE_COMMERCE' },
             { id: 'pre', name: 'App Store Pre-orders Standard', category: 'APP_STORE_COMMERCE' },
             { id: 'ses', name: 'App Sessions Standard', category: 'APP_USAGE' },
+            { id: 'subst', name: 'App Store Subscription State Standard', category: 'APP_STORE_COMMERCE' },
+            { id: 'subev', name: 'App Store Subscription Event Standard', category: 'APP_STORE_COMMERCE' },
+            { id: 'subevd', name: 'App Store Subscription Event Detailed', category: 'APP_STORE_COMMERCE' },
           ];
     },
     async listInstances(reportId) {
@@ -893,16 +953,16 @@ export function appContract(name: string, makeStore: () => Promise<Store>): void
           proceeds: 11.13,
         });
         expect(playPerf.stores[0]!.currency).toBe('EUR');
-        const subs = await appSubscriptions(ctx, { app: APP.id, start: '2026-10-01', end: '2026-10-19' });
+        const subs = await appSubscriptions(ctx, { app: APP.id, store: 'play', start: '2026-10-01', end: '2026-10-19' });
         expect(subs.current).toEqual({ newSubscriptions: 6, canceledSubscriptions: 2, activeSubscriptions: 27, net: 4 });
         expect(subs.products).toEqual([
           { product: 'pro_monthly', newSubscriptions: 6, canceledSubscriptions: 2, activeSubscriptions: 27, net: 4 },
         ]);
-        expect(subs.territories.map((t) => [t.territory, t.activeSubscriptions, t.net])).toEqual([
+        expect(subs.territories!.map((t) => [t.territory, t.activeSubscriptions, t.net])).toEqual([
           ['US', 22, 4],
           ['DE', 5, 0],
         ]);
-        expect(subs.series.map((d) => [d.date, d.activeSubscriptions])).toEqual([
+        expect(subs.series!.map((d) => [d.date, d.activeSubscriptions])).toEqual([
           ['2026-10-09', 20],
           ['2026-10-10', 27],
         ]);
@@ -1124,6 +1184,91 @@ export function appContract(name: string, makeStore: () => Promise<Store>): void
         expect(progress.apps[0]!.datasets.find((d) => d.dataset === 'google_play')).toMatchObject({ complete: true });
       });
 
+      it('syncs App Store subscription states and events and summarizes them per subscription, offer, storefront and source', async () => {
+        const cfg = config({ APP_STORE_PUBLIC_DATA: 'false' });
+        const asc = fakeAsc();
+        const run = await runSync({ store, config: cfg, clients: { asc: asc.client }, trigger: 'manual', now: NOW, pacing: {} });
+        expect(run.status).toBe('ok');
+        expect(asc.calls).toContain('listInstances:subst');
+        expect(asc.calls).toContain('listInstances:subev');
+        // The Detailed event report is not read.
+        expect(asc.calls).not.toContain('listInstances:subevd');
+        const ctx = { store, config: cfg, clients: {}, now: () => NOW };
+        const subs = await appSubscriptions(ctx, { app: APP.id, store: 'apple', start: '2026-10-12', end: '2026-10-18' });
+        expect(subs).not.toHaveProperty('current');
+        const apple = subs.appStore!;
+        // Levels on the last day: 11 + 4 paid plans and 3 trials; billing retry apart; churned left out.
+        expect(apple.current).toMatchObject({
+          activeSubscriptions: 18,
+          paidPlans: 15,
+          freeTrials: 3,
+          billingRetry: 1,
+          trialStarts: 4,
+          trialConversions: 2,
+          paidStarts: 1,
+          renewals: 5,
+          voluntaryChurn: 2,
+          involuntaryChurn: 1,
+          churn: 3,
+          refunds: 1,
+          trialConversionRate: 0.5,
+        });
+        expect(apple.previous).toMatchObject({ activeSubscriptions: 0, trialStarts: 0 });
+        expect(apple.products.map((x) => [x.product, x.activeSubscriptions, x.trialStarts])).toEqual([
+          ['Pro Monthly', 14, 4],
+          ['Pro Annual', 4, 0],
+        ]);
+        expect(apple.offerTypes.map((x) => [x.offerType, x.activeSubscriptions])).toEqual([
+          ['none', 15],
+          ['free_trial', 3],
+        ]);
+        expect(apple.territories.map((x) => [x.territory, x.activeSubscriptions, x.paidStarts])).toEqual([
+          ['US', 14, 0],
+          ['DE', 4, 0],
+          ['GB', 0, 1],
+        ]);
+        expect(apple.sources.find((x) => x.source === 'search')).toMatchObject({ trialStarts: 3, trialConversions: 2, renewals: 5 });
+        expect(apple.sources.find((x) => x.source === 'web_referrer')).toMatchObject({ trialStarts: 1 });
+        expect(apple.series.map((x) => [x.date, x.activeSubscriptions, x.trialStarts])).toEqual([
+          ['2026-10-17', 10, 0],
+          ['2026-10-18', 18, 4],
+        ]);
+        // Filters: an offer type and a storefront.
+        const trials = await appSubscriptions(ctx, {
+          app: APP.id,
+          store: 'apple',
+          start: '2026-10-12',
+          end: '2026-10-18',
+          offerType: 'free_trial',
+        });
+        expect(trials.appStore!.current).toMatchObject({ activeSubscriptions: 3, trialStarts: 4, renewals: 0 });
+        const gb = await appSubscriptions(ctx, { app: APP.id, store: 'apple', start: '2026-10-12', end: '2026-10-18', territory: 'gb' });
+        expect(gb.appStore!.current).toMatchObject({ activeSubscriptions: 0, paidStarts: 1 });
+        // Both stores: Google Play keeps its top-level fields, the App Store is under appStore.
+        const both = await appSubscriptions(ctx, { app: APP.id, start: '2026-10-12', end: '2026-10-18' });
+        expect(both.current).toBeDefined();
+        expect(both.appStore!.current.activeSubscriptions).toBe(18);
+        // A newer instance replaces the days it covers as a whole.
+        await store.writeAppSubscriptionMetrics(APP.id, {
+          kind: 'state',
+          dates: ['2026-10-18'],
+          rows: [
+            {
+              date: '2026-10-18',
+              metric: 'full_price',
+              metricGroup: 'paid_plans',
+              product: 'Pro Monthly',
+              offerType: '',
+              territory: 'US',
+              source: '*',
+              count: 12,
+            },
+          ],
+        });
+        const again = await appSubscriptions(ctx, { app: APP.id, store: 'apple', start: '2026-10-12', end: '2026-10-18' });
+        expect(again.appStore!.current).toMatchObject({ activeSubscriptions: 12, freeTrials: 0, billingRetry: 0, trialStarts: 4 });
+      });
+
       it('looks for report kinds added since the last listing right away', async () => {
         const cfg = config({ APP_STORE_PUBLIC_DATA: 'false' });
         const today = '2026-10-20';
@@ -1172,7 +1317,10 @@ export function appContract(name: string, makeStore: () => Promise<Store>): void
         const ctx = { store, config: cfg, clients: {}, now: () => NOW };
         const perf = await appPerformance(ctx, { app: APP.id, store: 'play', start: '2026-10-01', end: '2026-10-19' });
         expect(perf.stores[0]).toMatchObject({ currency: null, current: { installs: 16, proceeds: 0 } });
-        expect((await appSubscriptions(ctx, { app: APP.id, start: '2026-10-01', end: '2026-10-19' })).current.activeSubscriptions).toBe(0);
+        expect(
+          (await appSubscriptions(ctx, { app: APP.id, store: 'play', start: '2026-10-01', end: '2026-10-19' })).current!
+            .activeSubscriptions,
+        ).toBe(0);
       });
 
       it('syncs the rest of Google Play when the financial files can be listed but not read', async () => {

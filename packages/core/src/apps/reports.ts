@@ -19,6 +19,8 @@ import {
   type AppStoreDailyInput,
   type AppStoreMetric,
   type AppSubscriptionInput,
+  type AppSubscriptionMetricInput,
+  type AppSubscriptionMetricKind,
   type AppVitalsInput,
   type IsoDate,
 } from '../types.js';
@@ -502,6 +504,53 @@ export function crashesCollector(): ReportCollector {
   };
 }
 
+/** `Free Trial Starts` → `free_trial_starts` (Apple's metric names, offer types and groupings). */
+export function slug(value: string): string {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_|_$/g, '')
+    .slice(0, 80);
+}
+
+/**
+ * App Store Subscription State or Event (Standard): counts per day, metric, subscription, offer
+ * type, territory and (events only) download source. States are kept without the source: they are
+ * levels of every subscription, many rows a day, and the events already tie starts and churn to it.
+ */
+export function subscriptionMetricsCollector(kind: AppSubscriptionMetricKind): ReportCollector {
+  const rows = new Map<string, AppSubscriptionMetricInput>();
+  const days = new Set<IsoDate>();
+  const col = columns();
+  return {
+    add(row) {
+      const date = cellDate(kind === 'event' ? col(row, 'event date', 'date') : col(row, 'date'));
+      if (!date) return;
+      days.add(date);
+      const metric = slug(kind === 'event' ? col(row, 'event sub type') : col(row, 'state metric'));
+      if (!metric) return;
+      const count = num(col(row, 'counts', 'count'));
+      if (!count) return;
+      const metricGroup = slug(kind === 'event' ? col(row, 'event grouping') : col(row, 'state metric grouping'));
+      const product = (col(row, 'subscription name').trim() || col(row, 'subscription identifier').trim() || '-').slice(0, 120);
+      const offerType = slug(col(row, 'offer type'));
+      const territory = normalizeTerritory(col(row, 'territory'));
+      const source = kind === 'event' ? normalizeAppSource(col(row, 'app download source type')) : ALL_KEY;
+      const key = [date, metric, metricGroup, product, offerType, territory, source].join('|');
+      const e = rows.get(key) ?? { date, metric, metricGroup, product, offerType, territory, source, count: 0 };
+      e.count += count;
+      rows.set(key, e);
+    },
+    async write(store, appId, before) {
+      const dates = coveredDays(days, before);
+      if (dates.length === 0) return { written: 0, oldest: null };
+      const written = await store.writeAppSubscriptionMetrics(appId, { kind, dates, rows: keep(rows.values(), before) });
+      return { written, oldest: dates[0]! };
+    },
+  };
+}
+
 // ------------------------------------------------------------------ Google Play
 
 /** Store performance by country: store listing visitors and acquisitions per territory. */
@@ -753,7 +802,7 @@ export const ASC_REPORTS: readonly AscReportSpec[] = [
   {
     key: 'purchases',
     label: 'App Store Purchases',
-    match: (n) => has(n, /\bpurchases\b/i, /standard/i) && !/pre-?order/i.test(n),
+    match: (n) => has(n, /\bpurchases\b/i, /standard/i) && !/pre-?order|subscription/i.test(n),
     collector: purchasesCollector,
   },
   {
@@ -761,6 +810,18 @@ export const ASC_REPORTS: readonly AscReportSpec[] = [
     label: 'App Sessions',
     match: (n) => has(n, /\bsessions\b/i, /standard/i),
     collector: sessionsCollector,
+  },
+  {
+    key: 'subscription_state',
+    label: 'App Store Subscription State',
+    match: (n) => has(n, /subscription state/i, /standard/i),
+    collector: () => subscriptionMetricsCollector('state'),
+  },
+  {
+    key: 'subscription_event',
+    label: 'App Store Subscription Event',
+    match: (n) => has(n, /subscription event/i, /standard/i),
+    collector: () => subscriptionMetricsCollector('event'),
   },
   {
     key: 'engagement_referrers',

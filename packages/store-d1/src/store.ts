@@ -61,6 +61,9 @@ import {
   type WebAnalyticsInput,
   type WebVitalsInput,
   type AppSubscriptionInput,
+  type AppSubscriptionMetricQuery,
+  type AppSubscriptionMetricRow,
+  type AppSubscriptionMetricWrite,
   type AppSubscriptionQuery,
   type AppSubscriptionRow,
   type AppEarningsInput,
@@ -1943,6 +1946,100 @@ export class D1Store implements Store {
     }));
   }
 
+  async writeAppSubscriptionMetrics(appId: string, w: AppSubscriptionMetricWrite): Promise<number> {
+    const kind = allow([w.kind], ['state', 'event'] as const, 'subscription metric kind')[0]!;
+    const agg = new Map<string, { d: string; m: string; g: string; p: string; o: string; t: string; s: string; c: number }>();
+    for (const r of w.rows) {
+      const key = [r.date, r.metric, r.metricGroup, r.product, r.offerType, r.territory, r.source].join('|');
+      const e = agg.get(key) ?? {
+        d: r.date,
+        m: r.metric,
+        g: r.metricGroup,
+        p: r.product,
+        o: r.offerType,
+        t: r.territory,
+        s: r.source,
+        c: 0,
+      };
+      e.c += Math.round(r.count);
+      agg.set(key, e);
+    }
+    const days = [...new Set([...w.dates, ...[...agg.values()].map((x) => x.d)])];
+    if (days.length === 0) return 0;
+    const rows = [...agg.values()].filter((x) => x.c !== 0);
+    // A newer report replaces its days as a whole: rows it no longer lists go.
+    await this.batch([
+      ...chunks(days).map((group) =>
+        this.db
+          .prepare(
+            `DELETE FROM app_subscription_metrics_daily WHERE app_id = ?1 AND store = 'apple' AND kind = ?2 AND date IN (SELECT value FROM json_each(?3))`,
+          )
+          .bind(appId, kind, JSON.stringify(group)),
+      ),
+      ...chunks(rows).map((group) =>
+        this.db
+          .prepare(
+            `INSERT INTO app_subscription_metrics_daily (app_id, store, kind, date, metric, metric_group, product, offer_type, territory, source, count)
+             SELECT ?1, 'apple', ?2, j.value->>'d', j.value->>'m', j.value->>'g', j.value->>'p', j.value->>'o', j.value->>'t', j.value->>'s', j.value->>'c'
+             FROM json_each(?3) j WHERE true`,
+          )
+          .bind(appId, kind, JSON.stringify(group)),
+      ),
+    ]);
+    return rows.length;
+  }
+
+  async queryAppSubscriptionMetrics(q: AppSubscriptionMetricQuery): Promise<AppSubscriptionMetricRow[]> {
+    const kind = allow([q.kind], ['state', 'event'] as const, 'subscription metric kind')[0]!;
+    const dims = allow(
+      [...new Set(q.dimensions)],
+      ['date', 'metric', 'metricGroup', 'product', 'offerType', 'territory', 'source'] as const,
+      'dimension',
+    );
+    const column: Record<(typeof dims)[number], string> = {
+      date: 'date',
+      metric: 'metric',
+      metricGroup: 'metric_group',
+      product: 'product',
+      offerType: 'offer_type',
+      territory: 'territory',
+      source: 'source',
+    };
+    const binds: Bind[] = [q.appId, kind, q.range.start, q.range.end];
+    const where = ['app_id = ?1', `store = 'apple'`, 'kind = ?2', 'date >= ?3', 'date <= ?4'];
+    for (const [value, col] of [
+      [q.product, 'product'],
+      [q.territory, 'territory'],
+      [q.offerType, 'offer_type'],
+      [q.source, 'source'],
+    ] as const) {
+      if (value === undefined) continue;
+      binds.push(value);
+      where.push(`${col} = ?${binds.length}`);
+    }
+    const filter = where.join(' AND ');
+    // States are levels: per date that day's, otherwise the range's last day with data.
+    const count =
+      kind === 'event' || dims.includes('date')
+        ? 'SUM(count)'
+        : `SUM(CASE WHEN date = (SELECT MAX(date) FROM app_subscription_metrics_daily WHERE ${filter}) THEN count ELSE 0 END)`;
+    const cols = dims.map((d) => `${column[d]} AS ${d}`);
+    const rows = await this.all<Record<string, string | number | null>>(
+      `SELECT ${cols.map((c) => `${c}, `).join('')}${count} AS count
+       FROM app_subscription_metrics_daily WHERE ${filter}
+       ${dims.length ? `GROUP BY ${dims.map((d) => column[d]).join(', ')}` : ''}
+       HAVING COUNT(*) > 0
+       ORDER BY ${dims.includes('date') ? 'date ASC, ' : ''}count DESC${dims.length ? `, ${dims.map((d) => column[d]).join(', ')}` : ''}
+       LIMIT ${Math.max(1, Math.min(10000, Math.floor(q.limit ?? 5000)))}`,
+      ...binds,
+    );
+    return rows.map((r) => {
+      const out: AppSubscriptionMetricRow = { count: Number(r.count) || 0 };
+      for (const d of dims) if (r[d] != null) out[d] = String(r[d]);
+      return out;
+    });
+  }
+
   async queryAppChartRanks(appId: string, range: DateRange): Promise<AppChartRankInput[]> {
     const rows = await this.all<AppChartRankInput>(
       `SELECT date, territory, chart, genre, rank FROM app_chart_ranks WHERE app_id = ?1 AND date >= ?2 AND date <= ?3
@@ -1971,6 +2068,7 @@ export class D1Store implements Store {
       ['reviews', 'app_reviews', true],
       ['vitals', 'app_vitals', true],
       ['subscriptions', 'app_subscriptions_daily', false],
+      ['subscription_metrics', 'app_subscription_metrics_daily', true],
     ];
     for (const id of ids) {
       const results = await this.db.batch(

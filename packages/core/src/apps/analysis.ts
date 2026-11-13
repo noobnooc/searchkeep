@@ -554,20 +554,117 @@ export async function appBreakdown(ctx: OpsContext, p: AppBreakdownParams) {
   };
 }
 
-export interface AppSubscriptionsParams extends Omit<AppParams, 'store'> {
+export interface AppSubscriptionsParams extends AppParams {
   product?: string;
   territory?: string;
+  /** App Store only: an offer type (`free_trial`, `pay_up_front`, `pay_as_you_go`, ...; empty string for none). */
+  offerType?: string;
 }
 
-/**
- * Google Play subscriptions (ADR 0010): new, canceled and active subscriptions per product and
- * country over the range, against the previous period, with the daily trend.
- */
-export async function appSubscriptions(ctx: OpsContext, p: AppSubscriptionsParams) {
-  const r = await resolveApp(ctx, { ...p, store: 'play' }, { days: 28, limit: 50 });
-  if (!r.app.playPackage)
-    throw new SearchkeepError('bad_request', 'This app has no Google Play package; subscriptions come from Google Play.');
-  const prev = previousPeriod(r.range);
+interface MetricMatch {
+  metrics?: string[];
+  groups?: string[];
+  prefix?: string;
+}
+
+type AppleEventName =
+  | 'trialStarts'
+  | 'paidOfferStarts'
+  | 'trialConversions'
+  | 'paidOfferConversions'
+  | 'paidStarts'
+  | 'renewals'
+  | 'voluntaryChurn'
+  | 'involuntaryChurn'
+  | 'refunds'
+  | 'enteredBillingIssue'
+  | 'recoveredFromBillingIssue';
+type AppleStateName = 'activeSubscriptions' | 'freeTrials' | 'paidOffers' | 'paidPlans' | 'gracePeriod' | 'billingRetry' | 'suspended';
+
+/** App Store subscription event sub types and groupings (slugs) summed into each summary figure. */
+const APPLE_EVENTS: Record<AppleEventName, MetricMatch> = {
+  trialStarts: { metrics: ['free_trial_starts'] },
+  paidOfferStarts: { metrics: ['paid_offer_starts'] },
+  trialConversions: { metrics: ['full_price_from_free_trial', 'contingent_price_from_free_trial'] },
+  paidOfferConversions: { metrics: ['full_price_from_paid_offer', 'contingent_price_from_paid_offer'] },
+  paidStarts: { metrics: ['full_price_subscription_starts', 'contingent_price_subscription_starts'] },
+  renewals: { groups: ['renewals'] },
+  voluntaryChurn: { groups: ['voluntary_churn'] },
+  involuntaryChurn: { groups: ['involuntary_churn'] },
+  refunds: { prefix: 'refunds_' },
+  enteredBillingIssue: { groups: ['entered_billing_issue'] },
+  recoveredFromBillingIssue: { groups: ['recoveries_from_billing_issue'] },
+};
+/** App Store subscription states (levels) per summary figure; churned states are 2-year totals and left out. */
+const APPLE_STATES: Record<AppleStateName, MetricMatch> = {
+  activeSubscriptions: { groups: ['subscription_offers', 'paid_plans'] },
+  freeTrials: { metrics: ['free_trials'] },
+  paidOffers: { metrics: ['paid_offers'] },
+  paidPlans: { groups: ['paid_plans'] },
+  gracePeriod: { metrics: ['grace_period'] },
+  billingRetry: { metrics: ['billing_retry'] },
+  suspended: { metrics: ['suspended'] },
+};
+
+interface MetricRow {
+  metric?: string;
+  metricGroup?: string;
+  date?: string;
+  product?: string;
+  offerType?: string;
+  territory?: string;
+  source?: string;
+  count: number;
+}
+
+const matches = (d: MetricMatch, r: MetricRow) =>
+  Boolean(
+    d.metrics?.includes(r.metric ?? '') || d.groups?.includes(r.metricGroup ?? '') || (d.prefix && (r.metric ?? '').startsWith(d.prefix)),
+  );
+
+function sumBy<K extends string>(defs: Record<K, MetricMatch>, rows: MetricRow[]): Record<K, number> {
+  const out = {} as Record<K, number>;
+  for (const name of Object.keys(defs) as K[]) {
+    let total = 0;
+    for (const r of rows) if (matches(defs[name], r)) total += r.count;
+    out[name] = total;
+  }
+  return out;
+}
+
+type AppleSummary = Record<AppleEventName | AppleStateName | 'churn', number> & { trialConversionRate: number | null };
+
+function appleSummary(events: MetricRow[], states: MetricRow[]): AppleSummary {
+  const e = sumBy(APPLE_EVENTS, events);
+  const st = sumBy(APPLE_STATES, states);
+  return {
+    ...st,
+    ...e,
+    churn: e.voluntaryChurn + e.involuntaryChurn,
+    // Conversions ÷ trial starts in the same period: a rough rate, not a cohort.
+    trialConversionRate: e.trialStarts > 0 ? round(e.trialConversions / e.trialStarts, 4) : null,
+  };
+}
+
+type GroupKey = 'date' | 'product' | 'offerType' | 'territory' | 'source';
+
+/** Rows grouped by a key (plus metric and grouping) → one summary per value of the key. */
+function groupSummaries(key: GroupKey, events: MetricRow[], states: MetricRow[]): Array<AppleSummary & { value: string }> {
+  const by = new Map<string, { events: MetricRow[]; states: MetricRow[] }>();
+  const at = (v: string) => {
+    let e = by.get(v);
+    if (!e) by.set(v, (e = { events: [], states: [] }));
+    return e;
+  };
+  for (const r of events) at(r[key] ?? '').events.push(r);
+  for (const r of states) at(r[key] ?? '').states.push(r);
+  return [...by].map(([value, x]) => ({ value, ...appleSummary(x.events, x.states) }));
+}
+
+const APPLE_SUBSCRIPTION_NOTE =
+  "App Store (appStore): Apple's Subscription State report gives levels (activeSubscriptions = free trials, paid offers and paid plans; billing retry, grace period and suspended are listed apart; churned subscriptions are left out) on the last day with data; the Subscription Event report gives counts summed over the range (trialConversions = trials converted to full or contingent price; renewals = all renewals; churn = voluntary + involuntary; refunds = refunds requested). Sources are where the subscriber first downloaded the app (events only). Data is complete about 3 days after a day ends; history goes back to January 1, 2025 through the one-time snapshot.";
+
+async function playSubscriptions(ctx: OpsContext, r: ResolvedApp, p: AppSubscriptionsParams, prev: DateRange) {
   const q = {
     appId: r.app.id,
     ...(p.product ? { product: p.product.trim() } : {}),
@@ -585,18 +682,121 @@ export async function appSubscriptions(ctx: OpsContext, p: AppSubscriptionsParam
     const t = x ?? none;
     return { ...none, ...t, net: t.newSubscriptions - t.canceledSubscriptions };
   };
+  // Google Play keeps the top-level fields it has always had.
   return {
-    app: r.app.id,
-    range: r.range,
-    previousRange: prev,
     current: total(current[0]),
     previous: total(previous[0]),
     products: products.map((x) => ({ ...x, net: x.newSubscriptions - x.canceledSubscriptions })),
     territories: territories.map((x) => ({ ...x, net: x.newSubscriptions - x.canceledSubscriptions })),
     series,
-    notes: [
-      'Google Play subscription statistics: new and canceled subscriptions are summed over the range; active subscriptions are those on the last day with data. They need the service account to view financial data.',
-    ],
+  };
+}
+
+async function appleSubscriptions(ctx: OpsContext, r: ResolvedApp, p: AppSubscriptionsParams, prev: DateRange) {
+  const q = {
+    appId: r.app.id,
+    ...(p.product ? { product: p.product.trim() } : {}),
+    ...(p.territory ? { territory: p.territory.trim().toUpperCase() } : {}),
+    ...(p.offerType !== undefined ? { offerType: p.offerType.trim().toLowerCase() } : {}),
+  };
+  const md = ['metric', 'metricGroup'] as const;
+  const ev = (range: DateRange, extra: Array<'date' | 'product' | 'offerType' | 'territory' | 'source'> = []) =>
+    ctx.store.queryAppSubscriptionMetrics({ ...q, kind: 'event', range, dimensions: [...extra, ...md], limit: 10000 });
+  const st = (range: DateRange, extra: Array<'date' | 'product' | 'offerType' | 'territory'> = []) =>
+    ctx.store.queryAppSubscriptionMetrics({ ...q, kind: 'state', range, dimensions: [...extra, ...md], limit: 10000 });
+  const [evCur, evPrev, stCur, stPrev, evDays, stDays, evProd, stProd, evOffer, stOffer, evTerr, stTerr, evSrc] = await Promise.all([
+    ev(r.range),
+    ev(prev),
+    st(r.range),
+    st(prev),
+    ev(r.range, ['date']),
+    st(r.range, ['date']),
+    ev(r.range, ['product']),
+    st(r.range, ['product']),
+    ev(r.range, ['offerType']),
+    st(r.range, ['offerType']),
+    ev(r.range, ['territory']),
+    st(r.range, ['territory']),
+    ev(r.range, ['source']),
+  ]);
+  const rank = (xs: Array<AppleSummary & { value: string }>) =>
+    xs
+      .sort((a, b) => b.activeSubscriptions - a.activeSubscriptions || b.trialStarts + b.paidStarts - (a.trialStarts + a.paidStarts))
+      .slice(0, r.limit);
+  const as = <K extends string>(k: K, xs: Array<AppleSummary & { value: string }>) =>
+    xs.map(({ value, ...x }) => ({ [k]: value, ...x }) as AppleSummary & Record<K, string>);
+  const hasData = evCur.length > 0 || stCur.length > 0;
+  const result = {
+    current: appleSummary(evCur, stCur),
+    previous: appleSummary(evPrev, stPrev),
+    products: as('product', rank(groupSummaries('product', evProd, stProd))),
+    offerTypes: as(
+      'offerType',
+      rank(groupSummaries('offerType', evOffer, stOffer)).map((x) => ({ ...x, value: x.value || 'none' })),
+    ),
+    territories: as('territory', rank(groupSummaries('territory', evTerr, stTerr))),
+    sources: rank(groupSummaries('source', evSrc, [])).map((x) => ({
+      source: x.value,
+      trialStarts: x.trialStarts,
+      paidOfferStarts: x.paidOfferStarts,
+      paidStarts: x.paidStarts,
+      trialConversions: x.trialConversions,
+      renewals: x.renewals,
+      churn: x.churn,
+      refunds: x.refunds,
+    })),
+    series: as(
+      'date',
+      groupSummaries('date', evDays, stDays).sort((a, b) => a.value.localeCompare(b.value)),
+    ),
+    events: evCur
+      .map((x) => ({ metric: x.metric, metricGroup: x.metricGroup, count: x.count }))
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 100),
+  };
+  return { result, hasData };
+}
+
+/**
+ * Subscriptions per store. Google Play (ADR 0010): new, canceled and active subscriptions per
+ * product and country. App Store: subscription states (active, trials, offers, billing retry,
+ * grace period) and lifecycle events (trial starts and conversions, paid starts, renewals,
+ * voluntary and involuntary churn, refunds) per subscription, offer type, storefront and download
+ * source. Both against the previous period of the same length, with the daily trend.
+ */
+export async function appSubscriptions(ctx: OpsContext, p: AppSubscriptionsParams) {
+  const r = await resolveApp(ctx, p, { days: 28, limit: 50 });
+  const stores = storesOf(r.app, r.store);
+  const prev = previousPeriod(r.range);
+  const notes: string[] = [...r.notes];
+  let play: Awaited<ReturnType<typeof playSubscriptions>> | undefined;
+  let appStore: Awaited<ReturnType<typeof appleSubscriptions>> | undefined;
+
+  if (stores.includes('play')) {
+    play = await playSubscriptions(ctx, r, p, prev);
+    notes.push(
+      'Google Play subscription statistics (top-level current, previous, products, territories, series): new and canceled subscriptions are summed over the range; active subscriptions are those on the last day with data. They need the service account to view financial data.',
+    );
+  }
+  if (stores.includes('apple')) {
+    appStore = await appleSubscriptions(ctx, r, p, prev);
+    notes.push(APPLE_SUBSCRIPTION_NOTE);
+    if (!appStore.hasData)
+      notes.push(
+        'App Store: no subscription data in this range yet. The reports come with the App Store reports already started for the app (no new permission); the first ones appear a day or two after this version syncs, history through the next monthly snapshot (Settings → Apps).',
+      );
+  }
+  if (p.product) notes.push('Product filters by the Google Play product id and by the App Store subscription name.');
+  notes.push(
+    'Subscription revenue split into new and renewal is not in these reports. Install retention and subscriber cohorts are offered by neither store: use your own app analytics or a subscription platform for those.',
+  );
+  return {
+    app: r.app.id,
+    range: r.range,
+    previousRange: prev,
+    ...(play ?? {}),
+    ...(appStore ? { appStore: appStore.result } : {}),
+    notes,
   };
 }
 

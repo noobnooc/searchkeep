@@ -26,6 +26,16 @@ Because users sync `main` at any time, the `Unreleased` section is always accura
 
 ### Added
 
+- App Store subscriptions. The sync reads Apple's App Store Subscription State and Subscription
+  Event reports (Standard), which the App Store report requests already produce: active
+  subscriptions, free trials, paid offers, billing retry, grace period and suspended
+  subscriptions per day, and trial starts, trial conversions, paid starts, renewals, voluntary and
+  involuntary churn and refunds per subscription, offer type, storefront and (for events) the
+  source the subscriber first downloaded the app from. History goes back to January 1, 2025 through
+  the one-time snapshot. `app_subscriptions` (MCP and `/api/app-subscriptions`) takes a `store`
+  and an `offerType` parameter and returns the App Store under `appStore`; Google Play keeps its
+  top-level fields. Nothing to set up.
+
 - App numbers per app version, device and OS version
   ([ADR 0010](docs/adr/0010-app-revenue-and-engagement.md)): Google Play installs, uninstalls,
   active devices, ratings, crashes and ANRs from the Play Console's per-version, per-device and

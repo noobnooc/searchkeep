@@ -298,7 +298,8 @@ cloudflared access curl "https://searchkeep.example.com/api/import/ai-citations?
   revoke it. The daily sync reads the reports with a <strong>Sales and Reports</strong> key: App Store Discovery and
   Engagement, App Downloads and App Store Installation and Deletion (Standard, for counts), their Detailed versions (only
   for the referring websites and apps), App Crashes, App Store Purchases (purchases, proceeds and sales in USD, paying
-  users) and App Sessions (sessions and their length, from people who share analytics), plus customer reviews. Revenue
+  users), App Sessions (sessions and their length, from people who share analytics) and App Store Subscription State
+  and Event (active subscriptions, trials, renewals, churn and refunds per subscription, offer and source), plus customer reviews. Revenue
   and sessions are attributed to the same sources and storefronts as downloads, so you see what each source brings. A
   one-time snapshot fills history back to January 2024. Data is complete 2-5 days after a day ends; the App Store
   reports no search terms.

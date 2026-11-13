@@ -469,17 +469,23 @@ export const TOOLS: Tool[] = [
   },
   {
     name: 'app_subscriptions',
-    summary: 'Google Play subscriptions per product and country, against the previous period.',
+    summary: 'Subscriptions on both stores per product, offer and country, against the previous period.',
     description:
-      'New, canceled and active Google Play subscriptions per product and country over the period, against the previous period, with the daily trend of active subscriptions. Comes from the Play Console’s subscription statistics and needs the service account to view financial data.',
+      'Google Play: new, canceled and active subscriptions per product and country (the Play Console’s subscription statistics; needs the service account to view financial data). App Store: active subscriptions, free trials, paid offers, billing retry and grace period, and trial starts, trial conversions, paid starts, renewals, churn and refunds per subscription, offer type, storefront and download source (Apple’s Subscription State and Event reports; nothing extra to set up). Both against the previous period, with the daily trend.',
     readOnly: true,
     params: [
       app,
+      appStore,
       start,
       end,
       days(28),
-      { name: 'product', type: 'string', description: 'Only this subscription product id.' },
+      { name: 'product', type: 'string', description: 'Only this subscription: Google Play product id or App Store subscription name.' },
       { name: 'territory', type: 'string', description: 'Only this country, e.g. `US`.' },
+      {
+        name: 'offerType',
+        type: 'string',
+        description: 'App Store only: `free_trial`, `pay_up_front`, `pay_as_you_go`, or empty for none.',
+      },
       limit(50),
     ],
     example: 'Which countries gained the most subscribers this month?',
