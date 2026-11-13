@@ -47,6 +47,7 @@ export const SOURCE_NAMES: Record<SourceId, string> = {
   asc: 'App Store Connect',
   play: 'Google Play',
   appstore: 'App Store public feeds',
+  appleads: 'Apple Ads',
 };
 
 /** Sync results and backoff entries of an app use this in place of a site id. */
@@ -98,6 +99,18 @@ export const syncKeys = {
   ascSnapshot: (app: string, report: string) => `app:asc:snap:${app}:${report}`,
   /** Customer reviews: newest review synced and how far the history went (`ReviewCursor`). */
   ascReviews: (app: string) => `app:asc:reviews:${app}`,
+  /** Sales and Trends of the vendor account (`AscSalesState`). */
+  ascSales: 'app:asc:sales',
+  /** App SKUs by Apple ID, refreshed daily (`{ day, skus }`), to split Sales and Trends rows between apps. */
+  ascSkus: 'app:asc:skus',
+  /** Day an app's store listing was last snapshotted, per store (`{ day, problem? }`). */
+  listingChecked: (app: string, store: 'apple' | 'play') => `app:listing:${store}:${app}`,
+  /** Google Play reviews read through the Android Publisher API (`{ checkedAt, problem? }`). */
+  playReviewsApi: (app: string) => `app:play:reviews-api:${app}`,
+  /** A review reply waiting for confirmation (`PendingReply`), by token. */
+  pendingReply: (token: string) => `reply:pending:${token}`,
+  /** Apple Ads sync state of an app (`AppleAdsState`). */
+  appleAds: (app: string) => `app:ads:${app}`,
   /** The Play Console report files of an app, listed once a day (`PlayListing`). */
   playListing: (app: string) => `app:play:list:${app}`,
   /** The financial files of an app (earnings of the account, its subscriptions), listed once a day (`PlayListing`). */
@@ -113,6 +126,26 @@ export const syncKeys = {
   backoff: 'sync:backoff',
   lastRun: 'sync:last_run',
 } as const;
+
+export interface AscSalesState {
+  /** Ids of the apps the cursor was read for. */
+  apps?: string[];
+  /** Newest day read (or found to have no sales). */
+  through?: IsoDate;
+  /** Oldest day read: history continues before it. */
+  from?: IsoDate;
+  /** The newest day was not out yet: not asked again before this time (ISO timestamp). */
+  waitUntil?: string;
+}
+
+export interface AppleAdsState {
+  checkedOn?: IsoDate;
+  /** Newest day of search terms and of impression share read. */
+  termsThrough?: IsoDate;
+  shareThrough?: IsoDate;
+  /** Why the last read failed (credentials refused). */
+  problem?: string;
+}
 
 export interface AppStorePublicPart {
   day: IsoDate;
@@ -227,6 +260,11 @@ export type AscRequestKind = 'ongoing' | 'snapshot';
 export interface AscPending {
   listedOn: IsoDate;
   instances: Array<{ id: string; processingDate: IsoDate }>;
+  /**
+   * Snapshot only: monthly instances Apple made for a report that has no daily ones (checked once).
+   * Searchkeep keeps days, so monthly-only history is reported, not stored.
+   */
+  monthly?: number;
 }
 
 export interface AscReportIds {

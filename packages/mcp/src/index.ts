@@ -13,6 +13,11 @@ import {
   appReviews,
   appSearchTerms,
   appBreakdown,
+  appRevenue,
+  appChanges,
+  appFrameworkReport,
+  appAds,
+  replyReview,
   appStability,
   appSubscriptions,
   listApps,
@@ -130,6 +135,11 @@ export const TOOL_NAMES = [
   'app_stability',
   'app_subscriptions',
   'app_breakdown',
+  'app_revenue',
+  'app_changes',
+  'app_framework_report',
+  'app_ads',
+  'reply_review',
 ] as const;
 
 /** Parameters shared by the app tools (ADR 0009). */
@@ -439,20 +449,27 @@ export function createSearchkeepMcpServer(deps: McpDeps): McpServer {
     {
       title: 'App store performance',
       description:
-        "An app's store funnel per store: impressions (App Store), page views (App Store product page views, Google Play store listing visitors), downloads (first-time downloads, store listing acquisitions), redownloads, installs, deletions, active devices and conversion rates, plus App Store revenue (purchases, proceeds and sales in USD, paying users, proceeds per download) and sessions (sessions, average length, sessions per device), compared with the previous period. groupBy adds rows by date, week, month, store, territory, source (search, browse, app_referrer, web_referrer, referral, ...) or referrer (websites, apps and UTM sources that sent people to the store page; ownSite marks the owner's own site). Institutional purchases (App Store licenses bought in bulk through Apple Business Manager or Apple School Manager) are left out of the totals and trends and listed only by source. Includes the App Store chart position when the opt-in public feeds are on.",
+        "An app's store funnel per store: impressions (App Store), page views (App Store product page views, Google Play store listing visitors), downloads (first-time downloads, store listing acquisitions), redownloads, installs, deletions, active devices and conversion rates, plus App Store revenue (purchases, proceeds and sales in USD, paying users, proceeds per download) and sessions (sessions, average length, sessions per device), compared with the previous period. groupBy adds rows by date, week, month, store, territory, source (search, browse, app_referrer, web_referrer, referral, ...) or referrer (websites, apps and UTM sources that sent people to the store page; ownSite marks the owner's own site), and App Store pages by page_type or page_title (custom product pages, in-app events). Institutional purchases (App Store licenses bought in bulk through Apple Business Manager or Apple School Manager) are left out of the totals, trends and rates unless includeVolumePurchases is true, and listed by source. anomalies lists days where a metric is at least 50 times the median of the 28 days before, with the territory and source behind most of it. Includes the App Store chart position when the opt-in public feeds are on.",
       inputSchema: {
         ...appCommon,
         store: appStore,
         groupBy: z
-          .array(z.enum(['date', 'week', 'month', 'store', 'territory', 'source', 'referrer']))
+          .array(z.enum(['date', 'week', 'month', 'store', 'territory', 'source', 'referrer', 'page_type', 'page_title']))
           .max(2)
           .optional()
-          .describe('Default: totals per store only.'),
+          .describe(
+            'Default: totals per store only. page_type / page_title list the App Store funnel per product page type, or per custom product page and in-app event (pages).',
+          ),
         territory: z.string().optional().describe('Only this territory, as the store reports it (e.g. US).'),
         source: z
           .string()
           .optional()
           .describe('Only this source: search, browse, app_referrer, web_referrer, referral, app_clip, notification, other.'),
+        includeChanges: z.boolean().optional().describe('Attach the store changes of each day to the series (default true).'),
+        includeVolumePurchases: z
+          .boolean()
+          .optional()
+          .describe('Count institutional purchases (bulk licenses) in the totals, trend and rates. Default false.'),
         referrerKind: z.enum(['web', 'app', 'utm']).optional().describe('With groupBy referrer: only websites, apps or UTM sources.'),
       },
       annotations: READ_ONLY,
@@ -502,7 +519,7 @@ export function createSearchkeepMcpServer(deps: McpDeps): McpServer {
     {
       title: 'App stability',
       description:
-        'Crash and ANR rates (Google Play, shares of daily users, with the user-perceived rates Google uses for its bad-behavior thresholds) and crash counts (App Store), per day or per app version.',
+        'Crash and ANR rates (Google Play, shares of daily users, with the user-perceived rates Google uses for its bad-behavior thresholds; crash and ANR counts from the monthly files) and crash counts (App Store: crashes with a crash log, and crashesExpanded for every crash on device), per day or per app version. The notes say why data is missing (minimum numbers of users).',
       inputSchema: {
         ...appCommon,
         store: appStore,
@@ -518,11 +535,16 @@ export function createSearchkeepMcpServer(deps: McpDeps): McpServer {
     {
       title: 'App subscriptions',
       description:
-        'Google Play subscriptions: new, canceled and active subscriptions per product and country over the period, against the previous period, with the daily trend. Needs the service account to view financial data.',
+        "Subscriptions per store against the previous period, with the daily trend. Google Play (top-level fields): new, canceled and active subscriptions per product and country; needs the service account to view financial data. App Store (appStore): active subscriptions, free trials, paid offers, billing retry and grace period (levels), and trial starts, trial conversions, paid starts, renewals, voluntary and involuntary churn and refunds (counts), per subscription, offer type, storefront and download source; from Apple's subscription reports, no extra permission.",
       inputSchema: {
         ...appCommon,
-        product: z.string().optional().describe('Only this subscription product id.'),
+        store: appStore,
+        product: z.string().optional().describe('Only this subscription: Google Play product id or App Store subscription name.'),
         territory: z.string().optional().describe('Only this country (e.g. US).'),
+        offerType: z
+          .string()
+          .optional()
+          .describe('App Store only: offer type, e.g. free_trial, pay_up_front, pay_as_you_go; empty string for no offer.'),
       },
       annotations: READ_ONLY,
     },
@@ -544,6 +566,111 @@ export function createSearchkeepMcpServer(deps: McpDeps): McpServer {
     },
     async (args) => run(() => appBreakdown(ctx, clean(args))),
   );
+
+  server.registerTool(
+    'app_revenue',
+    {
+      title: 'App revenue per product',
+      description:
+        "App Store revenue per product, against the previous period. analytics: Apple's USD estimate per product (in-app purchase or paid app) with refunds kept apart, always available. sales: with the ASC_VENDOR_NUMBER secret, exact units, proceeds and refunds per SKU in each proceeds currency (never added across currencies), and subscription proceeds split into first payments and renewals. refunds lists refunded products per day, newest first, to explain a negative revenue day.",
+      inputSchema: {
+        ...appCommon,
+        groupBy: z
+          .array(z.enum(['date', 'product', 'territory', 'type']))
+          .optional()
+          .describe('Group rows by these (default product). type = purchase type or product type (app, in_app, subscription).'),
+        product: z.string().optional().describe('Only this product: its name in App Store Connect, or its SKU.'),
+        territory: z.string().optional().describe('Only this storefront (e.g. US).'),
+      },
+      annotations: READ_ONLY,
+    },
+    async (args) => run(() => appRevenue(ctx, clean(args))),
+  );
+
+  server.registerTool(
+    'app_changes',
+    {
+      title: 'App store changes',
+      description:
+        "What changed on the app's store presence and when, from daily snapshots: App Store versions going on sale or into review, phased releases, names, subtitles, keywords, descriptions, promotional text and release notes per locale; Google Play titles, descriptions, track releases, rollouts and release notes (opt-in). Each change has the value before and after. Use it to explain a jump or drop in app_performance (whose series also lists each day's changes).",
+      inputSchema: {
+        ...appCommon,
+        end: date.optional().describe('End date (YYYY-MM-DD). Defaults to today.'),
+        days: z.number().int().min(1).max(3660).optional().describe('Days back from end. Default 90.'),
+        store: appStore,
+        entity: z
+          .string()
+          .optional()
+          .describe('version, listing, app_info (App Store), listing, track (Google Play), or an exact entity such as listing:IOS.'),
+        field: z
+          .string()
+          .optional()
+          .describe('e.g. keywords, subtitle, name, description, promotional_text, whats_new, live, title, releases.'),
+        locale: z.string().optional().describe('Locale or language, e.g. en-US.'),
+      },
+      annotations: READ_ONLY,
+    },
+    async (args) => run(() => appChanges(ctx, clean(args))),
+  );
+
+  server.registerTool(
+    'app_framework_report',
+    {
+      title: 'App framework report',
+      description:
+        "One of the app's chosen Framework Usage reports from App Store Connect Analytics (e.g. Notification Summary Engagement, App Added to Focus, Mode Activity Notifications, Call Services and Call Performance), grouped by any of its dimensions or by date, with its metrics summed. Reports are chosen per app in Settings → Apps (frameworkReports); the answer lists the report's dimensions and metrics.",
+      inputSchema: {
+        ...appCommon,
+        report: z.string().min(1).describe('The report name as chosen for the app.'),
+        groupBy: z
+          .array(z.string())
+          .max(3)
+          .optional()
+          .describe('Dimension columns as the report names them (lower case), and/or date. Default: totals.'),
+        filters: z.record(z.string(), z.string()).optional().describe('Only rows whose dimension (column name) has this value.'),
+      },
+      annotations: READ_ONLY,
+    },
+    async (args) => run(() => appFrameworkReport(ctx, clean(args))),
+  );
+
+  server.registerTool(
+    'app_ads',
+    {
+      title: 'Apple Ads search terms',
+      description:
+        "Search terms of the user's own Apple Ads campaigns (impressions, taps, installs, spend, tap-through and install rates, cost per install) with the app's impression share, rank and Apple's search popularity (1-5) per term and storefront: keyword-level App Store data that Apple's analytics reports lack. Answers configured: false with the setup steps when the Apple Ads credentials are not set. Organic keyword rankings are not available from any official API.",
+      inputSchema: {
+        ...appCommon,
+        end: date.optional().describe('End date (YYYY-MM-DD). Defaults to yesterday.'),
+        termContains: z.string().optional().describe('Only terms containing this text.'),
+        territory: z.string().optional().describe('Impression share of this storefront only (e.g. US).'),
+        sortBy: z.enum(['impressions', 'installs', 'spend', 'popularity']).optional().describe('Default impressions.'),
+      },
+      annotations: { ...READ_ONLY, openWorldHint: false },
+    },
+    async (args) => run(() => appAds(ctx, clean(args))),
+  );
+
+  if (ctx.config.enableWrites) {
+    server.registerTool(
+      'reply_review',
+      {
+        title: 'Reply to a review',
+        description:
+          'Replies to an App Store or Google Play review. Writes to an external system (the reply is public and the reviewer is notified); only with ENABLE_WRITES. Two steps: call without confirmToken to get a preview and a token (nothing is posted); show the reply to the user and get their explicit confirmation; then call again with the same arguments plus confirmToken (valid 15 minutes) to post. Review ids come from app_reviews. App Store replies need ASC_REPLY_KEY_ID/ASC_REPLY_PRIVATE_KEY (Customer Support role); Google Play replies need PLAY_REVIEWS_API and "Reply to reviews" (at most 350 characters).',
+        inputSchema: {
+          app: appCommon.app,
+          store: z.enum(['apple', 'play']).describe('apple = App Store, play = Google Play.'),
+          reviewId: z.string().min(1).describe('The review id from app_reviews.'),
+          text: z.string().min(1).max(5970).describe('The reply, plain text.'),
+          confirmToken: z.string().optional().describe('From the preview, after the user confirmed. Without it nothing is posted.'),
+        },
+        annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+      },
+      async (args) => run(() => replyReview(ctx, clean(args))),
+    );
+  }
 
   return server;
 }

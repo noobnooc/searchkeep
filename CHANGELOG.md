@@ -26,6 +26,128 @@ Because users sync `main` at any time, the `Unreleased` section is always accura
 
 ### Added
 
+- Apple Ads search terms (optional). With the credentials of an Apple Ads API user
+  (`APPLE_ADS_CLIENT_ID`, `APPLE_ADS_TEAM_ID`, `APPLE_ADS_KEY_ID`, `APPLE_ADS_PRIVATE_KEY`; optional
+  `APPLE_ADS_ACCOUNT_ID`), the sync reads once a day, through the Apple Ads Platform API, the search
+  terms of the campaigns that promote each app (impressions, taps, installs, spend; 90 days the first
+  time) and the app's impression share, rank and search popularity per term and storefront (30 days
+  the first time). The older Campaign Management API, which Apple sunsets on January 26, 2027, is not
+  used. New package `@searchkeep/source-apple-ads` (no dependency: ES256 client secrets are signed
+  with WebCrypto) and new read-only MCP tool and API `app_ads`; without credentials it answers
+  `configured: false` with the setup steps, and `app_search_terms` says the same for App Store
+  terms. `setup_status` gains `config.apple_ads` and `probe.apple_ads`, which warns when the API
+  user's role could change campaigns.
+
+  #### Upgrade notes
+  - Optional: to use `app_ads`, invite an API user with the **API Account Read Only** role in
+    ads.apple.com, upload its public key under Account Settings → API, and set the four
+    `APPLE_ADS_*` secrets (see docs/deploy.md step 14a). Skipping it changes nothing else.
+
+- App Store Framework Usage reports per app. An app can name up to 10 Framework Usage reports of
+  App Store Connect Analytics (`frameworkReports` in `APPS` or **Settings** → **Apps**), for example
+  Notification Summary Engagement or App Added to Focus. The sync reads them from the existing
+  report requests and keeps, per day, each combination of their dimensions with the metric columns
+  summed (at most 200 a day, the rest as "Other"). New read-only MCP tool and API
+  `app_framework_report` groups any of them by date or any dimension. Nothing else to set up.
+
+- Fresher reviews and review replies. App Store reviews are read every 4 hours (and marked replied
+  when they have a developer response). With the opt-in `PLAY_REVIEWS_API=true`, Google Play reviews
+  of the last week are read every 4 hours through the Android Publisher API, ahead of the monthly
+  files (no reviewer names are kept). New write tool `reply_review`, registered only with
+  `ENABLE_WRITES=true`: the first call shows a preview and returns a confirmation token, nothing is
+  posted; the second call with the token (valid 15 minutes, single use) posts. App Store replies use a
+  separate key with the Customer Support role (`ASC_REPLY_KEY_ID`, `ASC_REPLY_PRIVATE_KEY`), never the
+  Sales and Reports key; Google Play replies use the reviews API. `setup_status` gains
+  `config.play_reviews_api`, `probe.play_reviews` and, with writes on, `config.review_replies`.
+
+  #### Upgrade notes
+  - Nothing to do for App Store reviews.
+  - Optional, Google Play reviews within hours: set `PLAY_REVIEWS_API` to `true` and grant the
+    service account **Reply to reviews** for the app in the Play Console (Google offers no read-only
+    permission for this API). Skipping it keeps the monthly files.
+  - Optional, replies: with `ENABLE_WRITES=true`, create an App Store Connect API key with the
+    **Customer Support** role and set `ASC_REPLY_KEY_ID` and `ASC_REPLY_PRIVATE_KEY`; for Google Play,
+    the `PLAY_REVIEWS_API` setup above. Without them `reply_review` says what is missing.
+
+- Data quality checks. `app_performance` flags `anomalies`: days where downloads, impressions,
+  unique page views or installs are at least 50 times the median of the 28 days before (and at
+  least 100), with the territory and source behind most of it; volume purchases are included in
+  the check so a bulk license day is found. `includeVolumePurchases: true` counts institutional
+  purchases in the totals, trend, conversion rates and proceeds per download (they stay out by
+  default). For App Store history, `list_apps` shows per report where the daily reports start and
+  what the one-time snapshot delivered (`filled`, `reading`, `waiting`, or `monthly_only` when Apple
+  made only monthly instances, which Searchkeep does not split into days), and `app_performance`'s
+  notes say which numbers start late and why. A regression test covers a snapshot that arrives after
+  the daily reports and overlaps them: only earlier days are written, nothing is counted twice.
+
+- Analytics sharing rate. The App Store Opt-in report (first-time downloaders and how many share
+  analytics with developers) is read from the same report requests. `app_performance` returns
+  `analyticsSharing` (downloading users, users opting in, rate) for the App Store, and its notes
+  say how to scale installs, deletions, sessions and crashes, which count only people who share.
+  Nothing to set up.
+
+- Stability data that says why it is empty. The App Store's App Crashes Expanded report (every crash
+  on device, not only those with a crash log) is read next to App Crashes, and each crash report now
+  replaces the days it covers. Google Play crash and ANR rates are asked only up to the newest day
+  Google has complete (the metric set's freshness), so a lagging day no longer fails the request.
+  `app_stability` returns Google Play crash and ANR counts from the monthly crash files when the
+  Reporting API has no rates, and its notes say why data is missing (Apple makes crash reports only
+  when at least five people who share analytics had events; Google computes rates only above a
+  minimum number of daily users). `setup_status` gains `probe.play_vitals` with the steps when the
+  Reporting API is not enabled or not allowed.
+
+- App Store funnel per product page. The Discovery and Engagement and App Downloads reports are now
+  also kept per page type (Standard: product page, list views, store sheet, in-app event, ...) and
+  per page title (Detailed: custom product pages, in-app events, "Default Product Page"). New
+  `app_performance` `groupBy` values `page_type` and `page_title` return `pages` with impressions,
+  page views, first-time downloads and page conversion. Product page optimization treatments are in
+  no report Apple offers. Nothing to set up; the next snapshot fills history.
+
+- Store change timeline. Once a day the sync snapshots each app's App Store presence with the
+  existing key (the version on sale and the one in the works with state, release type and phased
+  release; the on-sale version's description, keywords, promotional text and release notes per
+  locale; names and subtitles) and, with the opt-in `PLAY_METADATA=true`, Google Play listings
+  and tracks through an edit that is deleted, never committed. Fields that changed are recorded with
+  the value before and after. New MCP tool and API `app_changes` (`/api/app-changes`);
+  `app_performance` lists each day's changes in its series (`includeChanges: false` leaves them
+  out). `setup_status` gains `probe.asc_metadata`, `config.play_metadata` and
+  `probe.play_metadata`.
+
+  #### Upgrade notes
+  - Nothing to do for the App Store. If `probe.asc_metadata` warns, the key's role may not read app
+    information and only this feature stays empty.
+  - Optional, for Google Play: set `PLAY_METADATA` to `true`, enable the Google Play Android
+    Developer API in the service account's Google Cloud project and grant it **View app information
+    (read-only)** in the Play Console. Use a service account your release tooling does not use:
+    opening an edit closes that account's other open edits.
+
+- App Store revenue per product. The App Store Purchases report's Content Name is now kept per
+  product, purchase type and storefront (Apple's USD estimate, refunds kept apart), and with the
+  optional `ASC_VENDOR_NUMBER` secret the sync reads the daily Sales and Trends Summary Sales report
+  of the account with the existing Sales and Reports key (one call a day, history back a year): units,
+  proceeds and refunds per SKU, country, price and currency, and whether a subscription payment was
+  new or a renewal. Free downloads, updates and redownloads are left out; amounts in different
+  currencies are never added up. New MCP tool and API `app_revenue` (`/api/app-revenue`) with a
+  `refunds` list per day and product; `app_subscriptions` returns `appStore.proceeds` split into
+  first payments and renewals. `setup_status` gains `config.asc_vendor` and `probe.asc_sales`.
+
+  #### Upgrade notes
+  - Optional, any time after syncing: for exact revenue per product, copy the vendor number from App
+    Store Connect → **Payments and Financial Reports** (next to your legal entity name) and run
+    `npx wrangler secret put ASC_VENDOR_NUMBER` (or add it under the Worker's **Settings** →
+    **Variables and Secrets**). Skipping it keeps the USD estimate per product;
+    `setup_status` shows `config.asc_vendor` as `warn` until it is set.
+
+- App Store subscriptions. The sync reads Apple's App Store Subscription State and Subscription
+  Event reports (Standard), which the App Store report requests already produce: active
+  subscriptions, free trials, paid offers, billing retry, grace period and suspended
+  subscriptions per day, and trial starts, trial conversions, paid starts, renewals, voluntary and
+  involuntary churn and refunds per subscription, offer type, storefront and (for events) the
+  source the subscriber first downloaded the app from. History goes back to January 1, 2025 through
+  the one-time snapshot. `app_subscriptions` (MCP and `/api/app-subscriptions`) takes a `store`
+  and an `offerType` parameter and returns the App Store under `appStore`; Google Play keeps its
+  top-level fields. Nothing to set up.
+
 - App numbers per app version, device and OS version
   ([ADR 0010](docs/adr/0010-app-revenue-and-engagement.md)): Google Play installs, uninstalls,
   active devices, ratings, crashes and ANRs from the Play Console's per-version, per-device and

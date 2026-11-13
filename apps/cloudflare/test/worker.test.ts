@@ -225,7 +225,7 @@ describe('sites managed in the dashboard', () => {
       expect.objectContaining({
         id: 'acme-app',
         stores: { appStore: true, googlePlay: false, appStorePublic: false },
-        appStoreReports: { started: false, stopped: false, snapshot: false },
+        appStoreReports: { started: false, stopped: false, snapshot: false, history: [] },
       }),
     ]);
 

@@ -360,6 +360,57 @@ export const TOOLS: Tool[] = [
     params: [site, { name: 'live', type: 'boolean', description: '`true` refreshes the list from the Search Console API first.' }],
   },
   {
+    name: 'app_framework_report',
+    summary: 'One of the app’s chosen App Store Framework Usage reports, grouped by any of its dimensions.',
+    description:
+      'Framework Usage reports from App Store Connect Analytics (for example Notification Summary Engagement, App Added to Focus, Mode Activity Notifications, Call Services and Call Performance) chosen per app in Settings → Apps. Their metric columns are summed by date and by any of the report’s dimensions; the answer lists both. Apple leaves out rows below five devices.',
+    readOnly: true,
+    params: [
+      app,
+      { name: 'report', type: 'string', description: 'Required. The report name as chosen for the app.' },
+      start,
+      end,
+      days(28),
+      { name: 'groupBy', type: 'string[]', description: 'Dimension columns of the report and/or `date`. Default: totals.' },
+      { name: 'filters', type: 'Record<string, string>', description: 'Only rows whose dimension has this value.' },
+      limit(50),
+    ],
+    example: 'How often do people tap our notifications in the notification summary?',
+  },
+  {
+    name: 'app_ads',
+    summary: 'Apple Ads search terms of your own campaigns, with impression share and search popularity.',
+    description:
+      'Search terms people typed when your Apple Ads showed (impressions, taps, installs, spend, tap-through and install rates, cost per install), with your app’s impression share, rank and Apple’s 1-5 search popularity per term and storefront, from the Apple Ads Platform API with a read-only API user. Without the APPLE_ADS_* secrets it answers “not configured” with the steps. Organic keyword rankings are not available from any official API.',
+    readOnly: true,
+    params: [
+      app,
+      start,
+      { name: 'end', type: 'YYYY-MM-DD', description: 'Defaults to yesterday.' },
+      days(28),
+      { name: 'termContains', type: 'string', description: 'Only terms containing this text.' },
+      { name: 'territory', type: 'string', description: 'Impression share of this storefront only, e.g. `US`.' },
+      { name: 'sortBy', type: '"impressions" | "installs" | "spend" | "popularity"', description: 'Defaults to `impressions`.' },
+      limit(50),
+    ],
+    example: 'Which paid search terms bring installs cheapest, and where is our impression share low?',
+  },
+  {
+    name: 'reply_review',
+    summary: 'Replies to an App Store or Google Play review, after a preview. Off by default.',
+    description:
+      'Writes to an external system: the reply is public and the reviewer is notified. Registered only with ENABLE_WRITES=true. The first call returns a preview and a confirmation token and posts nothing; the second call, with the same arguments and the token (valid 15 minutes), posts. App Store replies use their own Customer Support key (ASC_REPLY_*); Google Play replies need PLAY_REVIEWS_API and “Reply to reviews” (at most 350 characters).',
+    readOnly: false,
+    params: [
+      app,
+      { name: 'store', type: '"apple" | "play"', description: 'Required.' },
+      { name: 'reviewId', type: 'string', description: 'Required. From app_reviews.' },
+      { name: 'text', type: 'string', description: 'Required. The reply.' },
+      { name: 'confirmToken', type: 'string', description: 'From the preview, after the user confirmed.' },
+    ],
+    example: 'Draft a reply to the newest one-star review and post it after I approve.',
+  },
+  {
     name: 'submit_sitemap',
     summary: 'Submit a sitemap to Search Console. Off by default.',
     description:
@@ -388,7 +439,7 @@ export const TOOLS: Tool[] = [
     name: 'app_performance',
     summary: 'The store funnel, revenue and sessions of an app, per store, against the previous period.',
     description:
-      'Impressions (App Store), page views (App Store product page views, Google Play store listing visitors), downloads (first-time downloads, store listing acquisitions), redownloads, installs, deletions, active devices and conversion rates per store, plus App Store revenue (purchases, proceeds and sales in USD, paying users, proceeds per download) and sessions (sessions, average length, sessions per device), compared with the previous period of the same length. `groupBy` adds rows by date, week, month, store, territory, source (search, browse, app_referrer, web_referrer, referral, ...) or referrer: the websites, apps and UTM sources that sent people to the store page, with your own site marked. Institutional purchases (App Store licenses bought in bulk through Apple Business Manager or Apple School Manager) are left out of the totals and trends and listed only by source. With the opt-in public feeds, it also returns your app’s App Store chart positions.',
+      'Impressions (App Store), page views (App Store product page views, Google Play store listing visitors), downloads (first-time downloads, store listing acquisitions), redownloads, installs, deletions, active devices and conversion rates per store, plus App Store revenue (purchases, proceeds and sales in USD, paying users, proceeds per download) and sessions (sessions, average length, sessions per device), compared with the previous period of the same length. `groupBy` adds rows by date, week, month, store, territory, source (search, browse, app_referrer, web_referrer, referral, ...) or referrer: the websites, apps and UTM sources that sent people to the store page, with your own site marked; `page_type` and `page_title` list the App Store funnel per product page type, custom product page and in-app event. Institutional purchases (App Store licenses bought in bulk through Apple Business Manager or Apple School Manager) are left out of the totals and trends and listed only by source. With the opt-in public feeds, it also returns your app’s App Store chart positions.',
     readOnly: true,
     params: [
       app,
@@ -399,7 +450,8 @@ export const TOOLS: Tool[] = [
       {
         name: 'groupBy',
         type: 'string[]',
-        description: 'Up to two of `date`, `week`, `month`, `store`, `territory`, `source`, `referrer`. Default: totals per store only.',
+        description:
+          'Up to two of `date`, `week`, `month`, `store`, `territory`, `source`, `referrer`, `page_type`, `page_title`. Default: totals per store only.',
       },
       { name: 'territory', type: 'string', description: 'Only this territory, as the store reports it (e.g. `US`).' },
       {
@@ -408,6 +460,11 @@ export const TOOLS: Tool[] = [
         description: 'Only this source: `search`, `browse`, `app_referrer`, `web_referrer`, `referral`, ...',
       },
       { name: 'referrerKind', type: '"web" | "app" | "utm"', description: 'With `groupBy` referrer: only websites, apps or UTM sources.' },
+      {
+        name: 'includeChanges',
+        type: 'boolean',
+        description: 'List each day’s store changes in the series (see app_changes). Default `true`.',
+      },
       limit(50),
     ],
     example: 'How did App Store search conversion change this month, by territory?',
@@ -454,7 +511,7 @@ export const TOOLS: Tool[] = [
     name: 'app_stability',
     summary: 'Crash and ANR rates per day or app version.',
     description:
-      'Google Play crash and ANR rates (shares of daily users, including the user-perceived rates behind Google’s bad-behavior thresholds of 1.09% and 0.47%) from the Play Developer Reporting API, and App Store crash counts from the App Crashes report, per day or per app version.',
+      'Google Play crash and ANR rates (shares of daily users, including the user-perceived rates behind Google’s bad-behavior thresholds of 1.09% and 0.47%) from the Play Developer Reporting API and crash and ANR counts from the monthly crash files, and App Store crash counts from the App Crashes and App Crashes Expanded reports, per day or per app version. The notes say why data is missing when it is (Apple’s and Google’s minimum numbers of users).',
     readOnly: true,
     params: [
       app,
@@ -469,20 +526,67 @@ export const TOOLS: Tool[] = [
   },
   {
     name: 'app_subscriptions',
-    summary: 'Google Play subscriptions per product and country, against the previous period.',
+    summary: 'Subscriptions on both stores per product, offer and country, against the previous period.',
     description:
-      'New, canceled and active Google Play subscriptions per product and country over the period, against the previous period, with the daily trend of active subscriptions. Comes from the Play Console’s subscription statistics and needs the service account to view financial data.',
+      'Google Play: new, canceled and active subscriptions per product and country (the Play Console’s subscription statistics; needs the service account to view financial data). App Store: active subscriptions, free trials, paid offers, billing retry and grace period, and trial starts, trial conversions, paid starts, renewals, churn and refunds per subscription, offer type, storefront and download source (Apple’s Subscription State and Event reports; nothing extra to set up). Both against the previous period, with the daily trend.',
+    readOnly: true,
+    params: [
+      app,
+      appStore,
+      start,
+      end,
+      days(28),
+      { name: 'product', type: 'string', description: 'Only this subscription: Google Play product id or App Store subscription name.' },
+      { name: 'territory', type: 'string', description: 'Only this country, e.g. `US`.' },
+      {
+        name: 'offerType',
+        type: 'string',
+        description: 'App Store only: `free_trial`, `pay_up_front`, `pay_as_you_go`, or empty for none.',
+      },
+      limit(50),
+    ],
+    example: 'Which countries gained the most subscribers this month?',
+  },
+  {
+    name: 'app_changes',
+    summary: 'What changed on the app’s store presence and when, with the values before and after.',
+    description:
+      'Daily snapshots of the App Store version on sale and the one in the works (state, release type, phased release), the on-sale version’s description, keywords, promotional text and release notes per locale, and the app’s name and subtitle; with PLAY_METADATA=true also Google Play titles, descriptions, track releases, rollouts and release notes (read through an edit that is deleted, never committed). Each changed field is listed on the day it was first seen; app_performance’s series lists the same changes per day.',
+    readOnly: true,
+    params: [
+      app,
+      appStore,
+      start,
+      { name: 'end', type: 'YYYY-MM-DD', description: 'Defaults to today.' },
+      days(90),
+      {
+        name: 'entity',
+        type: 'string',
+        description: '`version`, `listing`, `app_info`, `track`, or an exact entity such as `listing:IOS`.',
+      },
+      { name: 'field', type: 'string', description: 'e.g. `keywords`, `subtitle`, `promotional_text`, `live`.' },
+      { name: 'locale', type: 'string', description: 'e.g. `en-US`.' },
+      limit(100),
+    ],
+    example: 'What did we change on the store page the week downloads dropped?',
+  },
+  {
+    name: 'app_revenue',
+    summary: 'App Store revenue per product, with refunds, against the previous period.',
+    description:
+      'Apple’s USD estimate per product (in-app purchase or paid app) from the App Store Purchases report, with refunds kept apart; with the optional ASC_VENDOR_NUMBER secret also the exact units, proceeds and refunds per SKU in each proceeds currency from Sales and Trends (never added across currencies), and subscription proceeds split into first payments and renewals. Lists refunded products per day.',
     readOnly: true,
     params: [
       app,
       start,
       end,
       days(28),
-      { name: 'product', type: 'string', description: 'Only this subscription product id.' },
-      { name: 'territory', type: 'string', description: 'Only this country, e.g. `US`.' },
+      { name: 'groupBy', type: '("date" | "product" | "territory" | "type")[]', description: 'Defaults to `product`.' },
+      { name: 'product', type: 'string', description: 'Only this product: its name in App Store Connect, or its SKU.' },
+      { name: 'territory', type: 'string', description: 'Only this storefront, e.g. `US`.' },
       limit(50),
     ],
-    example: 'Which countries gained the most subscribers this month?',
+    example: 'Which product was refunded on the day revenue went negative?',
   },
   {
     name: 'app_breakdown',
@@ -503,7 +607,7 @@ export const TOOLS: Tool[] = [
   },
 ];
 
-/** Tools registered by default; `submit_sitemap` appears only with `ENABLE_WRITES=true`. */
+/** Tools registered by default; `submit_sitemap` and `reply_review` appear only with `ENABLE_WRITES=true`. */
 export const READ_ONLY_TOOLS = TOOLS.filter((t) => t.readOnly);
 
 export interface Secret {
@@ -569,7 +673,8 @@ export const SECRETS: Secret[] = [
   {
     name: 'ENABLE_WRITES',
     required: 'optional',
-    description: 'Set to `true` to register `submit_sitemap`. Requires Full permission in GSC.',
+    description:
+      'Set to `true` to register `submit_sitemap` (requires Full permission in GSC) and `reply_review` (needs ASC_REPLY_KEY_ID and ASC_REPLY_PRIVATE_KEY, or PLAY_REVIEWS_API).',
     example: 'true',
   },
   {
@@ -645,6 +750,37 @@ const APP_SECRETS: Secret[] = [
   },
   { name: 'ASC_ISSUER_ID', required: 'for apps', description: 'The Issuer ID shown above the App Store Connect API keys.' },
   { name: 'ASC_PRIVATE_KEY', required: 'for apps', description: 'Contents of the key’s `AuthKey_<KEY ID>.p8` file.' },
+  {
+    name: 'APPLE_ADS_CLIENT_ID',
+    required: 'optional',
+    description:
+      'With APPLE_ADS_TEAM_ID, APPLE_ADS_KEY_ID and APPLE_ADS_PRIVATE_KEY: credentials of an Apple Ads API user with the API Account Read Only role, for app_ads. APPLE_ADS_ACCOUNT_ID limits it to one ad account.',
+  },
+  {
+    name: 'PLAY_REVIEWS_API',
+    required: 'optional',
+    description:
+      '`true` to read Google Play reviews of the last week every 4 hours through the Android Publisher API. Needs the “Reply to reviews” permission (Google offers no read-only one).',
+  },
+  {
+    name: 'ASC_REPLY_KEY_ID',
+    required: 'optional',
+    description:
+      'Key ID of a second App Store Connect API key with the Customer Support role, used only by reply_review (with ENABLE_WRITES).',
+  },
+  { name: 'ASC_REPLY_PRIVATE_KEY', required: 'optional', description: 'Contents of that key’s `.p8` file.' },
+  {
+    name: 'PLAY_METADATA',
+    required: 'optional',
+    description:
+      '`true` to snapshot Google Play store listings and tracks daily for app_changes. Needs the Android Publisher API and View app information (read-only); the edit used is deleted, never committed.',
+  },
+  {
+    name: 'ASC_VENDOR_NUMBER',
+    required: 'optional',
+    description:
+      'Vendor number from App Store Connect → Payments and Financial Reports. Turns on exact App Store revenue per product from the daily Sales and Trends report (read with the same Sales and Reports key).',
+  },
   {
     name: 'PLAY_REPORTS_BUCKET',
     required: 'for apps',

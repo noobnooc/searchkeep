@@ -309,6 +309,8 @@ export const appConfigs = sqliteTable('app_configs', {
   siteId: text('site_id'),
   /** Storefronts for the opt-in public feeds, comma-separated. */
   territories: text('territories'),
+  /** Framework Usage report names, JSON array. */
+  frameworkReports: text('framework_reports'),
   createdAt: text('created_at').notNull().default(now),
   updatedAt: text('updated_at').notNull().default(now),
 });
@@ -425,6 +427,8 @@ export const appVitals = sqliteTable(
     distinctUsers: integer('distinct_users'),
     crashes: integer('crashes'),
     crashDevices: integer('crash_devices'),
+    crashesExpanded: integer('crashes_expanded'),
+    crashDevicesExpanded: integer('crash_devices_expanded'),
   },
   (t) => [primaryKey({ columns: [t.appId, t.store, t.date, t.version] })],
 );
@@ -457,6 +461,214 @@ export const appSubscriptionsDaily = sqliteTable(
     activeSubscriptions: integer('active_subscriptions').notNull().default(0),
   },
   (t) => [primaryKey({ columns: [t.appId, t.date, t.territory, t.product, t.basePlan] })],
+);
+
+/**
+ * App Store subscription states and events per day (Analytics Reports, Standard): one row per kind,
+ * metric, subscription, offer type, territory and download source (`*` for states).
+ */
+export const appSubscriptionMetricsDaily = sqliteTable(
+  'app_subscription_metrics_daily',
+  {
+    appId: text('app_id').notNull(),
+    store: text('store').notNull(),
+    kind: text('kind').notNull(),
+    date: text('date').notNull(),
+    metric: text('metric').notNull(),
+    metricGroup: text('metric_group').notNull().default(''),
+    product: text('product').notNull(),
+    offerType: text('offer_type').notNull().default(''),
+    territory: text('territory').notNull(),
+    source: text('source').notNull(),
+    count: integer('count').notNull().default(0),
+  },
+  (t) => [
+    primaryKey({ columns: [t.appId, t.store, t.kind, t.date, t.metric, t.metricGroup, t.product, t.offerType, t.territory, t.source] }),
+    index('app_subscription_metrics_daily_date').on(t.appId, t.kind, t.date),
+  ],
+);
+
+/** App Store purchases per day, product (Content Name), purchase type and territory; USD cents (Apple's estimate). */
+export const appProductsDaily = sqliteTable(
+  'app_products_daily',
+  {
+    appId: text('app_id').notNull(),
+    store: text('store').notNull(),
+    date: text('date').notNull(),
+    product: text('product').notNull(),
+    purchaseType: text('purchase_type').notNull().default(''),
+    territory: text('territory').notNull(),
+    purchases: integer('purchases').notNull().default(0),
+    refunds: integer('refunds').notNull().default(0),
+    proceedsCents: integer('proceeds_cents').notNull().default(0),
+    refundProceedsCents: integer('refund_proceeds_cents').notNull().default(0),
+    salesCents: integer('sales_cents').notNull().default(0),
+  },
+  (t) => [
+    primaryKey({ columns: [t.appId, t.store, t.date, t.product, t.purchaseType, t.territory] }),
+    index('app_products_daily_date').on(t.appId, t.date),
+  ],
+);
+
+/** App Store Sales and Trends (Summary Sales, daily) per product and price point, in the report's currencies. */
+export const appSalesDaily = sqliteTable(
+  'app_sales_daily',
+  {
+    appId: text('app_id').notNull(),
+    date: text('date').notNull(),
+    sku: text('sku').notNull(),
+    title: text('title').notNull().default(''),
+    productType: text('product_type').notNull(),
+    subscription: text('subscription').notNull().default(''),
+    period: text('period').notNull().default(''),
+    territory: text('territory').notNull(),
+    proceedsCurrency: text('proceeds_currency').notNull(),
+    customerCurrency: text('customer_currency').notNull(),
+    customerPriceCents: integer('customer_price_cents').notNull().default(0),
+    units: integer('units').notNull().default(0),
+    refundUnits: integer('refund_units').notNull().default(0),
+    proceedsCents: integer('proceeds_cents').notNull().default(0),
+    refundProceedsCents: integer('refund_proceeds_cents').notNull().default(0),
+    salesCents: integer('sales_cents').notNull().default(0),
+  },
+  (t) => [
+    primaryKey({
+      columns: [
+        t.appId,
+        t.date,
+        t.sku,
+        t.productType,
+        t.subscription,
+        t.period,
+        t.territory,
+        t.proceedsCurrency,
+        t.customerCurrency,
+        t.customerPriceCents,
+      ],
+    }),
+    index('app_sales_daily_date').on(t.appId, t.date),
+  ],
+);
+
+/** App Store funnel per page type (level `type`, Standard reports) or page type and title (level `title`, Detailed reports). */
+export const appStorePagesDaily = sqliteTable(
+  'app_store_pages_daily',
+  {
+    appId: text('app_id').notNull(),
+    date: text('date').notNull(),
+    level: text('level').notNull(),
+    pageType: text('page_type').notNull(),
+    pageTitle: text('page_title').notNull().default(''),
+    impressions: integer('impressions').notNull().default(0),
+    impressionsUnique: integer('impressions_unique').notNull().default(0),
+    pageViews: integer('page_views').notNull().default(0),
+    pageViewsUnique: integer('page_views_unique').notNull().default(0),
+    downloads: integer('downloads').notNull().default(0),
+  },
+  (t) => [
+    primaryKey({ columns: [t.appId, t.date, t.level, t.pageType, t.pageTitle] }),
+    index('app_store_pages_daily_date').on(t.appId, t.level, t.date),
+  ],
+);
+
+/** App Store Opt-in: first-time downloaders per day and how many share analytics with developers. */
+export const appOptInDaily = sqliteTable(
+  'app_optin_daily',
+  {
+    appId: text('app_id').notNull(),
+    date: text('date').notNull(),
+    downloadingUsers: integer('downloading_users').notNull().default(0),
+    optingInUsers: integer('opting_in_users').notNull().default(0),
+  },
+  (t) => [primaryKey({ columns: [t.appId, t.date] })],
+);
+
+/**
+ * Framework Usage reports chosen per app: per report, day and combination of dimension values (a
+ * canonical JSON object), the summed metrics (JSON object). At most 200 combinations a day.
+ */
+export const appFrameworkDaily = sqliteTable(
+  'app_framework_daily',
+  {
+    appId: text('app_id').notNull(),
+    report: text('report').notNull(),
+    date: text('date').notNull(),
+    dims: text('dims').notNull(),
+    metrics: text('metrics').notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.appId, t.report, t.date, t.dims] }), index('app_framework_daily_date').on(t.appId, t.report, t.date)],
+);
+
+/** Apple Ads search terms of the user's own campaigns, per day, campaign, term and matching keyword. */
+export const appAdsTermsDaily = sqliteTable(
+  'app_ads_terms_daily',
+  {
+    appId: text('app_id').notNull(),
+    date: text('date').notNull(),
+    campaignId: text('campaign_id').notNull(),
+    term: text('term').notNull(),
+    keyword: text('keyword').notNull().default(''),
+    impressions: integer('impressions').notNull().default(0),
+    taps: integer('taps').notNull().default(0),
+    installs: integer('installs').notNull().default(0),
+    newDownloads: integer('new_downloads').notNull().default(0),
+    spendCents: integer('spend_cents').notNull().default(0),
+    currency: text('currency').notNull().default(''),
+  },
+  (t) => [
+    primaryKey({ columns: [t.appId, t.date, t.campaignId, t.term, t.keyword] }),
+    index('app_ads_terms_daily_date').on(t.appId, t.date),
+  ],
+);
+
+/** The app's Apple Ads impression share per day, storefront and search term, with Apple's search popularity (1-5). */
+export const appAdsShareDaily = sqliteTable(
+  'app_ads_share_daily',
+  {
+    appId: text('app_id').notNull(),
+    date: text('date').notNull(),
+    territory: text('territory').notNull(),
+    term: text('term').notNull(),
+    lowShare: real('low_share'),
+    highShare: real('high_share'),
+    rank: integer('rank'),
+    popularity: integer('popularity'),
+  },
+  (t) => [primaryKey({ columns: [t.appId, t.date, t.territory, t.term] }), index('app_ads_share_daily_date').on(t.appId, t.date)],
+);
+
+/** The latest snapshot of an app's store fields (versions, listings, app info, tracks), one row per field. */
+export const appListingValues = sqliteTable(
+  'app_listing_values',
+  {
+    appId: text('app_id').notNull(),
+    store: text('store').notNull(),
+    entity: text('entity').notNull(),
+    locale: text('locale').notNull().default(''),
+    field: text('field').notNull(),
+    value: text('value').notNull(),
+    seenOn: text('seen_on').notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.appId, t.store, t.entity, t.locale, t.field] })],
+);
+
+/** Changes of an app's store fields between daily snapshots: the value before and after. */
+export const appListingChanges = sqliteTable(
+  'app_listing_changes',
+  {
+    appId: text('app_id').notNull(),
+    store: text('store').notNull(),
+    date: text('date').notNull(),
+    entity: text('entity').notNull(),
+    locale: text('locale').notNull().default(''),
+    field: text('field').notNull(),
+    before: text('before'),
+    after: text('after'),
+  },
+  (t) => [
+    primaryKey({ columns: [t.appId, t.store, t.date, t.entity, t.locale, t.field] }),
+    index('app_listing_changes_date').on(t.appId, t.date),
+  ],
 );
 
 /**

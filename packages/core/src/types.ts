@@ -10,7 +10,7 @@ export type IsoDate = string;
 
 export type SearchSource = 'gsc' | 'bing';
 /** App sources: App Store Connect, Google Play, and Apple's public App Store feeds (opt-in). */
-export type AppSourceId = 'asc' | 'play' | 'appstore';
+export type AppSourceId = 'asc' | 'play' | 'appstore' | 'appleads';
 export type SourceId = SearchSource | 'cloudflare' | AppSourceId;
 
 /**
@@ -397,6 +397,11 @@ export interface AppConfig {
    * first. Default: the app's biggest App Store storefronts by downloads, then the largest ones.
    */
   territories?: string[];
+  /**
+   * Framework Usage reports of App Store Connect Analytics to keep for this app, by name (e.g.
+   * `Notification Summary Engagement`, `App Added to Focus`), read with `app_framework_report`.
+   */
+  frameworkReports?: string[];
   /** Where the app is defined: the APPS secret (read-only) or the dashboard. */
   origin?: 'secret' | 'dashboard';
 }
@@ -635,6 +640,8 @@ export interface AppReviewQuery {
   version?: string;
   /** Case-insensitive substring of the title or body. */
   contains?: string;
+  /** Only this review. */
+  id?: string;
   limit?: number;
 }
 
@@ -662,6 +669,9 @@ export interface AppVitalsInput {
   distinctUsers?: number | null;
   crashes?: number | null;
   crashDevices?: number | null;
+  /** App Store: every crash on device (App Crashes Expanded), not only those with a crash log. */
+  crashesExpanded?: number | null;
+  crashDevicesExpanded?: number | null;
 }
 
 export type AppVitalsMetric = Exclude<keyof AppVitalsInput, 'date' | 'version'>;
@@ -669,6 +679,8 @@ export type AppVitalsMetric = Exclude<keyof AppVitalsInput, 'date' | 'version'>;
 export interface AppVitalsWrite {
   metrics: AppVitalsMetric[];
   rows: AppVitalsInput[];
+  /** Days replaced as a whole: versions of these days the write does not mention get the metrics cleared. */
+  dates?: IsoDate[];
 }
 
 export interface AppVitalsQuery {
@@ -690,6 +702,8 @@ export interface AppVitalsRow {
   distinctUsers: number | null;
   crashes: number | null;
   crashDevices: number | null;
+  crashesExpanded: number | null;
+  crashDevicesExpanded: number | null;
 }
 
 /** The user's own app's position in an App Store top chart (opt-in public feeds). */
@@ -811,6 +825,276 @@ export interface AppSubscriptionRow {
   canceledSubscriptions: number;
   /** Per date: that day's; otherwise on the range's last day with data. */
   activeSubscriptions: number;
+}
+
+/**
+ * App Store subscription states (levels per day) and events (counts per day) from the Analytics
+ * Reports "App Store Subscription State" and "App Store Subscription Event" (Standard).
+ */
+export type AppSubscriptionMetricKind = 'state' | 'event';
+
+export interface AppSubscriptionMetricInput {
+  date: IsoDate;
+  /** Apple's State Metric or Event Sub Type as a slug, e.g. `free_trial_starts`, `billing_retry`. */
+  metric: string;
+  /** Apple's State Metric Grouping or Event Grouping as a slug, e.g. `subscription_offers`, `voluntary_churn`. */
+  metricGroup: string;
+  /** Subscription name as set in App Store Connect. */
+  product: string;
+  /** Offer type slug (`free_trial`, `pay_up_front`, ...), or empty for no offer. */
+  offerType: string;
+  /** Upper-case territory code. */
+  territory: string;
+  /** App download source type (events only; `*` for states). */
+  source: string;
+  count: number;
+}
+
+export interface AppSubscriptionMetricWrite {
+  kind: AppSubscriptionMetricKind;
+  /** Days replaced as a whole. */
+  dates: IsoDate[];
+  rows: AppSubscriptionMetricInput[];
+}
+
+export type AppSubscriptionMetricDimension = 'date' | 'metric' | 'metricGroup' | 'product' | 'offerType' | 'territory' | 'source';
+
+export interface AppSubscriptionMetricQuery {
+  appId: string;
+  kind: AppSubscriptionMetricKind;
+  range: DateRange;
+  dimensions: AppSubscriptionMetricDimension[];
+  product?: string;
+  territory?: string;
+  offerType?: string;
+  source?: string;
+  limit?: number;
+}
+
+export interface AppSubscriptionMetricRow {
+  date?: IsoDate;
+  metric?: string;
+  metricGroup?: string;
+  product?: string;
+  offerType?: string;
+  territory?: string;
+  source?: string;
+  /** Events: summed over the range. States: per date that day's level, otherwise the level on the range's last day with data. */
+  count: number;
+}
+
+/** App Store purchases per product (Analytics Reports, App Store Purchases Standard); amounts in USD cents (Apple's estimate). */
+export interface AppProductInput {
+  date: IsoDate;
+  /** Content Name: the app's name for paid apps, the in-app purchase's reference name otherwise. */
+  product: string;
+  /** Purchase Type as a slug, e.g. `in_app_purchases`, `paid_app`. */
+  purchaseType: string;
+  territory: string;
+  /** Purchases (refunds left out). */
+  purchases: number;
+  /** Refunded purchases, as a positive count. */
+  refunds: number;
+  /** Proceeds of the purchases, net of the refunds' proceeds. */
+  proceedsCents: number;
+  /** Proceeds taken back by refunds, as a positive amount. */
+  refundProceedsCents: number;
+  salesCents: number;
+}
+
+export type AppProductDimension = 'date' | 'product' | 'purchaseType' | 'territory';
+
+export interface AppProductQuery {
+  appId: string;
+  range: DateRange;
+  dimensions: AppProductDimension[];
+  product?: string;
+  territory?: string;
+  limit?: number;
+}
+
+export interface AppProductRow {
+  date?: IsoDate;
+  product?: string;
+  purchaseType?: string;
+  territory?: string;
+  purchases: number;
+  refunds: number;
+  proceedsCents: number;
+  refundProceedsCents: number;
+  salesCents: number;
+}
+
+/**
+ * App Store Sales and Trends (Summary Sales, daily) per product and price point. Proceeds are in
+ * the proceeds currency, sales in the customer's currency; neither is ever added across currencies.
+ */
+export interface AppSalesInput {
+  date: IsoDate;
+  sku: string;
+  /** App name, or the in-app purchase's product id. */
+  title: string;
+  /** `app`, `in_app`, `subscription`, or Apple's product type identifier when unknown. */
+  productType: string;
+  /** Auto-renewable subscriptions: `new` or `renewal`; empty otherwise. */
+  subscription: string;
+  /** Subscription period (`1 Month`, ...), or empty. */
+  period: string;
+  territory: string;
+  proceedsCurrency: string;
+  customerCurrency: string;
+  /** Customer price per unit in cents of the customer currency (absolute). */
+  customerPriceCents: number;
+  units: number;
+  /** Refunded units, as a positive count. */
+  refundUnits: number;
+  /** Proceeds net of refunds, in cents of the proceeds currency. */
+  proceedsCents: number;
+  /** Proceeds taken back by refunds, positive, in cents of the proceeds currency. */
+  refundProceedsCents: number;
+  /** Customer price × units, net of refunds, in cents of the customer currency. */
+  salesCents: number;
+}
+
+export type AppSalesDimension =
+  'date' | 'sku' | 'title' | 'productType' | 'subscription' | 'territory' | 'proceedsCurrency' | 'customerCurrency' | 'customerPriceCents';
+
+export interface AppSalesQuery {
+  appId: string;
+  range: DateRange;
+  dimensions: AppSalesDimension[];
+  sku?: string;
+  territory?: string;
+  limit?: number;
+}
+
+export interface AppSalesRow {
+  date?: IsoDate;
+  sku?: string;
+  title?: string;
+  productType?: string;
+  subscription?: string;
+  territory?: string;
+  proceedsCurrency?: string;
+  customerCurrency?: string;
+  customerPriceCents?: number;
+  units: number;
+  refundUnits: number;
+  proceedsCents: number;
+  refundProceedsCents: number;
+  salesCents: number;
+}
+
+/**
+ * One field of an app's store presence as seen today: e.g. entity `listing:IOS`, locale `en-US`,
+ * field `keywords`; entity `version:IOS`, field `live` (the version on sale).
+ */
+export interface AppListingValue {
+  entity: string;
+  /** Locale or language code, or empty for fields without one. */
+  locale: string;
+  field: string;
+  value: string;
+}
+
+/** A change of a store field between two daily snapshots. */
+export interface AppChangeRow {
+  store: AppStore;
+  /** The day the change was first seen. */
+  date: IsoDate;
+  entity: string;
+  locale: string;
+  field: string;
+  /** Null when the field did not exist before (added) or no longer exists (removed). */
+  before: string | null;
+  after: string | null;
+}
+
+export interface AppChangeQuery {
+  appId: string;
+  store?: AppStore;
+  range: DateRange;
+  /** Entity prefix, e.g. `listing`, `version`, `app_info`, `track`. */
+  entity?: string;
+  field?: string;
+  locale?: string;
+  limit?: number;
+}
+
+/** App Store funnel per product page: by page type (Standard reports) or by page title (Detailed reports, noised). */
+export type AppPageLevel = 'type' | 'title';
+export interface AppPageMetrics {
+  impressions: number;
+  impressionsUnique: number;
+  pageViews: number;
+  pageViewsUnique: number;
+  downloads: number;
+}
+export type AppPageMetric = keyof AppPageMetrics;
+
+export interface AppPageInput extends Partial<AppPageMetrics> {
+  date: IsoDate;
+  /** Page type slug: `product_page`, `no_page`, `in_app_event`, `store_sheet`, ... */
+  pageType: string;
+  /** Page title (custom product page or in-app event name, `Default Product Page`); empty at level `type`. */
+  pageTitle: string;
+}
+
+export interface AppPageWrite {
+  level: AppPageLevel;
+  /** Metrics set by this write; for the days in `dates`, pages it does not mention get them zeroed. */
+  metrics: AppPageMetric[];
+  dates: IsoDate[];
+  rows: AppPageInput[];
+}
+
+export interface AppPageRow extends AppPageMetrics {
+  pageType: string;
+  pageTitle: string;
+}
+
+/** App Store Opt-in: first-time downloaders per day and how many of them share analytics with developers. */
+export interface AppOptInInput {
+  date: IsoDate;
+  downloadingUsers: number;
+  optingInUsers: number;
+}
+
+/** One row of a Framework Usage report: dimension values (by column name) and summed metrics. */
+export interface AppFrameworkInput {
+  date: IsoDate;
+  dims: Record<string, string>;
+  metrics: Record<string, number>;
+}
+
+export interface AppFrameworkRow {
+  date: IsoDate;
+  dims: Record<string, string>;
+  metrics: Record<string, number>;
+}
+
+/** Apple Ads search terms summed over a range (the user's own campaigns). */
+export interface AppAdsTermRow {
+  term: string;
+  impressions: number;
+  taps: number;
+  installs: number;
+  newDownloads: number;
+  spendCents: number;
+  currency: string;
+  /** Keywords that matched the term. */
+  keywords: string[];
+}
+
+/** The latest impression share of a term (per storefront) in a range. */
+export interface AppAdsShareRow {
+  term: string;
+  territory: string;
+  date: IsoDate;
+  lowShare: number | null;
+  highShare: number | null;
+  rank: number | null;
+  popularity: number | null;
 }
 
 export interface AppDataCoverage {

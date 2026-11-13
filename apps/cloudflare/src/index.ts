@@ -16,6 +16,10 @@ import {
   type AppBreakdownDimension,
   appStability,
   appSubscriptions,
+  appRevenue,
+  appChanges,
+  appFrameworkReport,
+  appAds,
   listApps,
   startAppStoreReports,
   validateApp,
@@ -69,6 +73,7 @@ import { createAscClient } from '@searchkeep/source-app-store-connect';
 import { createAppStorePublicClient } from '@searchkeep/source-app-store-public';
 import { createBingClient } from '@searchkeep/source-bing';
 import { createPlayClient } from '@searchkeep/source-google-play';
+import { createAppleAdsClient } from '@searchkeep/source-apple-ads';
 import { createCloudflareClient } from '@searchkeep/source-cloudflare';
 import { createGscClient, createSitemapReader } from '@searchkeep/source-gsc';
 import { D1Store, ensureMigrated } from '@searchkeep/store-d1';
@@ -126,7 +131,23 @@ export function buildClients(config: SearchkeepConfig, browser: BrowserFetch | n
   if (config.asc.keyId && config.asc.issuerId && config.asc.privateKey)
     clients.asc = createAscClient({ keyId: config.asc.keyId, issuerId: config.asc.issuerId, privateKey: config.asc.privateKey });
   if (config.play.clientEmail && config.play.privateKey && config.play.bucket)
-    clients.play = createPlayClient({ clientEmail: config.play.clientEmail, privateKey: config.play.privateKey });
+    clients.play = createPlayClient({
+      clientEmail: config.play.clientEmail,
+      privateKey: config.play.privateKey,
+      // The Android Publisher API (no read-only scope) only for the opt-in features that need it.
+      publisher: config.play.metadata || config.play.reviewsApi,
+      reviews: config.play.reviewsApi,
+    });
+  const ads = config.appleAds;
+  if (ads.clientId && ads.teamId && ads.keyId && ads.privateKey)
+    clients.appleAds = createAppleAdsClient({ clientId: ads.clientId, teamId: ads.teamId, keyId: ads.keyId, privateKey: ads.privateKey });
+  // Review responses only with writes on, through their own key (never the Sales and Reports key).
+  if (config.enableWrites && config.asc.replyKeyId && config.asc.issuerId && config.asc.replyPrivateKey)
+    clients.ascReplies = createAscClient({
+      keyId: config.asc.replyKeyId,
+      issuerId: config.asc.issuerId,
+      privateKey: config.asc.replyPrivateKey,
+    });
   if (config.appStorePublic)
     clients.appStore = createAppStorePublicClient(
       // Apple's public feeds refuse Workers' egress IPs (HTTP 403) but accept Browser Run's.
@@ -697,10 +718,12 @@ app.get(
       opsContext(c),
       x.strip({
         ...common,
-        groupBy: x.list<AppDimension | 'referrer'>('groupBy'),
+        groupBy: x.list<AppDimension | 'referrer' | 'page_type' | 'page_title'>('groupBy'),
         territory: x.get('territory'),
         source: x.get('source'),
         referrerKind: x.get('referrerKind') as AppReferrerKind | undefined,
+        ...(x.get('includeChanges') === 'false' ? { includeChanges: false } : {}),
+        ...(x.get('includeVolumePurchases') === 'true' ? { includeVolumePurchases: true } : {}),
       }),
     );
   }),
@@ -744,6 +767,46 @@ app.get(
   }),
 );
 app.get(
+  '/api/app-framework-report',
+  handle((c) => {
+    const { x, common } = appParams(c);
+    const { store: _store, ...rest } = common;
+    return appFrameworkReport(opsContext(c), x.strip({ ...rest, report: x.get('report') ?? '', groupBy: x.list<string>('groupBy') }));
+  }),
+);
+app.get(
+  '/api/app-ads',
+  handle((c) => {
+    const { x, common } = appParams(c);
+    const { store: _store, ...rest } = common;
+    return appAds(
+      opsContext(c),
+      x.strip({
+        ...rest,
+        termContains: x.get('termContains'),
+        territory: x.get('territory'),
+        sortBy: x.get('sortBy') as 'impressions' | 'installs' | 'spend' | 'popularity' | undefined,
+      }),
+    );
+  }),
+);
+app.get(
+  '/api/app-changes',
+  handle((c) => {
+    const { x, common } = appParams(c);
+    return appChanges(opsContext(c), x.strip({ ...common, entity: x.get('entity'), field: x.get('field'), locale: x.get('locale') }));
+  }),
+);
+app.get(
+  '/api/app-revenue',
+  handle((c) => {
+    const { x, common } = appParams(c);
+    const { store: _store, ...rest } = common;
+    const groupBy = x.list<'date' | 'product' | 'territory' | 'type'>('groupBy');
+    return appRevenue(opsContext(c), x.strip({ ...rest, groupBy, product: x.get('product'), territory: x.get('territory') }));
+  }),
+);
+app.get(
   '/api/app-breakdown',
   handle((c) => {
     const { x, common } = appParams(c);
@@ -754,8 +817,10 @@ app.get(
   '/api/app-subscriptions',
   handle((c) => {
     const { x, common } = appParams(c);
-    const { store: _store, ...rest } = common;
-    return appSubscriptions(opsContext(c), x.strip({ ...rest, product: x.get('product'), territory: x.get('territory') }));
+    return appSubscriptions(
+      opsContext(c),
+      x.strip({ ...common, product: x.get('product'), territory: x.get('territory'), offerType: x.get('offerType') }),
+    );
   }),
 );
 app.get(

@@ -10,14 +10,23 @@ import {
   appSearchTerms,
   appStability,
   appSubscriptions,
+  appRevenue,
+  appChanges,
+  appFrameworkReport,
+  appAds,
+  replyReview,
   listApps,
   startAppStoreReports,
 } from '../apps/analysis.js';
 import {
   ASC_REPORTS,
   BREAKDOWN_VALUES_PER_DAY,
+  crashesCollector,
+  crashesExpandedCollector,
   downloadReferrersCollector,
+  downloadsCollector,
   engagementCollector,
+  engagementReferrersCollector,
   playEarningsCollector,
   playCrashesBreakdownCollector,
   playInstallsBreakdownCollector,
@@ -29,8 +38,9 @@ import { evaluateReadiness } from '../auth/readiness.js';
 import { loadConfig, withStoredApps, type SearchkeepConfig } from '../config.js';
 import { addDays, daysBetween } from '../dates.js';
 import type { DelimitedRow } from '../delimited.js';
+import type { AppListingValue } from '../types.js';
 import { SourceError } from '../http.js';
-import type { AscClient, AscReportRequest, PlayClient, AppStorePublicClient, SourceClients } from '../sources.js';
+import type { AppleAdsClient, AscClient, AscReportRequest, PlayClient, AppStorePublicClient, SourceClients } from '../sources.js';
 import type { Store } from '../store.js';
 import { syncProgress } from '../sync/progress.js';
 import { runSync } from '../sync/run-sync.js';
@@ -56,7 +66,20 @@ function config(extra: Record<string, string> = {}): SearchkeepConfig {
 }
 
 /** App Store Connect with an ongoing request (three daily instances) and a snapshot. */
-function fakeAsc(opts: { listForbidden?: boolean; requests?: AscReportRequest[] } = {}) {
+function fakeAsc(
+  opts: {
+    listForbidden?: boolean;
+    requests?: AscReportRequest[];
+    salesForbidden?: boolean;
+    listing?: AppListingValue[] | 'forbidden';
+    /** Installs reports: the snapshot's daily instance is not there yet, there, or there only as monthly instances. */
+    installs?: 'waiting' | 'ready' | 'monthly';
+    /** Lists the Mode Activity Notifications Framework Usage report with one instance. */
+    framework?: boolean;
+    /** Customer reviews come back with a developer response. */
+    replied?: boolean;
+  } = {},
+) {
   const calls: string[] = [];
   const requests: AscReportRequest[] = opts.requests ?? [
     { id: 'ongoing', accessType: 'ONGOING', stoppedDueToInactivity: false },
@@ -68,7 +91,12 @@ function fakeAsc(opts: { listForbidden?: boolean; requests?: AscReportRequest[] 
     crash: [{ id: 'crash-2026-10-19', processingDate: '2026-10-19' }],
     pur: [{ id: 'pur-2026-10-19', processingDate: '2026-10-19' }],
     ses: [{ id: 'ses-2026-10-19', processingDate: '2026-10-19' }],
+    subst: [{ id: 'subst-2026-10-19', processingDate: '2026-10-19' }],
+    subev: [{ id: 'subev-2026-10-19', processingDate: '2026-10-19' }],
     'snap-eng': [{ id: 'snap-eng-1', processingDate: '2026-10-19' }],
+    inst: [{ id: 'inst-2026-10-19', processingDate: '2026-10-19' }],
+    fw: [{ id: 'fw-2026-10-19', processingDate: '2026-10-19' }],
+    ...(opts.installs === 'ready' ? { 'snap-inst': [{ id: 'snap-inst-1', processingDate: '2026-10-21' }] } : {}),
   };
   const rowsFor = (instanceId: string): DelimitedRow[] => {
     if (instanceId === 'snap-eng-1') {
@@ -76,6 +104,39 @@ function fakeAsc(opts: { listForbidden?: boolean; requests?: AscReportRequest[] 
       const out: DelimitedRow[] = [];
       for (let d = '2026-09-01'; d <= '2026-10-17'; d = addDays(d, 1))
         out.push(eng(d, 'US', 'App Store search', 'Impression', 'No page', 999, 500));
+      return out;
+    }
+    const ins = (date: string, counts: number): DelimitedRow => ({
+      date,
+      event: 'Install',
+      'download type': 'First-time download',
+      'source type': 'App Store search',
+      territory: 'US',
+      counts: String(counts),
+    });
+    if (instanceId === 'fw-2026-10-19') {
+      const row = (date: string, territory: string, resolution: string, count: number, devices: number): DelimitedRow => ({
+        count: String(count),
+        territory,
+        date,
+        platform: 'iOS 26.1',
+        device: 'iPhone',
+        build: '23B85',
+        'unique devices': String(devices),
+        'release type': 'Production',
+        'resolution type': resolution,
+      });
+      return [
+        row('2026-10-17', 'US', 'Tapped', 10, 7),
+        row('2026-10-18', 'US', 'Tapped', 12, 9),
+        row('2026-10-18', 'DE', 'Cleared', 30, 20),
+      ];
+    }
+    // Ongoing installs: Oct 17 and 18. History: every day from Oct 1 to Oct 18 (overlapping).
+    if (instanceId === 'inst-2026-10-19') return [ins('2026-10-17', 5), ins('2026-10-18', 6)];
+    if (instanceId === 'snap-inst-1') {
+      const out: DelimitedRow[] = [];
+      for (let d = '2026-10-01'; d <= '2026-10-18'; d = addDays(d, 1)) out.push(ins(d, 100));
       return out;
     }
     const [kind, ...rest] = instanceId.split('-');
@@ -117,6 +178,61 @@ function fakeAsc(opts: { listForbidden?: boolean; requests?: AscReportRequest[] 
         pur('App Store search', 'US', 3, '20.97', '29.97', 2),
         pur('App Store search', 'US', -1, '-6.99', '-9.99', 0),
         pur('Web referrer', 'GB', 1, '4.99', '6.99', 1),
+      ];
+    }
+    if (kind === 'subst') {
+      // Columns of the App Store Subscription State report (Standard).
+      const st = (date: string, metric: string, group: string, product: string, offer: string, territory: string, counts: number) => ({
+        date,
+        'app name': 'Acme',
+        'app apple identifier': APP.appleId,
+        'state metric': metric,
+        'state metric grouping': group,
+        'subscription name': product,
+        'subscription identifier': product === 'Pro Monthly' ? '6450000001' : '6450000002',
+        'subscription duration': product === 'Pro Monthly' ? '1 Month' : '1 Year',
+        'offer type': offer,
+        'auto-renew status': 'Auto-renew on',
+        'family sharing': 'Individual',
+        'app download source type': 'App Store search',
+        'page type': 'Product page',
+        territory,
+        counts: String(counts),
+      });
+      return [
+        st('2026-10-17', 'Full price', 'Paid plans', 'Pro Monthly', '', 'US', 10),
+        st('2026-10-18', 'Full price', 'Paid plans', 'Pro Monthly', '', 'US', 11),
+        st('2026-10-18', 'Full price', 'Paid plans', 'Pro Annual', '', 'DE', 4),
+        st('2026-10-18', 'Free trials', 'Subscription offers', 'Pro Monthly', 'Free Trial', 'US', 3),
+        st('2026-10-18', 'Billing retry', 'Billing issue', 'Pro Monthly', '', 'US', 1),
+        st('2026-10-18', 'Voluntarily churned', 'Churned', 'Pro Monthly', '', 'US', 40),
+      ];
+    }
+    if (kind === 'subev') {
+      // Columns of the App Store Subscription Event report (Standard).
+      const ev = (sub: string, group: string, offer: string, source: string, territory: string, counts: number) => ({
+        'event date': '2026-10-18',
+        'app name': 'Acme',
+        'app apple identifier': APP.appleId,
+        'event sub type': sub,
+        'event grouping': group,
+        'subscription name': 'Pro Monthly',
+        'subscription identifier': '6450000001',
+        'offer type': offer,
+        'app download source type': source,
+        'page type': 'Product page',
+        territory,
+        counts: String(counts),
+      });
+      return [
+        ev('Free Trial Starts', 'Offer Starts', 'Free Trial', 'App Store search', 'US', 3),
+        ev('Free Trial Starts', 'Offer Starts', 'Free Trial', 'Web referrer', 'US', 1),
+        ev('Full Price from Free Trial', 'Paid Subscriptions from Offers', 'Free Trial', 'App Store search', 'US', 2),
+        ev('Full Price Subscription Starts', 'Paid Subscription Starts', '', 'App Store browse', 'GB', 1),
+        ev('Full Price Renewals', 'Renewals', '', 'App Store search', 'US', 5),
+        ev('Voluntary Churn from Full Price', 'Voluntary Churn', '', 'App Store search', 'US', 2),
+        ev('Involuntary Churn from Full Price', 'Involuntary Churn', '', 'App Store search', 'US', 1),
+        ev('Refunds from Full Price', 'Refunds', '', 'App Store search', 'US', 1),
       ];
     }
     if (kind === 'ses') {
@@ -161,7 +277,63 @@ function fakeAsc(opts: { listForbidden?: boolean; requests?: AscReportRequest[] 
   }
   const client: AscClient = {
     async listApps() {
-      return [{ id: APP.appleId, name: 'Acme', bundleId: 'com.acme.app' }];
+      calls.push('listApps');
+      return [{ id: APP.appleId, name: 'Acme', bundleId: 'com.acme.app', sku: 'ACME' }];
+    },
+    async listingSnapshot() {
+      calls.push('listingSnapshot');
+      if (opts.listing === 'forbidden') throw new SourceError('asc', 403, 'HTTP 403: FORBIDDEN_ERROR');
+      const values = opts.listing ?? [
+        { entity: 'version:IOS', locale: '', field: 'live', value: '2.0' },
+        { entity: 'listing:IOS', locale: 'en-US', field: 'keywords', value: 'alert,bell' },
+        { entity: 'app_info', locale: 'en-US', field: 'subtitle', value: 'Alerts that ring' },
+      ];
+      return { scopes: ['version:IOS', 'listing:IOS', 'app_info'], values, calls: 4 };
+    },
+    async salesReport(vendor, date, onRow) {
+      calls.push(`sales:${date}`);
+      if (opts.salesForbidden) throw new SourceError('asc', 403, 'sales report: HTTP 403: FORBIDDEN_ERROR');
+      if (date !== '2026-10-18') return null;
+      // Summary Sales rows (columns as Apple names them), for this app and another app of the account.
+      const sale = (
+        sku: string,
+        type: string,
+        units: number,
+        proceeds: string,
+        cur: string,
+        country: string,
+        appleId: string,
+        price: string,
+        parent: string,
+        sub: string,
+      ) => ({
+        provider: 'APPLE',
+        sku,
+        title: sku === 'ACME' ? 'Acme' : sku,
+        'product type identifier': type,
+        units: String(units),
+        'developer proceeds': proceeds,
+        'begin date': '10/18/2026',
+        'end date': '10/18/2026',
+        'customer currency': cur,
+        'country code': country,
+        'currency of proceeds': cur,
+        'apple identifier': appleId,
+        'customer price': price,
+        'parent identifier': parent,
+        subscription: sub,
+        period: sub ? '1 Month' : '',
+      });
+      const rows = [
+        sale('acme.pro', 'IAY', 3, '4.99', 'USD', 'US', '900001', '6.99', 'ACME', 'New'),
+        sale('acme.pro', 'IAY', 5, '4.99', 'USD', 'US', '900001', '6.99', 'ACME', 'Renewal'),
+        sale('acme.pro', 'IAY', -1, '4.99', 'USD', 'US', '900001', '-6.99', 'ACME', 'New'),
+        sale('acme.pro', 'IAY', 2, '5.05', 'EUR', 'DE', '900001', '7.99', 'ACME', 'Renewal'),
+        sale('ACME', '7', 30, '0', 'USD', 'US', APP.appleId, '0', '', ''),
+        sale('other.tip', 'IA1', 4, '0.70', 'USD', 'US', '900002', '0.99', 'OTHER', ''),
+      ];
+      for (const r of rows) onRow(r);
+      return rows.length;
     },
     async latestBuildIcon() {
       return null;
@@ -186,9 +358,14 @@ function fakeAsc(opts: { listForbidden?: boolean; requests?: AscReportRequest[] 
     },
     async listReports(requestId) {
       calls.push(`listReports:${requestId}`);
+      const installs = opts.installs
+        ? [{ id: requestId === 'snap' ? 'snap-inst' : 'inst', name: 'App Store Installation and Deletion Standard', category: 'APP_USAGE' }]
+        : [];
       return requestId === 'snap'
-        ? [{ id: 'snap-eng', name: 'App Store Discovery and Engagement Standard', category: 'APP_STORE_ENGAGEMENT' }]
+        ? [{ id: 'snap-eng', name: 'App Store Discovery and Engagement Standard', category: 'APP_STORE_ENGAGEMENT' }, ...installs]
         : [
+            ...installs,
+            ...(opts.framework ? [{ id: 'fw', name: 'Mode Activity Notifications', category: 'FRAMEWORK_USAGE' }] : []),
             { id: 'eng', name: 'App Store Discovery and Engagement Standard', category: 'APP_STORE_ENGAGEMENT' },
             { id: 'dl', name: 'App Downloads Standard', category: 'APP_STORE_COMMERCE' },
             { id: 'crash', name: 'App Crashes', category: 'APP_USAGE' },
@@ -196,10 +373,18 @@ function fakeAsc(opts: { listForbidden?: boolean; requests?: AscReportRequest[] 
             { id: 'pur', name: 'App Store Purchases Standard', category: 'APP_STORE_COMMERCE' },
             { id: 'pre', name: 'App Store Pre-orders Standard', category: 'APP_STORE_COMMERCE' },
             { id: 'ses', name: 'App Sessions Standard', category: 'APP_USAGE' },
+            { id: 'subst', name: 'App Store Subscription State Standard', category: 'APP_STORE_COMMERCE' },
+            { id: 'subev', name: 'App Store Subscription Event Standard', category: 'APP_STORE_COMMERCE' },
+            { id: 'subevd', name: 'App Store Subscription Event Detailed', category: 'APP_STORE_COMMERCE' },
           ];
     },
-    async listInstances(reportId) {
-      calls.push(`listInstances:${reportId}`);
+    async listInstances(reportId, granularity) {
+      calls.push(`listInstances:${reportId}${granularity === 'DAILY' ? '' : `:${granularity}`}`);
+      if (granularity === 'MONTHLY')
+        return reportId === 'snap-inst' && opts.installs === 'monthly'
+          ? [{ id: 'snap-inst-m1', granularity: 'MONTHLY', processingDate: '2026-10-21' }]
+          : [];
+      if (granularity !== 'DAILY') return [];
       return [...(instances[reportId] ?? [])].reverse().map((i) => ({ ...i, granularity: 'DAILY' }));
     },
     async listSegments(instanceId) {
@@ -215,8 +400,24 @@ function fakeAsc(opts: { listForbidden?: boolean; requests?: AscReportRequest[] 
       calls.push('listReviews');
       return {
         reviews: [
-          { id: 'r1', rating: 5, title: 'Great', body: 'Love it', createdDate: '2026-10-18T10:00:00-07:00', territory: 'USA' },
-          { id: 'r2', rating: 1, title: 'Crashes', body: 'Crashes on start', createdDate: '2026-10-12T10:00:00Z', territory: 'GBR' },
+          {
+            id: 'r1',
+            rating: 5,
+            title: 'Great',
+            body: 'Love it',
+            createdDate: '2026-10-18T10:00:00-07:00',
+            territory: 'USA',
+            replied: false,
+          },
+          {
+            id: 'r2',
+            rating: 1,
+            title: 'Crashes',
+            body: 'Crashes on start',
+            createdDate: '2026-10-12T10:00:00Z',
+            territory: 'GBR',
+            replied: Boolean(opts.replied),
+          },
         ],
         next: null,
       };
@@ -229,7 +430,9 @@ function fakeAsc(opts: { listForbidden?: boolean; requests?: AscReportRequest[] 
  * `financeDenied`: listing the financial folders answers 403. `financeReadDenied`: they can be
  * listed, but reading a financial file answers 403 (what an account without "View financial data" sees).
  */
-function fakePlay(opts: { financeDenied?: boolean; financeReadDenied?: boolean } = {}) {
+function fakePlay(
+  opts: { financeDenied?: boolean; financeReadDenied?: boolean; vitals?: 'empty' | 'forbidden'; reviews?: 'ok' | 'forbidden' } = {},
+) {
   const financial = (name: string) => /^(financial-stats|earnings)\//.test(name);
   const calls: string[] = [];
   const pkg = APP.playPackage;
@@ -386,6 +589,8 @@ function fakePlay(opts: { financeDenied?: boolean; financeReadDenied?: boolean }
     },
     async vitals(_pkg, metric, range) {
       calls.push(`vitals:${metric}:${range.start}..${range.end}`);
+      if (opts.vitals === 'forbidden') throw new SourceError('play', 403, 'HTTP 403: PERMISSION_DENIED');
+      if (opts.vitals === 'empty') return [];
       return [
         {
           date: range.end,
@@ -406,6 +611,31 @@ function fakePlay(opts: { financeDenied?: boolean; financeReadDenied?: boolean }
     async listApps() {
       return [{ packageName: pkg, name: 'Acme' }];
     },
+    ...(opts.reviews
+      ? {
+          async listReviews() {
+            calls.push('listReviews');
+            if (opts.reviews === 'forbidden') throw new SourceError('play', 403, 'HTTP 403: The caller does not have permission');
+            return {
+              reviews: [
+                {
+                  id: 'gp:new1',
+                  modifiedAt: '2026-10-19T08:00:00.000Z',
+                  rating: 2,
+                  text: 'Crashes on launch',
+                  language: 'en',
+                  version: '2.4.0',
+                  replied: false,
+                },
+              ],
+              next: null,
+            };
+          },
+          async replyToReview(_pkg: string, id: string, text: string) {
+            calls.push(`reply:${id}:${text}`);
+          },
+        }
+      : {}),
   };
   return { client, calls };
 }
@@ -893,16 +1123,16 @@ export function appContract(name: string, makeStore: () => Promise<Store>): void
           proceeds: 11.13,
         });
         expect(playPerf.stores[0]!.currency).toBe('EUR');
-        const subs = await appSubscriptions(ctx, { app: APP.id, start: '2026-10-01', end: '2026-10-19' });
+        const subs = await appSubscriptions(ctx, { app: APP.id, store: 'play', start: '2026-10-01', end: '2026-10-19' });
         expect(subs.current).toEqual({ newSubscriptions: 6, canceledSubscriptions: 2, activeSubscriptions: 27, net: 4 });
         expect(subs.products).toEqual([
           { product: 'pro_monthly', newSubscriptions: 6, canceledSubscriptions: 2, activeSubscriptions: 27, net: 4 },
         ]);
-        expect(subs.territories.map((t) => [t.territory, t.activeSubscriptions, t.net])).toEqual([
+        expect(subs.territories!.map((t) => [t.territory, t.activeSubscriptions, t.net])).toEqual([
           ['US', 22, 4],
           ['DE', 5, 0],
         ]);
-        expect(subs.series.map((d) => [d.date, d.activeSubscriptions])).toEqual([
+        expect(subs.series!.map((d) => [d.date, d.activeSubscriptions])).toEqual([
           ['2026-10-09', 20],
           ['2026-10-10', 27],
         ]);
@@ -1008,6 +1238,39 @@ export function appContract(name: string, makeStore: () => Promise<Store>): void
         expect(only.stores[0]!.volumePurchaseDownloads).toBeUndefined();
         // They do not make Germany one of the app's biggest storefronts.
         expect(await appStorefronts(store, APP, '2026-10-20')).toEqual(['us', 'fr', 'cn', 'jp', 'gb']);
+        // Counted only when asked for.
+        const all = await appPerformance(ctx, { ...p, includeVolumePurchases: true });
+        expect(all.stores[0]!.current.downloads).toBe(100012);
+        expect(all.notes.some((n) => n.startsWith('includeVolumePurchases'))).toBe(true);
+      });
+
+      it('flags days far above the 28 days before them, with the territory and source behind them', async () => {
+        const cfg = config({ APP_STORE_PUBLIC_DATA: 'false' });
+        const rows = [];
+        for (let d = '2026-08-20'; d <= '2026-10-18'; d = addDays(d, 1))
+          rows.push({ date: d, territory: 'US', source: 'search', pageViewsUnique: 40, downloads: 20 });
+        rows.push({ date: '2026-09-15', territory: 'DE', source: 'institutional', pageViewsUnique: 0, downloads: 100000 });
+        await store.writeAppStoreDaily(APP.id, 'apple', { metrics: ['pageViewsUnique', 'downloads'], shape: 'cross', dates: [], rows });
+        const ctx = { store, config: cfg, clients: {}, now: () => NOW };
+        const perf = await appPerformance(ctx, { app: APP.id, store: 'apple', start: '2026-07-21', end: '2026-10-18' });
+        // 90 days: the institutional spike neither inflates the totals nor the conversion rate...
+        expect(perf.stores[0]!.current).toMatchObject({ downloads: 60 * 20, pageConversion: 0.5 });
+        // ...and is flagged, with what was behind it.
+        expect(perf.anomalies).toEqual([
+          {
+            store: 'apple',
+            date: '2026-09-15',
+            metric: 'downloads',
+            value: 100020,
+            median28: 20,
+            ratio: 5001,
+            top: { territory: 'DE', source: 'institutional', value: 100000, share: 0.9998 },
+          },
+        ]);
+        expect(perf.notes.some((n) => n.startsWith('Anomalies: 1 day') && n.includes('institutional'))).toBe(true);
+        // A steady app has none.
+        const quiet = await appPerformance(ctx, { app: APP.id, store: 'apple', start: '2026-10-01', end: '2026-10-18' });
+        expect(quiet).not.toHaveProperty('anomalies');
       });
 
       it("checks the app's biggest storefronts first and only the charts it can be in", async () => {
@@ -1124,6 +1387,966 @@ export function appContract(name: string, makeStore: () => Promise<Store>): void
         expect(progress.apps[0]!.datasets.find((d) => d.dataset === 'google_play')).toMatchObject({ complete: true });
       });
 
+      it('syncs App Store subscription states and events and summarizes them per subscription, offer, storefront and source', async () => {
+        const cfg = config({ APP_STORE_PUBLIC_DATA: 'false' });
+        const asc = fakeAsc();
+        const run = await runSync({ store, config: cfg, clients: { asc: asc.client }, trigger: 'manual', now: NOW, pacing: {} });
+        expect(run.status).toBe('ok');
+        expect(asc.calls).toContain('listInstances:subst');
+        expect(asc.calls).toContain('listInstances:subev');
+        // The Detailed event report is not read.
+        expect(asc.calls).not.toContain('listInstances:subevd');
+        const ctx = { store, config: cfg, clients: {}, now: () => NOW };
+        const subs = await appSubscriptions(ctx, { app: APP.id, store: 'apple', start: '2026-10-12', end: '2026-10-18' });
+        expect(subs).not.toHaveProperty('current');
+        const apple = subs.appStore!;
+        // Levels on the last day: 11 + 4 paid plans and 3 trials; billing retry apart; churned left out.
+        expect(apple.current).toMatchObject({
+          activeSubscriptions: 18,
+          paidPlans: 15,
+          freeTrials: 3,
+          billingRetry: 1,
+          trialStarts: 4,
+          trialConversions: 2,
+          paidStarts: 1,
+          renewals: 5,
+          voluntaryChurn: 2,
+          involuntaryChurn: 1,
+          churn: 3,
+          refunds: 1,
+          trialConversionRate: 0.5,
+        });
+        expect(apple.previous).toMatchObject({ activeSubscriptions: 0, trialStarts: 0 });
+        expect(apple.products.map((x) => [x.product, x.activeSubscriptions, x.trialStarts])).toEqual([
+          ['Pro Monthly', 14, 4],
+          ['Pro Annual', 4, 0],
+        ]);
+        expect(apple.offerTypes.map((x) => [x.offerType, x.activeSubscriptions])).toEqual([
+          ['none', 15],
+          ['free_trial', 3],
+        ]);
+        expect(apple.territories.map((x) => [x.territory, x.activeSubscriptions, x.paidStarts])).toEqual([
+          ['US', 14, 0],
+          ['DE', 4, 0],
+          ['GB', 0, 1],
+        ]);
+        expect(apple.sources.find((x) => x.source === 'search')).toMatchObject({ trialStarts: 3, trialConversions: 2, renewals: 5 });
+        expect(apple.sources.find((x) => x.source === 'web_referrer')).toMatchObject({ trialStarts: 1 });
+        expect(apple.series.map((x) => [x.date, x.activeSubscriptions, x.trialStarts])).toEqual([
+          ['2026-10-17', 10, 0],
+          ['2026-10-18', 18, 4],
+        ]);
+        // Filters: an offer type and a storefront.
+        const trials = await appSubscriptions(ctx, {
+          app: APP.id,
+          store: 'apple',
+          start: '2026-10-12',
+          end: '2026-10-18',
+          offerType: 'free_trial',
+        });
+        expect(trials.appStore!.current).toMatchObject({ activeSubscriptions: 3, trialStarts: 4, renewals: 0 });
+        const gb = await appSubscriptions(ctx, { app: APP.id, store: 'apple', start: '2026-10-12', end: '2026-10-18', territory: 'gb' });
+        expect(gb.appStore!.current).toMatchObject({ activeSubscriptions: 0, paidStarts: 1 });
+        // Both stores: Google Play keeps its top-level fields, the App Store is under appStore.
+        const both = await appSubscriptions(ctx, { app: APP.id, start: '2026-10-12', end: '2026-10-18' });
+        expect(both.current).toBeDefined();
+        expect(both.appStore!.current.activeSubscriptions).toBe(18);
+        // A newer instance replaces the days it covers as a whole.
+        await store.writeAppSubscriptionMetrics(APP.id, {
+          kind: 'state',
+          dates: ['2026-10-18'],
+          rows: [
+            {
+              date: '2026-10-18',
+              metric: 'full_price',
+              metricGroup: 'paid_plans',
+              product: 'Pro Monthly',
+              offerType: '',
+              territory: 'US',
+              source: '*',
+              count: 12,
+            },
+          ],
+        });
+        const again = await appSubscriptions(ctx, { app: APP.id, store: 'apple', start: '2026-10-12', end: '2026-10-18' });
+        expect(again.appStore!.current).toMatchObject({ activeSubscriptions: 12, freeTrials: 0, billingRetry: 0, trialStarts: 4 });
+      });
+
+      it('reads Sales and Trends per day for the vendor account, history back a year, and splits revenue per product and currency', async () => {
+        const cfg = config({ APP_STORE_PUBLIC_DATA: 'false', ASC_VENDOR_NUMBER: '85000000' });
+        const asc = fakeAsc();
+        const run = await runSync({ store, config: cfg, clients: { asc: asc.client }, trigger: 'manual', now: NOW, pacing: {} });
+        expect(run.status).toBe('ok');
+        // Three days back to yesterday; yesterday is not out yet, so it is asked again later, not now.
+        expect(asc.calls.filter((c) => c.startsWith('sales:'))).toEqual(['sales:2026-10-17', 'sales:2026-10-18', 'sales:2026-10-19']);
+        const state = JSON.parse((await store.getMeta(syncKeys.ascSales))!);
+        expect(state).toMatchObject({ through: '2026-10-18', from: '2026-10-17' });
+        expect(Date.parse(state.waitUntil)).toBeGreaterThan(NOW.getTime());
+
+        // The next run: no daily call while waiting; history goes back from the oldest day read.
+        const next = fakeAsc();
+        await runSync({
+          store,
+          config: cfg,
+          clients: { asc: next.client },
+          trigger: 'manual',
+          now: new Date('2026-10-20T05:00:00Z'),
+          pacing: {},
+        });
+        const sales = next.calls.filter((c) => c.startsWith('sales:'));
+        expect(sales[0]).toBe('sales:2026-10-16');
+        expect(sales).not.toContain('sales:2026-10-19');
+        expect(JSON.parse((await store.getMeta(syncKeys.ascSales))!).from < '2026-10-16').toBe(true);
+
+        const ctx = { store, config: cfg, clients: {}, now: () => NOW };
+        const rev = await appRevenue(ctx, { app: APP.id, start: '2026-10-12', end: '2026-10-18' });
+        expect(rev.sales!.configured).toBe(true);
+        // Never added across currencies; refunds kept apart; the other app's tip is not this app's.
+        expect(rev.sales!.currencies).toEqual([
+          {
+            currency: 'EUR',
+            current: { units: 2, refundUnits: 0, proceeds: 10.1, refundedProceeds: 0 },
+            previous: { units: 0, refundUnits: 0, proceeds: 0, refundedProceeds: 0 },
+            newSubscriptionProceeds: 0,
+            renewalProceeds: 10.1,
+          },
+          {
+            currency: 'USD',
+            current: { units: 8, refundUnits: 1, proceeds: 34.93, refundedProceeds: 4.99 },
+            previous: { units: 0, refundUnits: 0, proceeds: 0, refundedProceeds: 0 },
+            newSubscriptionProceeds: 9.98,
+            renewalProceeds: 24.95,
+          },
+        ]);
+        expect(rev.sales!.rows.find((x) => x.sku === 'acme.pro' && x.currency === 'USD')).toMatchObject({ units: 8, refundUnits: 1 });
+        // Analytics: App Store Purchases per product, the refund kept apart.
+        expect(rev.analytics.rows).toEqual([
+          { product: 'Pro', purchases: 4, refunds: 1, proceeds: 18.97, refundedProceeds: 6.99, sales: 26.97 },
+        ]);
+        expect(rev.refunds).toEqual([
+          expect.objectContaining({
+            source: 'analytics',
+            date: '2026-10-18',
+            product: 'Pro',
+            refunds: 1,
+            refundedProceeds: 6.99,
+            currency: 'USD',
+          }),
+          expect.objectContaining({
+            source: 'sales',
+            date: '2026-10-18',
+            sku: 'acme.pro',
+            refunds: 1,
+            refundedProceeds: 4.99,
+            currency: 'USD',
+          }),
+        ]);
+        const byDay = await appRevenue(ctx, { app: APP.id, start: '2026-10-12', end: '2026-10-18', groupBy: ['date', 'product'] });
+        expect(byDay.analytics.rows[0]).toMatchObject({ date: '2026-10-18', product: 'Pro' });
+        // app_subscriptions splits subscription proceeds into first payments and renewals.
+        const subs = await appSubscriptions(ctx, { app: APP.id, store: 'apple', start: '2026-10-12', end: '2026-10-18' });
+        expect(subs.appStore!.proceeds).toEqual([
+          { currency: 'EUR', newSubscriptions: 0, renewals: 10.1, newUnits: 0, renewalUnits: 2 },
+          { currency: 'USD', newSubscriptions: 9.98, renewals: 24.95, newUnits: 3, renewalUnits: 5 },
+        ]);
+      });
+
+      it('catches up every missed Sales and Trends day after a pause, a month per run, and starts over for a new app', async () => {
+        const cfg = config({ APP_STORE_PUBLIC_DATA: 'false', ASC_VENDOR_NUMBER: '85000000' });
+        await store.setMeta(syncKeys.ascSales, JSON.stringify({ apps: [APP.id], through: '2026-09-01', from: '2025-10-25' }));
+        const asc = fakeAsc();
+        await runSync({ store, config: cfg, clients: { asc: asc.client }, trigger: 'manual', now: NOW, pacing: {} });
+        // Sep 2 onwards, in order, no day skipped (the history unit finishes last year's days on its own).
+        const days = asc.calls.filter((c) => c.startsWith('sales:2026-'));
+        expect(days[0]).toBe('sales:2026-09-02');
+        expect(days).toHaveLength(30);
+        expect(days.at(-1)).toBe('sales:2026-10-01');
+        expect(JSON.parse((await store.getMeta(syncKeys.ascSales))!).through).toBe('2026-10-01');
+        // A newly configured app has no sales history: the cursor starts over for all apps.
+        const two = config({
+          APP_STORE_PUBLIC_DATA: 'false',
+          ASC_VENDOR_NUMBER: '85000000',
+          APPS: JSON.stringify([APP, { id: 'second', name: 'Second', appleId: '7654321' }]),
+        });
+        const again = fakeAsc();
+        await runSync({
+          store,
+          config: two,
+          clients: { asc: again.client },
+          trigger: 'manual',
+          now: new Date('2026-10-20T05:00:00Z'),
+          pacing: {},
+        });
+        expect(again.calls.filter((c) => c.startsWith('sales:'))[0]).toBe('sales:2026-10-17');
+        const st = JSON.parse((await store.getMeta(syncKeys.ascSales))!);
+        expect(st.apps).toEqual(['acme-app', 'second']);
+        expect(st.from).toBe('2026-10-17');
+      });
+
+      it('marks stored App Store reviews replied once they have a developer response', async () => {
+        const cfg = config({ APP_STORE_PUBLIC_DATA: 'false' });
+        await runSync({ store, config: cfg, clients: { asc: fakeAsc().client }, trigger: 'manual', now: NOW, pacing: {} });
+        const ctx = { store, config: cfg, clients: {}, now: () => NOW };
+        const replied = async () =>
+          (await appReviews(ctx, { app: APP.id, store: 'apple', start: '2026-10-01', end: '2026-10-20' })).reviews.find(
+            (r) => r.id === 'r2',
+          )!.replied;
+        expect(await replied()).toBe(false);
+        await runSync({
+          store,
+          config: cfg,
+          clients: { asc: fakeAsc({ replied: true }).client },
+          trigger: 'manual',
+          now: new Date('2026-10-20T09:00:00Z'),
+          pacing: {},
+        });
+        expect(await replied()).toBe(true);
+      });
+
+      it('warns in setup_status when Sales and Trends is not set up or the key may not read it', async () => {
+        const readiness = evaluateReadiness({
+          configured: true,
+          identityOk: true,
+          inspection: { appFound: true, managedOAuthEnabled: true, broadPolicyReasons: [] },
+        });
+        const status = async (cfg: SearchkeepConfig, asc: AscClient) =>
+          (await setupStatus({ store, config: cfg, clients: { asc }, now: () => NOW }, { readiness })).checks;
+        const without = await status(config({ APP_STORE_PUBLIC_DATA: 'false' }), fakeAsc().client);
+        expect(without.find((c) => c.id === 'config.asc_vendor')).toMatchObject({
+          status: 'warn',
+          detail: expect.stringContaining('ASC_VENDOR_NUMBER'),
+        });
+        expect(without.find((c) => c.id === 'probe.asc_sales')).toBeUndefined();
+        const cfg = config({ APP_STORE_PUBLIC_DATA: 'false', ASC_VENDOR_NUMBER: '85000000' });
+        const ok = await status(cfg, fakeAsc().client);
+        expect(ok.find((c) => c.id === 'config.asc_vendor')!.status).toBe('ok');
+        expect(ok.find((c) => c.id === 'probe.asc_sales')!.status).toBe('ok');
+        const denied = await status(cfg, fakeAsc({ salesForbidden: true }).client);
+        expect(denied.find((c) => c.id === 'probe.asc_sales')).toMatchObject({
+          status: 'warn',
+          detail: expect.stringContaining('Sales and Reports'),
+        });
+        expect(config({ ASC_VENDOR_NUMBER: 'abc' }).errors.join(' ')).toContain('ASC_VENDOR_NUMBER');
+      });
+
+      it('records store changes between daily snapshots, from a baseline, and attaches them to the funnel', async () => {
+        const v = (entity: string, locale: string, field: string, value: string): AppListingValue => ({ entity, locale, field, value });
+        // The first snapshot of a scope is the baseline: nothing changed.
+        expect(
+          await store.snapshotAppListing(
+            APP.id,
+            'apple',
+            '2026-10-16',
+            ['version:IOS', 'listing:IOS'],
+            [
+              v('version:IOS', '', 'live', '2.0'),
+              v('listing:IOS', 'en-US', 'keywords', 'alert,bell'),
+              v('listing:IOS', 'de-DE', 'keywords', 'alarm'),
+            ],
+          ),
+        ).toBe(0);
+        // Changed, added and removed fields; a scope not read today keeps its values.
+        expect(
+          await store.snapshotAppListing(
+            APP.id,
+            'apple',
+            '2026-10-18',
+            ['listing:IOS'],
+            [v('listing:IOS', 'en-US', 'keywords', 'alert,bell,ring'), v('listing:IOS', 'en-US', 'promotional_text', 'New!')],
+          ),
+        ).toBe(3);
+        // Twice the same day: the first value before, the last after.
+        await store.snapshotAppListing(
+          APP.id,
+          'apple',
+          '2026-10-18',
+          ['listing:IOS'],
+          [v('listing:IOS', 'en-US', 'keywords', 'alert,ring'), v('listing:IOS', 'en-US', 'promotional_text', 'New!')],
+        );
+        // Another store is separate; its first snapshot is its baseline.
+        expect(await store.snapshotAppListing(APP.id, 'play', '2026-10-18', ['listing'], [v('listing', 'en-US', 'title', 'Acme')])).toBe(0);
+        // Unchanged: nothing recorded.
+        expect(await store.snapshotAppListing(APP.id, 'apple', '2026-10-18', ['version:IOS'], [v('version:IOS', '', 'live', '2.0')])).toBe(
+          0,
+        );
+
+        const cfg = config({ APP_STORE_PUBLIC_DATA: 'false' });
+        const ctx = { store, config: cfg, clients: {}, now: () => NOW };
+        const res = await appChanges(ctx, { app: APP.id, store: 'apple' });
+        expect(res.range.end).toBe('2026-10-20');
+        expect(res.changes.map((c) => [c.date, c.locale, c.field, c.kind, c.before, c.after])).toEqual([
+          ['2026-10-18', 'de-DE', 'keywords', 'removed', 'alarm', null],
+          ['2026-10-18', 'en-US', 'keywords', 'changed', 'alert,bell', 'alert,ring'],
+          ['2026-10-18', 'en-US', 'promotional_text', 'added', null, 'New!'],
+        ]);
+        expect(res.days).toEqual([{ store: 'apple', date: '2026-10-18', changes: 3 }]);
+        expect((await appChanges(ctx, { app: APP.id, field: 'keywords', locale: 'en-US' })).changes).toHaveLength(1);
+        expect((await appChanges(ctx, { app: APP.id, entity: 'version' })).changes).toHaveLength(0);
+
+        // The funnel's series lists the day's changes (and can leave them out).
+        await store.writeAppStoreDaily(APP.id, 'apple', {
+          metrics: ['impressions'],
+          shape: 'cross',
+          dates: ['2026-10-17', '2026-10-18'],
+          rows: [
+            { date: '2026-10-17', territory: 'US', source: 'search', impressions: 100 },
+            { date: '2026-10-18', territory: 'US', source: 'search', impressions: 160 },
+          ],
+        });
+        const perf = await appPerformance(ctx, { app: APP.id, store: 'apple', start: '2026-10-17', end: '2026-10-18' });
+        expect(perf.stores[0]!.series.map((x) => [x.date, x.changes?.length ?? 0])).toEqual([
+          ['2026-10-17', 0],
+          ['2026-10-18', 3],
+        ]);
+        expect(perf.notes.some((n) => n.startsWith('Store changes'))).toBe(true);
+        const without = await appPerformance(ctx, {
+          app: APP.id,
+          store: 'apple',
+          start: '2026-10-17',
+          end: '2026-10-18',
+          includeChanges: false,
+        });
+        expect(without.stores[0]!.series.some((x) => 'changes' in x)).toBe(false);
+      });
+
+      it('snapshots the store listing once a day in the sync, and notes a key that may not read it', async () => {
+        const cfg = config({ APP_STORE_PUBLIC_DATA: 'false' });
+        const asc = fakeAsc();
+        await runSync({ store, config: cfg, clients: { asc: asc.client }, trigger: 'manual', now: NOW, pacing: {} });
+        expect(asc.calls.filter((c) => c === 'listingSnapshot')).toHaveLength(1);
+        const next = fakeAsc({
+          listing: [
+            { entity: 'version:IOS', locale: '', field: 'live', value: '2.1' },
+            { entity: 'listing:IOS', locale: 'en-US', field: 'keywords', value: 'alert,bell' },
+            { entity: 'app_info', locale: 'en-US', field: 'subtitle', value: 'Alerts that ring' },
+          ],
+        });
+        // Same day: not read again. Next day: the new version on sale is a change.
+        await runSync({ store, config: cfg, clients: { asc: next.client }, trigger: 'manual', now: NOW, pacing: {} });
+        expect(next.calls).not.toContain('listingSnapshot');
+        await runSync({
+          store,
+          config: cfg,
+          clients: { asc: next.client },
+          trigger: 'manual',
+          now: new Date('2026-10-21T04:00:00Z'),
+          pacing: {},
+        });
+        const ctx = { store, config: cfg, clients: {}, now: () => new Date('2026-10-21T04:00:00Z') };
+        const res = await appChanges(ctx, { app: APP.id, store: 'apple' });
+        expect(res.changes).toEqual([
+          expect.objectContaining({
+            date: '2026-10-21',
+            entity: 'version:IOS',
+            field: 'live',
+            before: '2.0',
+            after: '2.1',
+            kind: 'changed',
+          }),
+        ]);
+        // A key that may not read app metadata: noted, the sync goes on, setup_status warns.
+        const denied = fakeAsc({ listing: 'forbidden' });
+        const run = await runSync({
+          store,
+          config: cfg,
+          clients: { asc: denied.client },
+          trigger: 'manual',
+          now: new Date('2026-10-22T04:00:00Z'),
+          pacing: {},
+        });
+        expect(run.status).toBe('ok');
+        const noted = await appChanges({ ...ctx, now: () => new Date('2026-10-22T04:00:00Z') }, { app: APP.id, store: 'apple' });
+        expect(noted.notes.some((n) => n.includes('may not read'))).toBe(true);
+        const readiness = evaluateReadiness({
+          configured: true,
+          identityOk: true,
+          inspection: { appFound: true, managedOAuthEnabled: true, broadPolicyReasons: [] },
+        });
+        const checks = (await setupStatus({ store, config: cfg, clients: { asc: denied.client }, now: () => NOW }, { readiness })).checks;
+        expect(checks.find((c) => c.id === 'probe.asc_metadata')).toMatchObject({
+          status: 'warn',
+          detail: expect.stringContaining('App Information'),
+        });
+        expect(checks.find((c) => c.id === 'config.play_metadata')).toMatchObject({ status: 'skipped' });
+      });
+
+      it('keeps the App Store funnel per page type and per custom product page', async () => {
+        const cfg = config({ APP_STORE_PUBLIC_DATA: 'false' });
+        const ctx = { store, config: cfg, clients: {}, now: () => NOW };
+        const add = async (collector: ReturnType<typeof engagementCollector>, rows: DelimitedRow[]) => {
+          for (const r of rows) collector.add(r);
+          await collector.write(store, APP.id);
+        };
+        const ev = (event: string, pageType: string, title: string | null, counts: number, unique: number): DelimitedRow => ({
+          date: '2026-10-18',
+          event,
+          'page type': pageType,
+          ...(title !== null ? { 'page title': title } : {}),
+          'source type': 'App Store search',
+          territory: 'US',
+          counts: String(counts),
+          'unique counts': String(unique),
+        });
+        const dl = (pageType: string, title: string | null, counts: number): DelimitedRow => ({
+          date: '2026-10-18',
+          'download type': 'First-time download',
+          'page type': pageType,
+          ...(title !== null ? { 'page title': title } : {}),
+          'source type': 'App Store search',
+          territory: 'US',
+          counts: String(counts),
+        });
+        // Standard: per page type.
+        await add(engagementCollector(), [
+          ev('Impression', 'No page', null, 500, 400),
+          ev('Page view', 'Product page', null, 80, 60),
+          ev('Page view', 'Product page', null, 20, 15),
+          ev('Page view', 'In-app event', null, 12, 10),
+        ]);
+        await add(downloadsCollector(), [dl('Product page', null, 30), dl('No page', null, 25), dl('In-app event', null, 2)]);
+        // Detailed: per page title.
+        await add(engagementReferrersCollector(), [
+          ev('Page view', 'Product page', 'Default Product Page', 70, 55),
+          ev('Page view', 'Product page', 'Alarm lovers', 30, 20),
+        ]);
+        await add(downloadReferrersCollector(), [dl('Product page', 'Default Product Page', 18), dl('Product page', 'Alarm lovers', 12)]);
+        const byType = await appPerformance(ctx, {
+          app: APP.id,
+          store: 'apple',
+          start: '2026-10-12',
+          end: '2026-10-18',
+          groupBy: ['page_type'],
+        });
+        expect(byType.pages).toEqual([
+          {
+            pageType: 'product_page',
+            impressions: 0,
+            impressionsUnique: 0,
+            pageViews: 100,
+            pageViewsUnique: 75,
+            downloads: 30,
+            pageConversion: 0.4,
+          },
+          {
+            pageType: 'in_app_event',
+            impressions: 0,
+            impressionsUnique: 0,
+            pageViews: 12,
+            pageViewsUnique: 10,
+            downloads: 2,
+            pageConversion: 0.2,
+          },
+          {
+            pageType: 'no_page',
+            impressions: 500,
+            impressionsUnique: 400,
+            pageViews: 0,
+            pageViewsUnique: 0,
+            downloads: 25,
+            pageConversion: null,
+          },
+        ]);
+        const byTitle = await appPerformance(ctx, {
+          app: APP.id,
+          store: 'apple',
+          start: '2026-10-12',
+          end: '2026-10-18',
+          groupBy: ['page_title'],
+        });
+        expect(byTitle.pages!.map((x) => [x.pageTitle, x.pageViewsUnique, x.downloads, x.pageConversion])).toEqual([
+          ['Default Product Page', 55, 18, 0.3273],
+          ['Alarm lovers', 20, 12, 0.6],
+        ]);
+        // A newer instance replaces the day: a custom page it no longer lists drops to zero.
+        await add(engagementReferrersCollector(), [ev('Page view', 'Product page', 'Default Product Page', 90, 70)]);
+        const again = await appPerformance(ctx, {
+          app: APP.id,
+          store: 'apple',
+          start: '2026-10-12',
+          end: '2026-10-18',
+          groupBy: ['page_title'],
+        });
+        expect(again.pages!.find((x) => x.pageTitle === 'Alarm lovers')).toMatchObject({ pageViewsUnique: 0, downloads: 12 });
+      });
+
+      it('explains empty crash data, counts Play crashes from the monthly files and keeps App Crashes Expanded apart', async () => {
+        const cfg = config({ APP_STORE_PUBLIC_DATA: 'false' });
+        const play = fakePlay({ vitals: 'empty' });
+        const run = await runSync({ store, config: cfg, clients: { play: play.client }, trigger: 'manual', now: NOW, pacing: {} });
+        expect(run.status).toBe('ok');
+        expect(JSON.parse((await store.getMeta(syncKeys.playVitals(APP.id)))!)).toMatchObject({ checkedOn: '2026-10-20', empty: true });
+        const ctx = { store, config: cfg, clients: {}, now: () => NOW };
+        const st = await appStability(ctx, { app: APP.id, start: '2026-10-01', end: '2026-10-19' });
+        const p = st.summary.find((s) => s.store === 'play')!;
+        expect(p.crashRate).toBeNull();
+        expect(p.crashes).toBeGreaterThan(0);
+        expect(st.notes.some((n) => n.includes('minimum number of daily users'))).toBe(true);
+        // No App Crashes report from Apple yet: said plainly.
+        expect(st.notes.some((n) => n.includes('at least five people'))).toBe(true);
+
+        // App Crashes and App Crashes Expanded: each replaces the days it covers.
+        const crash = (version: string, crashes: number): DelimitedRow => ({
+          date: '2026-10-18',
+          'app version': version,
+          crashes: String(crashes),
+          'unique devices': '1',
+        });
+        const exp = (version: string, count: number): DelimitedRow => ({
+          date: '2026-10-18',
+          'app version': version,
+          count: String(count),
+          'unique devices': '1',
+          territory: 'US',
+        });
+        const write = async (c: ReturnType<typeof crashesCollector>, rows: DelimitedRow[]) => {
+          for (const r of rows) c.add(r);
+          await c.write(store, APP.id);
+        };
+        await write(crashesCollector(), [crash('2.0', 3), crash('2.1', 1)]);
+        await write(crashesExpandedCollector(), [exp('2.1', 9)]);
+        // A newer instance no longer lists 2.0: its count goes, the expanded counts stay.
+        await write(crashesCollector(), [crash('2.1', 2)]);
+        const apple = await appStability(ctx, { app: APP.id, store: 'apple', start: '2026-10-01', end: '2026-10-19', groupBy: 'version' });
+        expect(apple.summary[0]).toMatchObject({ crashes: 2, crashesExpanded: 9 });
+        expect(apple.rows.map((r) => [r.version, r.crashes, r.crashesExpanded])).toEqual([['2.1', 2, 9]]);
+
+        // setup_status: rates refused → warn with the steps; readable but empty → ok with a note.
+        const readiness = evaluateReadiness({
+          configured: true,
+          identityOk: true,
+          inspection: { appFound: true, managedOAuthEnabled: true, broadPolicyReasons: [] },
+        });
+        const probe = async (client: PlayClient) =>
+          (await setupStatus({ store, config: cfg, clients: { play: client }, now: () => NOW }, { readiness })).checks.find(
+            (c) => c.id === 'probe.play_vitals',
+          );
+        expect(await probe(fakePlay({ vitals: 'forbidden' }).client)).toMatchObject({
+          status: 'warn',
+          detail: expect.stringContaining('Reporting API'),
+        });
+        expect(await probe(fakePlay({ vitals: 'empty' }).client)).toMatchObject({
+          status: 'ok',
+          detail: expect.stringContaining('minimum number'),
+        });
+        expect(await probe(fakePlay().client)).toMatchObject({ status: 'ok' });
+      });
+
+      it('reads the App Store Opt-in report and gives the analytics sharing rate with the funnel', async () => {
+        const cfg = config({ APP_STORE_PUBLIC_DATA: 'false' });
+        const ctx = { store, config: cfg, clients: {}, now: () => NOW };
+        expect(ASC_REPORTS.filter((s) => s.match('App Store Opt-in')).map((s) => s.key)).toEqual(['opt_in']);
+        const c = ASC_REPORTS.find((s) => s.key === 'opt_in')!.collector();
+        // Columns of the App Store Opt-in report.
+        for (const [date, users, opting] of [
+          ['2026-10-17', 40, 10],
+          ['2026-10-18', 60, 15],
+        ] as const)
+          c.add({
+            date,
+            'app name': 'Acme',
+            'app apple identifier': APP.appleId,
+            'downloading users': String(users),
+            'users opting-in': String(opting),
+          });
+        await c.write(store, APP.id);
+        await store.writeAppStoreDaily(APP.id, 'apple', {
+          metrics: ['downloads', 'installs'],
+          shape: 'cross',
+          dates: ['2026-10-18'],
+          rows: [{ date: '2026-10-18', territory: 'US', source: 'search', downloads: 100, installs: 25 }],
+        });
+        const perf = await appPerformance(ctx, { app: APP.id, store: 'apple', start: '2026-10-12', end: '2026-10-18' });
+        expect(perf.stores[0]!.analyticsSharing).toEqual({ downloadingUsers: 100, optingInUsers: 25, rate: 0.25 });
+        expect(perf.notes.some((n) => n.includes('25% of first-time downloaders') && n.includes('divide those by 0.25'))).toBe(true);
+        // A range without opt-in data has no rate.
+        const old = await appPerformance(ctx, { app: APP.id, store: 'apple', start: '2026-09-01', end: '2026-09-07' });
+        expect(old.stores[0]).not.toHaveProperty('analyticsSharing');
+      });
+
+      it('fills installs history when the snapshot arrives after the daily reports, without counting a day twice', async () => {
+        const cfg = config({ APP_STORE_PUBLIC_DATA: 'false' });
+        const sync = (installs: 'waiting' | 'ready' | 'monthly', now: string) =>
+          runSync({
+            store,
+            config: cfg,
+            clients: { asc: fakeAsc({ installs }).client },
+            trigger: 'manual',
+            now: new Date(now),
+            pacing: {},
+          });
+        const installsOn = async () =>
+          (
+            await store.queryAppStore({
+              appId: APP.id,
+              store: 'apple',
+              range: { start: '2026-09-25', end: '2026-10-19' },
+              dimensions: ['date'],
+              orderBy: 'date',
+              order: 'asc',
+            })
+          )
+            .filter((r) => r.installs > 0)
+            .map((r) => [r.date, r.installs]);
+        const ctx = (now: string) => ({ store, config: cfg, clients: {}, now: () => new Date(now) });
+
+        // Day 1: the daily report starts on Oct 17; the snapshot's installs are not there yet.
+        await sync('waiting', '2026-10-20T04:00:00Z');
+        expect(await installsOn()).toEqual([
+          ['2026-10-17', 5],
+          ['2026-10-18', 6],
+        ]);
+        const apps = await listApps(ctx('2026-10-20T04:00:00Z'));
+        expect(apps.apps[0]!.appStoreReports!.history.find((h) => h.report === 'installs')).toMatchObject({
+          ongoingFrom: '2026-10-17',
+          snapshot: 'waiting',
+        });
+        const perf = await appPerformance(ctx('2026-10-20T04:00:00Z'), {
+          app: APP.id,
+          store: 'apple',
+          start: '2026-10-01',
+          end: '2026-10-18',
+        });
+        expect(
+          perf.notes.some((n) => n.includes('has not delivered daily history') && n.includes('installs and deletions from 2026-10-17')),
+        ).toBe(true);
+
+        // Day 2: the snapshot arrives, overlapping the daily report's days: only the days before are written.
+        await sync('ready', '2026-10-21T04:00:00Z');
+        const days = await installsOn();
+        expect(days).toHaveLength(18);
+        expect(days.slice(0, 2)).toEqual([
+          ['2026-10-01', 100],
+          ['2026-10-02', 100],
+        ]);
+        expect(days.slice(-2)).toEqual([
+          ['2026-10-17', 5],
+          ['2026-10-18', 6],
+        ]);
+        expect(
+          (await listApps(ctx('2026-10-21T04:00:00Z'))).apps[0]!.appStoreReports!.history.find((h) => h.report === 'installs'),
+        ).toMatchObject({ snapshot: 'filled' });
+        // Another day's sync: still not doubled.
+        await sync('ready', '2026-10-22T04:00:00Z');
+        expect((await installsOn()).slice(-2)).toEqual([
+          ['2026-10-17', 5],
+          ['2026-10-18', 6],
+        ]);
+      });
+
+      it("says so when Apple delivers a report's snapshot only as monthly instances", async () => {
+        const cfg = config({ APP_STORE_PUBLIC_DATA: 'false' });
+        const asc = fakeAsc({ installs: 'monthly' });
+        await runSync({ store, config: cfg, clients: { asc: asc.client }, trigger: 'manual', now: NOW, pacing: {} });
+        expect(asc.calls).toContain('listInstances:snap-inst:MONTHLY');
+        const again = fakeAsc({ installs: 'monthly' });
+        await runSync({
+          store,
+          config: cfg,
+          clients: { asc: again.client },
+          trigger: 'manual',
+          now: new Date('2026-10-21T04:00:00Z'),
+          pacing: {},
+        });
+        // Checked once.
+        expect(again.calls).not.toContain('listInstances:snap-inst:MONTHLY');
+        const ctx = { store, config: cfg, clients: {}, now: () => NOW };
+        expect((await listApps(ctx)).apps[0]!.appStoreReports!.history.find((h) => h.report === 'installs')).toMatchObject({
+          snapshot: 'monthly_only',
+          monthlyInstances: 1,
+        });
+        const perf = await appPerformance(ctx, { app: APP.id, store: 'apple', start: '2026-10-01', end: '2026-10-18' });
+        expect(perf.notes.some((n) => n.includes('only as monthly totals'))).toBe(true);
+      });
+
+      it('reads App Store reviews every 4 hours and Google Play reviews through the API when on', async () => {
+        const cfg = config({ APP_STORE_PUBLIC_DATA: 'false', PLAY_REVIEWS_API: 'true' });
+        const at = (iso: string) => new Date(iso);
+        const asc = fakeAsc();
+        const play = fakePlay({ reviews: 'ok' });
+        await runSync({ store, config: cfg, clients: clients(asc, play), trigger: 'manual', now: at('2026-10-20T04:00:00Z'), pacing: {} });
+        expect(asc.calls.filter((c) => c === 'listReviews')).toHaveLength(1);
+        expect(play.calls.filter((c) => c === 'listReviews')).toHaveLength(1);
+        // Three hours later: not yet; five hours later: again.
+        const a2 = fakeAsc();
+        const p2 = fakePlay({ reviews: 'ok' });
+        await runSync({ store, config: cfg, clients: clients(a2, p2), trigger: 'manual', now: at('2026-10-20T07:00:00Z'), pacing: {} });
+        expect(a2.calls).not.toContain('listReviews');
+        expect(p2.calls).not.toContain('listReviews');
+        const a3 = fakeAsc();
+        await runSync({ store, config: cfg, clients: { asc: a3.client }, trigger: 'manual', now: at('2026-10-20T09:00:00Z'), pacing: {} });
+        expect(a3.calls).toContain('listReviews');
+        const ctx = { store, config: cfg, clients: {}, now: () => NOW };
+        const reviews = await appReviews(ctx, { app: APP.id, store: 'play', start: '2026-10-01', end: '2026-10-20' });
+        expect(reviews.reviews.find((r) => r.id === 'gp:new1')).toMatchObject({
+          rating: 2,
+          body: 'Crashes on launch',
+          version: '2.4.0',
+          replied: false,
+        });
+        expect(reviews.notes[0]).toContain('Android Publisher API every 4 hours');
+        // Without the permission: noted, the rest goes on, setup_status says what to grant.
+        const denied = fakePlay({ reviews: 'forbidden' });
+        const run = await runSync({
+          store,
+          config: cfg,
+          clients: { play: denied.client },
+          trigger: 'manual',
+          now: at('2026-10-21T04:00:00Z'),
+          pacing: {},
+        });
+        expect(run.status).toBe('ok');
+        const readiness = evaluateReadiness({
+          configured: true,
+          identityOk: true,
+          inspection: { appFound: true, managedOAuthEnabled: true, broadPolicyReasons: [] },
+        });
+        const checks = (await setupStatus({ store, config: cfg, clients: { play: denied.client }, now: () => NOW }, { readiness })).checks;
+        expect(checks.find((c) => c.id === 'probe.play_reviews')).toMatchObject({
+          status: 'warn',
+          detail: expect.stringContaining('Reply to reviews'),
+        });
+        expect(checks.find((c) => c.id === 'config.play_reviews_api')!.status).toBe('ok');
+      });
+
+      it('replies to a review only with writes on, after a preview, with a single-use token', async () => {
+        await store.writeAppReviews(APP.id, 'apple', [
+          {
+            id: 'r9',
+            createdAt: '2026-10-18T10:00:00.000Z',
+            rating: 1,
+            title: 'Crashes',
+            body: 'Crashes on start',
+            territory: 'US',
+            language: null,
+            version: null,
+            replied: false,
+          },
+        ]);
+        await store.writeAppReviews(APP.id, 'play', [
+          {
+            id: 'gp:9',
+            createdAt: '2026-10-18T10:00:00.000Z',
+            rating: 2,
+            title: null,
+            body: 'Slow',
+            territory: null,
+            language: 'en',
+            version: null,
+            replied: false,
+          },
+        ]);
+        const posted: string[] = [];
+        const replies = { replyToReview: async (id: string, text: string) => void posted.push(`${id}:${text}`) } as unknown as AscClient;
+        const base = { app: APP.id, store: 'apple' as const, reviewId: 'r9', text: 'Sorry! Fixed in 2.1.' };
+        // Writes off: refused.
+        const off = { store, config: config({ APP_STORE_PUBLIC_DATA: 'false' }), clients: { ascReplies: replies }, now: () => NOW };
+        await expect(replyReview(off, base)).rejects.toMatchObject({ code: 'writes_disabled' });
+        // Writes on, but no reply key: says which key to create.
+        const cfg = config({ APP_STORE_PUBLIC_DATA: 'false', ENABLE_WRITES: 'true', ASC_REPLY_KEY_ID: 'R', ASC_REPLY_PRIVATE_KEY: 'pk' });
+        await expect(replyReview({ store, config: cfg, clients: {}, now: () => NOW }, base)).rejects.toMatchObject({
+          code: 'not_configured',
+        });
+        const ctx = { store, config: cfg, clients: { ascReplies: replies }, now: () => NOW };
+        // Step 1: preview only.
+        const preview = await replyReview(ctx, base);
+        expect(preview).toMatchObject({
+          status: 'preview',
+          review: { id: 'r9', rating: 1, alreadyReplied: false },
+          reply: 'Sorry! Fixed in 2.1.',
+        });
+        expect(posted).toEqual([]);
+        // A different text needs a new preview.
+        await expect(replyReview(ctx, { ...base, text: 'Other', confirmToken: preview.confirmToken })).rejects.toMatchObject({
+          code: 'bad_request',
+        });
+        // Step 2: posted, marked replied, and the token cannot be used again.
+        const done = await replyReview(ctx, { ...base, confirmToken: preview.confirmToken });
+        expect(done.status).toBe('posted');
+        expect(posted).toEqual(['r9:Sorry! Fixed in 2.1.']);
+        const after = await appReviews(ctx, { app: APP.id, store: 'apple', start: '2026-10-01', end: '2026-10-20' });
+        expect(after.reviews.find((r) => r.id === 'r9')!.replied).toBe(true);
+        await expect(replyReview(ctx, { ...base, confirmToken: preview.confirmToken })).rejects.toMatchObject({ code: 'bad_request' });
+        // An expired preview is refused.
+        const p2 = await replyReview(ctx, base);
+        const late = { ...ctx, now: () => new Date(NOW.getTime() + 16 * 60_000) };
+        await expect(replyReview(late, { ...base, confirmToken: p2.confirmToken })).rejects.toMatchObject({ code: 'bad_request' });
+        // Google Play: at most 350 characters, through the API when PLAY_REVIEWS_API is on.
+        const play = fakePlay({ reviews: 'ok' });
+        const pcfg = config({ APP_STORE_PUBLIC_DATA: 'false', ENABLE_WRITES: 'true', PLAY_REVIEWS_API: 'true' });
+        const pctx = { store, config: pcfg, clients: { play: play.client }, now: () => NOW };
+        await expect(replyReview(pctx, { app: APP.id, store: 'play', reviewId: 'gp:9', text: 'x'.repeat(351) })).rejects.toMatchObject({
+          code: 'bad_request',
+        });
+        const pp = await replyReview(pctx, { app: APP.id, store: 'play', reviewId: 'gp:9', text: 'Thanks, looking into it.' });
+        await replyReview(pctx, {
+          app: APP.id,
+          store: 'play',
+          reviewId: 'gp:9',
+          text: 'Thanks, looking into it.',
+          confirmToken: pp.confirmToken,
+        });
+        expect(play.calls).toContain('reply:gp:9:Thanks, looking into it.');
+        await expect(replyReview(pctx, { app: APP.id, store: 'play', reviewId: 'nope', text: 'Hi' })).rejects.toMatchObject({
+          code: 'not_found',
+        });
+      });
+
+      it('reads the Framework Usage reports chosen for an app and groups them by any dimension', async () => {
+        const app = { ...APP, frameworkReports: ['Mode Activity Notifications'] };
+        const cfg = config({ APP_STORE_PUBLIC_DATA: 'false', APPS: JSON.stringify([app]) });
+        expect(cfg.apps[0]!.frameworkReports).toEqual(['Mode Activity Notifications']);
+        const asc = fakeAsc({ framework: true });
+        await runSync({ store, config: cfg, clients: { asc: asc.client }, trigger: 'manual', now: NOW, pacing: {} });
+        expect(asc.calls).toContain('listInstances:fw');
+        const ctx = { store, config: cfg, clients: {}, now: () => NOW };
+        const p = { app: APP.id, report: 'mode activity notifications', start: '2026-10-12', end: '2026-10-18' };
+        const totals = await appFrameworkReport(ctx, p);
+        expect(totals.report).toBe('Mode Activity Notifications');
+        expect(totals.dimensions).toEqual(['build', 'device', 'platform', 'release type', 'resolution type', 'territory']);
+        expect(totals.metrics).toEqual(['count', 'unique devices']);
+        expect(totals.rows).toEqual([{ count: 52, 'unique devices': 36 }]);
+        const byResolution = await appFrameworkReport(ctx, { ...p, groupBy: ['Resolution Type'] });
+        expect(byResolution.rows).toEqual([
+          { 'resolution type': 'Cleared', count: 30, 'unique devices': 20 },
+          { 'resolution type': 'Tapped', count: 22, 'unique devices': 16 },
+        ]);
+        const usByDay = await appFrameworkReport(ctx, { ...p, groupBy: ['date'], filters: { territory: 'us' } });
+        expect(usByDay.rows).toEqual([
+          { date: '2026-10-17', count: 10, 'unique devices': 7 },
+          { date: '2026-10-18', count: 12, 'unique devices': 9 },
+        ]);
+        await expect(appFrameworkReport(ctx, { ...p, groupBy: ['color'] })).rejects.toMatchObject({ code: 'bad_request' });
+        await expect(appFrameworkReport(ctx, { ...p, report: 'App Added to Focus' })).rejects.toMatchObject({ code: 'bad_request' });
+        // An app without the report does not read it.
+        const plain = fakeAsc({ framework: true });
+        await runSync({
+          store,
+          config: config({ APP_STORE_PUBLIC_DATA: 'false' }),
+          clients: { asc: plain.client },
+          trigger: 'manual',
+          now: new Date('2026-10-28T04:00:00Z'),
+          pacing: {},
+        });
+        expect(plain.calls).not.toContain('listInstances:fw');
+        // Dashboard-managed apps keep the choice.
+        await store.saveAppConfig({ id: 'other', name: 'Other', appleId: '7654321', frameworkReports: ['App Added to Focus'] });
+        expect((await store.listAppConfigs()).find((a) => a.id === 'other')!.frameworkReports).toEqual(['App Added to Focus']);
+      });
+
+      it('reads Apple Ads search terms and impression share, and says so plainly when Apple Ads is not set up', async () => {
+        const plain = config({ APP_STORE_PUBLIC_DATA: 'false' });
+        const off = await appAds({ store, config: plain, clients: {}, now: () => NOW }, { app: APP.id });
+        expect(off).toMatchObject({ configured: false });
+        expect(off.notes[0]).toContain('API Account Read Only');
+        const terms = await appSearchTerms({ store, config: plain, clients: {}, now: () => NOW }, { app: APP.id });
+        expect(terms.notes.some((n) => n.includes('Apple Ads is not configured'))).toBe(true);
+
+        const cfg = config({
+          APP_STORE_PUBLIC_DATA: 'false',
+          APPLE_ADS_CLIENT_ID: 'SEARCHADS.c',
+          APPLE_ADS_TEAM_ID: 'SEARCHADS.t',
+          APPLE_ADS_KEY_ID: 'k',
+          APPLE_ADS_PRIVATE_KEY: 'pk',
+        });
+        const calls: string[] = [];
+        let roles = ['API Account Read Only'];
+        const ads: AppleAdsClient = {
+          async accounts() {
+            calls.push('accounts');
+            return [{ id: '123', name: 'Acme Ads', roles }];
+          },
+          async campaigns(account, appleId) {
+            calls.push(`campaigns:${account}:${appleId}`);
+            return [{ id: '555', name: 'US Search' }];
+          },
+          async searchTerms(_a, campaignId, range) {
+            calls.push(`terms:${campaignId}:${range.start}..${range.end}`);
+            const row = (date: string, term: string, impressions: number, taps: number, installs: number, spendCents: number) => ({
+              date,
+              campaignId,
+              term,
+              keyword: term === 'alarm app' ? 'alarm' : '',
+              impressions,
+              taps,
+              installs,
+              newDownloads: installs,
+              spendCents,
+              currency: 'USD',
+            });
+            return [
+              row('2026-10-18', 'alarm app', 200, 20, 5, 2500),
+              row('2026-10-19', 'alarm app', 100, 10, 5, 1500),
+              row('2026-10-19', 'bell', 50, 1, 0, 100),
+            ];
+          },
+          async impressionShare(_a, _id, range) {
+            calls.push(`share:${range.start}..${range.end}`);
+            return [
+              { date: '2026-10-18', territory: 'US', term: 'alarm app', lowShare: 0.1, highShare: 0.2, rank: 4, popularity: 4 },
+              { date: '2026-10-19', territory: 'US', term: 'alarm app', lowShare: 0.3, highShare: 0.4, rank: 2, popularity: 4 },
+              { date: '2026-10-19', territory: 'US', term: 'wake up', lowShare: 0.1, highShare: 0.2, rank: 7, popularity: 5 },
+            ];
+          },
+        };
+        await runSync({ store, config: cfg, clients: { appleAds: ads }, trigger: 'manual', now: NOW, pacing: {} });
+        // First sync: 90 days of search terms, 30 days of impression share, ending yesterday.
+        expect(calls).toContain('terms:555:2026-07-22..2026-10-19');
+        expect(calls).toContain('share:2026-09-20..2026-10-19');
+        const ctx = { store, config: cfg, clients: { appleAds: ads }, now: () => NOW };
+        const res = await appAds(ctx, { app: APP.id, start: '2026-10-13', end: '2026-10-19' });
+        if (!res.configured) throw new Error('expected configured');
+        expect(res.currencies).toEqual([{ currency: 'USD', impressions: 350, taps: 31, installs: 10, spend: 41, costPerInstall: 4.1 }]);
+        expect(res.terms[0]).toMatchObject({
+          term: 'alarm app',
+          keywords: ['alarm'],
+          impressions: 300,
+          taps: 30,
+          installs: 10,
+          spend: 40,
+          tapThroughRate: 0.1,
+          installRate: 0.3333,
+          costPerInstall: 4,
+          // The newest impression share of the term in the range.
+          share: [{ territory: 'US', date: '2026-10-19', impressionShare: { low: 0.3, high: 0.4 }, rank: 2, popularity: 4 }],
+        });
+        expect(res.shareOnly).toEqual([expect.objectContaining({ term: 'wake up', popularity: 5 })]);
+        const byPopularity = await appAds(ctx, { app: APP.id, start: '2026-10-13', end: '2026-10-19', sortBy: 'popularity' });
+        expect(byPopularity.configured && byPopularity.terms[0]!.term).toBe('alarm app');
+        // Next day: only the last days again (late attribution).
+        calls.length = 0;
+        await runSync({
+          store,
+          config: cfg,
+          clients: { appleAds: ads },
+          trigger: 'manual',
+          now: new Date('2026-10-21T04:00:00Z'),
+          pacing: {},
+        });
+        expect(calls).toContain('terms:555:2026-10-16..2026-10-20');
+        // Re-reading a day does not double it.
+        const again = await appAds(ctx, { app: APP.id, start: '2026-10-13', end: '2026-10-19' });
+        if (!again.configured) throw new Error('expected configured');
+        expect(again.currencies[0]!.impressions).toBe(350);
+        // setup_status: read-only role ok; a role that can change campaigns is a warning.
+        const readiness = evaluateReadiness({
+          configured: true,
+          identityOk: true,
+          inspection: { appFound: true, managedOAuthEnabled: true, broadPolicyReasons: [] },
+        });
+        const probe = async () =>
+          (await setupStatus({ store, config: cfg, clients: { appleAds: ads }, now: () => NOW }, { readiness })).checks.find(
+            (c) => c.id === 'probe.apple_ads',
+          );
+        expect(await probe()).toMatchObject({ status: 'ok' });
+        roles = ['API Account Manager'];
+        expect(await probe()).toMatchObject({ status: 'warn', detail: expect.stringContaining('API Account Read Only') });
+        expect(
+          (await setupStatus({ store, config: plain, clients: {}, now: () => NOW }, { readiness })).checks.find(
+            (c) => c.id === 'config.apple_ads',
+          ),
+        ).toMatchObject({ status: 'skipped' });
+      });
+
       it('looks for report kinds added since the last listing right away', async () => {
         const cfg = config({ APP_STORE_PUBLIC_DATA: 'false' });
         const today = '2026-10-20';
@@ -1172,7 +2395,10 @@ export function appContract(name: string, makeStore: () => Promise<Store>): void
         const ctx = { store, config: cfg, clients: {}, now: () => NOW };
         const perf = await appPerformance(ctx, { app: APP.id, store: 'play', start: '2026-10-01', end: '2026-10-19' });
         expect(perf.stores[0]).toMatchObject({ currency: null, current: { installs: 16, proceeds: 0 } });
-        expect((await appSubscriptions(ctx, { app: APP.id, start: '2026-10-01', end: '2026-10-19' })).current.activeSubscriptions).toBe(0);
+        expect(
+          (await appSubscriptions(ctx, { app: APP.id, store: 'play', start: '2026-10-01', end: '2026-10-19' })).current!
+            .activeSubscriptions,
+        ).toBe(0);
       });
 
       it('syncs the rest of Google Play when the financial files can be listed but not read', async () => {

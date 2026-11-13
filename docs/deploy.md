@@ -96,7 +96,7 @@ are never shown, which is expected.
 | `GSC_PRIVATE_KEY`         | for GSC  | 12          | `private_key` from the service account key JSON (real line breaks or literal `\n`)                                     |
 | `BING_API_KEY`            | for Bing | 13          | Bing Webmaster Tools API key (treat it as a password)                                                                  |
 | `BRAND_REGEX`             | optional | 14          | Default brand regex, matched case-insensitively, for example `acme\|acme\s?corp`                                       |
-| `ENABLE_WRITES`           | optional | 14          | `true` to enable `submit_sitemap` (requires GSC **Full** permission)                                                   |
+| `ENABLE_WRITES`           | optional | 14          | `true` to enable `submit_sitemap` (GSC **Full** permission) and `reply_review` (a reply key or Play permission)        |
 | `GSC_ROWS_PER_DAY`        | optional | 14          | Max query × page rows stored per day from GSC, 100–100000. Default `2500`                                              |
 | `GSC_BACKFILL_MONTHS`     | optional | 14          | Months of GSC history to backfill, 0–16. Default `16`                                                                  |
 | `SYNC_DAILY_WRITE_BUDGET` | optional | 14          | Max rows history (GSC backfill, Cloudflare lookback) writes per UTC day. Default `80000` (D1 Free allows 100000)       |
@@ -109,9 +109,19 @@ are never shown, which is expected.
 | `ASC_KEY_ID`              | for apps | 14a         | Key ID of an App Store Connect API key with the **Sales and Reports** role (never an Admin key)                        |
 | `ASC_ISSUER_ID`           | for apps | 14a         | Issuer ID shown above the App Store Connect API keys                                                                   |
 | `ASC_PRIVATE_KEY`         | for apps | 14a         | Contents of that key's `AuthKey_<KEY ID>.p8` file                                                                      |
+| `ASC_VENDOR_NUMBER`       | optional | 14a         | Vendor number from Payments and Financial Reports: exact App Store revenue per product (Sales and Trends)              |
 | `PLAY_REPORTS_BUCKET`     | for apps | 14a         | Cloud Storage bucket of your Play Console reports, `pubsite_prod_rev_…` (the full `gs://` URI is accepted)             |
 | `PLAY_CLIENT_EMAIL`       | optional | 14a         | Service account for Google Play, when it is not the Search Console one (`GSC_CLIENT_EMAIL`)                            |
 | `PLAY_PRIVATE_KEY`        | optional | 14a         | Its private key, when `PLAY_CLIENT_EMAIL` is set                                                                       |
+| `PLAY_METADATA`           | optional | 14a         | `true` to snapshot Google Play store listings and tracks daily for `app_changes` (Android Publisher API, opt-in)       |
+| `PLAY_REVIEWS_API`        | optional | 14a         | `true` to read Google Play reviews of the last week every 4 hours (needs "Reply to reviews")                           |
+| `ASC_REPLY_KEY_ID`        | optional | 14a         | Key ID of a second App Store Connect key with the **Customer Support** role, only for `reply_review`                   |
+| `ASC_REPLY_PRIVATE_KEY`   | optional | 14a         | That key's `.p8` file contents                                                                                         |
+| `APPLE_ADS_CLIENT_ID`     | optional | 14a         | Apple Ads API user's `clientId` (Account Settings → API in ads.apple.com)                                              |
+| `APPLE_ADS_TEAM_ID`       | optional | 14a         | Its `teamId`                                                                                                           |
+| `APPLE_ADS_KEY_ID`        | optional | 14a         | Its `keyId`                                                                                                            |
+| `APPLE_ADS_PRIVATE_KEY`   | optional | 14a         | The `private-key.pem` whose public key was uploaded                                                                    |
+| `APPLE_ADS_ACCOUNT_ID`    | optional | 14a         | Read only this ad account; default every account the API user sees                                                     |
 | `APP_STORE_PUBLIC_DATA`   | optional | 14a         | `true` to turn on the opt-in plugin that reads Apple's public App Store feeds (your app's rating and chart position)   |
 
 `CLOUDFLARE_ACCOUNT_ID` and `CLOUDFLARE_API_TOKEN` are required even if you use no Cloudflare data:
@@ -711,9 +721,14 @@ The output lists your sites, including each `bingSiteUrl` from `SITES`.
 - **`BRAND_REGEX`**: a JavaScript regular expression source, matched case-insensitively, that
   identifies brand queries, for example `acme|acme\s?corp`. A site's `brandRegex` in `SITES`
   overrides it. Without it, the `brand` filter treats all queries as non-brand.
-- **`ENABLE_WRITES`**: set to `true` to enable the `submit_sitemap` tool. Also change the service
-  account's permission in Search Console to **Full** for the properties where you want to submit
-  sitemaps. Leave it unset to stay read-only.
+- **`ENABLE_WRITES`**: set to `true` to enable the `submit_sitemap` and `reply_review` tools. For
+  sitemaps, change the service account's permission in Search Console to **Full** for the
+  properties where you want to submit them. For App Store review replies, **[Human]** generate a
+  second App Store Connect API key with the **Customer Support** role and set `ASC_REPLY_KEY_ID`
+  and `ASC_REPLY_PRIVATE_KEY` (the Sales and Reports key never writes); for Google Play replies,
+  set `PLAY_REVIEWS_API=true` and grant the service account **Reply to reviews**. `reply_review`
+  always shows a preview first and posts only when called again with its confirmation token.
+  Leave `ENABLE_WRITES` unset to stay read-only. **Verify:** `setup_status` → `config.review_replies`.
 - **Sync budgets**: `GSC_ROWS_PER_DAY` (default `2500`), `GSC_BACKFILL_MONTHS` (default `16`),
   `SYNC_DAILY_WRITE_BUDGET` (default `80000`) and `SYNC_MAX_CALLS_PER_RUN` (default `35`). The
   defaults fit the free plans: D1 Free allows 100,000 rows written per day, Workers Free allows 50
@@ -758,6 +773,50 @@ one of your sites (referrals from it are marked as your own).
    npx wrangler secret put ASC_PRIVATE_KEY < AuthKey_ABC123DEF4.p8
    ```
 
+   Optional, for exact revenue per product: **[Human]** App Store Connect → **Payments and Financial
+   Reports**; the vendor number is shown next to your legal entity name (top left). Set it as
+   `ASC_VENDOR_NUMBER` (`npx wrangler secret put ASC_VENDOR_NUMBER`). The same Sales and Reports key
+   reads the daily Summary Sales report of the whole account (one call a day, history back a year,
+   which is how long Apple keeps daily reports); each app keeps only its own rows, aggregated per
+   product, country, currency and price. Without it, revenue per product is Apple's USD estimate
+   from the App Store Purchases report. **Verify:** `setup_status` shows `config.asc_vendor` and
+   `probe.asc_sales` as `ok`.
+
+   Store changes (`app_changes`): once a day the sync reads the App Store version on sale and the one
+   in the works, the on-sale version's texts and the app's names and subtitles per locale with the
+   same key (read only), and records the fields that changed. Apple has no read-only role for app
+   metadata; if the key's role may not read it, `probe.asc_metadata` warns and only this feature is
+   off. Google Play listings and tracks are opt-in: set `PLAY_METADATA` to `true`, enable the
+   **Google Play Android Developer API** in the service account's Google Cloud project, and in the
+   Play Console grant the service account **View app information (read-only)** for the app. The
+   sync opens an edit, reads it and deletes it without committing; opening an edit closes any other
+   edit the same service account has open, so do not share this service account with release
+   tooling (use `PLAY_CLIENT_EMAIL` and `PLAY_PRIVATE_KEY` for a separate one). **Verify:**
+   `probe.asc_metadata` and (when on) `probe.play_metadata` are `ok`.
+
+   Reviews: App Store reviews are read every 4 hours. Google Play reviews come from the monthly
+   files (3-7 days late); for the last week every 4 hours, set `PLAY_REVIEWS_API` to `true` and in
+   the Play Console grant the service account **Reply to reviews** for the app (Google offers no
+   read-only permission for the reviews API; Searchkeep replies only through `reply_review`, which
+   needs `ENABLE_WRITES`). **Verify:** `probe.play_reviews` is `ok`.
+
+   Framework Usage reports (optional, per app): in **Settings** → **Apps** → the app → **App Store
+   framework reports**, list report names from Apple's Analytics Reports catalog (for example
+   `Notification Summary Engagement, App Added to Focus`), or set `frameworkReports` in `APPS`.
+   They come with the report requests already started; read them with `app_framework_report`.
+
+   Apple Ads (optional, `app_ads`): **[Human]** in ads.apple.com → **Account Settings** → **User
+   Management**, invite an API user with the **API Account Read Only** role. Signed in as that user,
+   create a key pair (`openssl ecparam -genkey -name prime256v1 -noout -out private-key.pem`, then
+   `openssl ec -in private-key.pem -pubout -out public-key.pem`), paste the public key under
+   **Account Settings** → **API** and save. Set `APPLE_ADS_CLIENT_ID`, `APPLE_ADS_TEAM_ID` and
+   `APPLE_ADS_KEY_ID` from the credentials shown there, and `APPLE_ADS_PRIVATE_KEY` to the contents of
+   `private-key.pem`. Once a day the sync reads the search terms of the campaigns that promote each
+   app (90 days the first time) and the app's impression share and search popularity per term and
+   storefront (30 days the first time), through the Apple Ads Platform API. **Verify:**
+   `setup_status` → `config.apple_ads` and `probe.apple_ads` are `ok` (a warning if the role could
+   change campaigns).
+
 3. **Start App Store reports, once per app.** **[Human]** Apple generates analytics reports only
    after a request made with an **Admin** key, and Searchkeep never stores one. Generate a second,
    temporary Team Key with the **Admin** role. In the dashboard: **Settings** → **Apps** → **Start
@@ -799,7 +858,12 @@ Manager, are kept out of the totals and shown only by source), referring
 websites and apps, crash counts, customer reviews, and revenue (purchases, proceeds and sales in
 USD, paying users) and sessions attributed to the same sources and storefronts (App Store
 Purchases and App Sessions reports, from the same report requests; sessions count only people who
-share analytics, and only where at least five people had sessions); Google Play store listing
+share analytics, and only where at least five people had sessions), and subscriptions (active
+subscriptions, free trials, paid offers, billing retry and grace period, and trial starts, trial
+conversions, paid starts, renewals, voluntary and involuntary churn and refunds, per subscription,
+offer type, storefront and download source, from the App Store Subscription State and Event
+reports; history from January 1, 2025), and the share of first-time downloaders who share analytics
+(App Store Opt-in); Google Play store listing
 visitors and
 acquisitions by country and by traffic source with **search terms**, installs, uninstalls and
 active devices, ratings, reviews, crash and ANR rates; installs, ratings, crashes and ANRs per app

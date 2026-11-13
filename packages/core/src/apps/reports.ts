@@ -19,6 +19,17 @@ import {
   type AppStoreDailyInput,
   type AppStoreMetric,
   type AppSubscriptionInput,
+  type AppSubscriptionMetricInput,
+  type AppProductInput,
+  type AppSalesInput,
+  type AppConfig,
+  type AppFrameworkInput,
+  type AppOptInInput,
+  type AppPageInput,
+  type AppPageLevel,
+  type AppPageMetric,
+  type AppPageMetrics,
+  type AppSubscriptionMetricKind,
   type AppVitalsInput,
   type IsoDate,
 } from '../types.js';
@@ -171,7 +182,7 @@ const appleKeys = (row: DelimitedRow, col: ReturnType<typeof columns>) => ({
 });
 
 /** App Store Discovery and Engagement (Standard): impressions and product page views. */
-export function engagementCollector(): ReportCollector {
+function engagementFunnel(): ReportCollector {
   return new FunnelCollector(
     'apple',
     'cross',
@@ -189,7 +200,7 @@ export function engagementCollector(): ReportCollector {
 }
 
 /** App Downloads (Standard): first-time downloads and redownloads. */
-export function downloadsCollector(): ReportCollector {
+function downloadsFunnel(): ReportCollector {
   return new FunnelCollector(
     'apple',
     'cross',
@@ -224,18 +235,70 @@ export function installsCollector(): ReportCollector {
 
 /** App Store Purchases (Standard): paid app and in-app purchases, net of refunds, in USD (Apple's estimate). */
 export function purchasesCollector(): ReportCollector {
-  return new FunnelCollector(
-    'apple',
-    'cross',
-    ['purchases', 'proceedsCents', 'salesCents', 'payingUsers'],
-    (row, col) => ({
-      purchases: num(col(row, 'purchases')),
-      proceedsCents: Math.round(num(col(row, 'proceeds in usd', 'proceeds')) * 100),
-      salesCents: Math.round(num(col(row, 'sales in usd', 'sales')) * 100),
-      payingUsers: num(col(row, 'paying users')),
-    }),
-    appleKeys,
+  return both(
+    new FunnelCollector(
+      'apple',
+      'cross',
+      ['purchases', 'proceedsCents', 'salesCents', 'payingUsers'],
+      (row, col) => ({
+        purchases: num(col(row, 'purchases')),
+        proceedsCents: Math.round(num(col(row, 'proceeds in usd', 'proceeds')) * 100),
+        salesCents: Math.round(num(col(row, 'sales in usd', 'sales')) * 100),
+        payingUsers: num(col(row, 'paying users')),
+      }),
+      appleKeys,
+    ),
+    productsCollector(),
   );
+}
+
+/**
+ * App Store Purchases per product (Content Name), purchase type and territory, with refunds (rows
+ * with negative purchases) kept apart so a refund day shows which product it was.
+ */
+export function productsCollector(): ReportCollector {
+  const rows = new Map<string, AppProductInput>();
+  const days = new Set<IsoDate>();
+  const col = columns();
+  return {
+    add(row) {
+      const date = cellDate(col(row, 'date'));
+      if (!date) return;
+      days.add(date);
+      const purchases = num(col(row, 'purchases'));
+      const proceeds = Math.round(num(col(row, 'proceeds in usd', 'proceeds')) * 100);
+      const sales = Math.round(num(col(row, 'sales in usd', 'sales')) * 100);
+      if (!purchases && !proceeds && !sales) return;
+      const product = col(row, 'content name').trim().slice(0, 200) || '-';
+      const purchaseType = slug(col(row, 'purchase type'));
+      const territory = normalizeTerritory(col(row, 'territory'));
+      const key = `${date}|${product}|${purchaseType}|${territory}`;
+      const e = rows.get(key) ?? {
+        date,
+        product,
+        purchaseType,
+        territory,
+        purchases: 0,
+        refunds: 0,
+        proceedsCents: 0,
+        refundProceedsCents: 0,
+        salesCents: 0,
+      };
+      const refund = purchases < 0 || (purchases === 0 && proceeds < 0);
+      if (refund) {
+        e.refunds += Math.abs(purchases);
+        e.refundProceedsCents += Math.abs(proceeds);
+      } else e.purchases += purchases;
+      e.proceedsCents += proceeds;
+      e.salesCents += sales;
+      rows.set(key, e);
+    },
+    async write(store, appId, before) {
+      const dates = coveredDays(days, before);
+      if (dates.length === 0) return { written: 0, oldest: null };
+      return { written: await store.writeAppProducts(appId, dates, keep(rows.values(), before)), oldest: dates[0]! };
+    },
+  };
 }
 
 /** Values kept per day and dimension; the rest are summed into `Other` (ADR 0010). */
@@ -468,38 +531,355 @@ class ReferrerCollector implements ReportCollector {
   }
 }
 
-export const engagementReferrersCollector = (): ReportCollector => new ReferrerCollector('pageViews');
-export const downloadReferrersCollector = (): ReportCollector => new ReferrerCollector('downloads');
+export const engagementReferrersCollector = (): ReportCollector =>
+  both(new ReferrerCollector('pageViews'), new PageCollector('title', 'engagement'));
+export const downloadReferrersCollector = (): ReportCollector =>
+  both(new ReferrerCollector('downloads'), new PageCollector('title', 'downloads'));
 
-/** App Crashes: crashes and crashing devices per day and app version (and for all versions). */
-export function crashesCollector(): ReportCollector {
+/** App Store Discovery and Engagement (Standard): impressions and product page views, and the same per page type. */
+export function engagementCollector(): ReportCollector {
+  return both(engagementFunnel(), new PageCollector('type', 'engagement'));
+}
+
+/** App Downloads (Standard): first-time downloads and redownloads, and first-time downloads per page type. */
+export function downloadsCollector(): ReportCollector {
+  return both(downloadsFunnel(), new PageCollector('type', 'downloads'));
+}
+
+/**
+ * The App Store funnel per page: per page type from the Standard reports, per page type and title
+ * (custom product pages, in-app events) from the Detailed ones. Impressions and page views come from
+ * Discovery and Engagement, first-time downloads from App Downloads.
+ */
+class PageCollector implements ReportCollector {
+  private readonly rows = new Map<string, AppPageInput>();
+  private readonly days = new Set<IsoDate>();
+  private readonly col = columns();
+
+  constructor(
+    private readonly level: AppPageLevel,
+    private readonly report: 'engagement' | 'downloads',
+  ) {}
+
+  add(row: DelimitedRow): void {
+    const date = cellDate(this.col(row, 'date'));
+    if (!date) return;
+    this.days.add(date);
+    const counts = num(this.col(row, 'counts'));
+    const unique = num(this.col(row, 'unique counts', 'unique devices'));
+    let values: Partial<AppPageMetrics>;
+    if (this.report === 'engagement') {
+      const event = lower(this.col(row, 'event'));
+      if (event === 'impression') values = { impressions: counts, impressionsUnique: unique };
+      else if (event === 'page view') values = { pageViews: counts, pageViewsUnique: unique };
+      else return;
+    } else {
+      if (lower(this.col(row, 'download type')) !== 'first-time download') return;
+      values = { downloads: counts };
+    }
+    const pageType = slug(this.col(row, 'page type')) || 'unavailable';
+    const pageTitle = this.level === 'title' ? this.col(row, 'page title').trim().slice(0, 120) || '-' : '';
+    const key = `${date}|${pageType}|${pageTitle}`;
+    const e = this.rows.get(key) ?? { date, pageType, pageTitle };
+    for (const [m, v] of Object.entries(values) as Array<[AppPageMetric, number]>) e[m] = (e[m] ?? 0) + v;
+    this.rows.set(key, e);
+  }
+
+  async write(store: Store, appId: string, before?: IsoDate | null): Promise<WriteResult> {
+    const dates = coveredDays(this.days, before);
+    if (dates.length === 0) return { written: 0, oldest: null };
+    const metrics: AppPageMetric[] =
+      this.report === 'engagement' ? ['impressions', 'impressionsUnique', 'pageViews', 'pageViewsUnique'] : ['downloads'];
+    const written = await store.writeAppPages(appId, { level: this.level, metrics, dates, rows: keep(this.rows.values(), before) });
+    return { written, oldest: dates[0]! };
+  }
+}
+
+/**
+ * App Crashes (crash logs) or App Crashes Expanded (every crash on device): crashes and crashing
+ * devices per day and app version, and for all versions. Devices are summed across device models
+ * and OS versions, an upper bound. Every day the file covers is replaced.
+ */
+function crashCounts(expanded: boolean): ReportCollector {
   const rows = new Map<string, AppVitalsInput>();
+  const days = new Set<IsoDate>();
   const col = columns();
+  const [m, d] = expanded ? (['crashesExpanded', 'crashDevicesExpanded'] as const) : (['crashes', 'crashDevices'] as const);
   const bump = (date: IsoDate, version: string, crashes: number, devices: number) => {
     const key = `${date}|${version}`;
-    const e = rows.get(key) ?? { date, version, crashes: 0, crashDevices: 0 };
-    e.crashes = (e.crashes ?? 0) + crashes;
-    e.crashDevices = (e.crashDevices ?? 0) + devices;
+    const e = rows.get(key) ?? { date, version, [m]: 0, [d]: 0 };
+    e[m] = (e[m] ?? 0) + crashes;
+    e[d] = (e[d] ?? 0) + devices;
     rows.set(key, e);
   };
   return {
     add(row) {
       const date = cellDate(col(row, 'date'));
       if (!date) return;
-      const crashes = num(col(row, 'crashes', 'counts'));
+      days.add(date);
+      const crashes = num(col(row, 'crashes', 'counts', 'count'));
       const devices = num(col(row, 'unique devices'));
       bump(date, col(row, 'app version').slice(0, 60) || '-', crashes, devices);
       bump(date, '', crashes, devices);
     },
     async write(store, appId, before) {
-      const list = keep(rows.values(), before);
-      if (list.length === 0) return { written: 0, oldest: null };
+      const dates = coveredDays(days, before);
+      if (dates.length === 0) return { written: 0, oldest: null };
       return {
-        written: await store.writeAppVitals(appId, 'apple', { metrics: ['crashes', 'crashDevices'], rows: list }),
-        oldest: oldestOf(list),
+        written: await store.writeAppVitals(appId, 'apple', { metrics: [m, d], rows: keep(rows.values(), before), dates }),
+        oldest: dates[0]!,
       };
     },
   };
+}
+
+/** App Crashes: crashes that made a crash log, per day and app version (and for all versions). */
+export const crashesCollector = (): ReportCollector => crashCounts(false);
+/** App Crashes Expanded: every crash on device (iOS and iPadOS 17.4 and later), per day and app version. */
+export const crashesExpandedCollector = (): ReportCollector => crashCounts(true);
+
+/** `Free Trial Starts` → `free_trial_starts` (Apple's metric names, offer types and groupings). */
+export function slug(value: string): string {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_|_$/g, '')
+    .slice(0, 80);
+}
+
+/**
+ * App Store Subscription State or Event (Standard): counts per day, metric, subscription, offer
+ * type, territory and (events only) download source. States are kept without the source: they are
+ * levels of every subscription, many rows a day, and the events already tie starts and churn to it.
+ */
+export function subscriptionMetricsCollector(kind: AppSubscriptionMetricKind): ReportCollector {
+  const rows = new Map<string, AppSubscriptionMetricInput>();
+  const days = new Set<IsoDate>();
+  const col = columns();
+  return {
+    add(row) {
+      const date = cellDate(kind === 'event' ? col(row, 'event date', 'date') : col(row, 'date'));
+      if (!date) return;
+      days.add(date);
+      const metric = slug(kind === 'event' ? col(row, 'event sub type') : col(row, 'state metric'));
+      if (!metric) return;
+      const count = num(col(row, 'counts', 'count'));
+      if (!count) return;
+      const metricGroup = slug(kind === 'event' ? col(row, 'event grouping') : col(row, 'state metric grouping'));
+      const product = (col(row, 'subscription name').trim() || col(row, 'subscription identifier').trim() || '-').slice(0, 120);
+      const offerType = slug(col(row, 'offer type'));
+      const territory = normalizeTerritory(col(row, 'territory'));
+      const source = kind === 'event' ? normalizeAppSource(col(row, 'app download source type')) : ALL_KEY;
+      const key = [date, metric, metricGroup, product, offerType, territory, source].join('|');
+      const e = rows.get(key) ?? { date, metric, metricGroup, product, offerType, territory, source, count: 0 };
+      e.count += count;
+      rows.set(key, e);
+    },
+    async write(store, appId, before) {
+      const dates = coveredDays(days, before);
+      if (dates.length === 0) return { written: 0, oldest: null };
+      const written = await store.writeAppSubscriptionMetrics(appId, { kind, dates, rows: keep(rows.values(), before) });
+      return { written, oldest: dates[0]! };
+    },
+  };
+}
+
+/** Apple's product type identifiers (Sales and Trends) → a product type; updates and redownloads are skipped. */
+export function salesProductType(id: string): string | null {
+  const v = id.trim().toUpperCase();
+  if (!v) return null;
+  if (/^(3|3F|7|7F|7T|F7|IA3)$/.test(v)) return null;
+  if (/^(1|1F|1T|F1|1E|1EP|1EU|1-B|F1-B)$/.test(v)) return 'app';
+  if (/^IAY(-M)?$/.test(v)) return 'subscription';
+  if (/^(IA1|IA1-M|FI1|IA9|IA9-M)$/.test(v)) return 'in_app';
+  return v.toLowerCase().slice(0, 20);
+}
+
+/** The apps a Sales and Trends report is split between: an app's own rows by Apple ID, its in-app purchases by the app's SKU. */
+export interface SalesApp {
+  appId: string;
+  appleId: string;
+  sku: string | null;
+}
+
+/**
+ * Summary Sales (daily) of the whole vendor account, split per app while the rows stream in and
+ * aggregated per product and price point. Updates, redownloads and restored purchases are skipped.
+ */
+export function salesSummaryCollector(apps: SalesApp[]) {
+  const rows = new Map<string, Map<string, AppSalesInput>>();
+  const days = new Set<IsoDate>();
+  const col = columns();
+  const cents = (v: string) => Math.round(num(v) * 100);
+  return {
+    add(row: DelimitedRow): void {
+      const date = cellDate(col(row, 'begin date', 'date'));
+      if (!date) return;
+      days.add(date);
+      const productType = salesProductType(col(row, 'product type identifier'));
+      if (!productType) return;
+      const appleId = col(row, 'apple identifier').trim();
+      const parent = col(row, 'parent identifier').trim();
+      const app = apps.find((a) => a.appleId === appleId || (parent !== '' && a.sku !== null && a.sku === parent));
+      if (!app) return;
+      const units = num(col(row, 'units'));
+      if (!units) return;
+      const perUnitProceeds = cents(col(row, 'developer proceeds'));
+      const price = Math.abs(cents(col(row, 'customer price')));
+      const subscription = lower(col(row, 'subscription'));
+      const input: AppSalesInput = {
+        date,
+        sku: col(row, 'sku').trim().slice(0, 200) || appleId,
+        title: col(row, 'title').trim().slice(0, 200),
+        productType,
+        subscription: subscription === 'new' || subscription === 'renewal' ? subscription : '',
+        period: col(row, 'period').trim().slice(0, 30),
+        territory: normalizeTerritory(col(row, 'country code')),
+        proceedsCurrency: col(row, 'currency of proceeds').trim().toUpperCase().slice(0, 3) || '-',
+        customerCurrency: col(row, 'customer currency').trim().toUpperCase().slice(0, 3) || '-',
+        customerPriceCents: price,
+        units: units > 0 ? units : 0,
+        refundUnits: units < 0 ? -units : 0,
+        proceedsCents: Math.round(units * Math.abs(perUnitProceeds)),
+        refundProceedsCents: units < 0 ? Math.round(-units * Math.abs(perUnitProceeds)) : 0,
+        salesCents: Math.round(units * price),
+      };
+      const key = [
+        date,
+        input.sku,
+        productType,
+        input.subscription,
+        input.period,
+        input.territory,
+        input.proceedsCurrency,
+        input.customerCurrency,
+        price,
+      ].join('|');
+      const perApp = rows.get(app.appId) ?? new Map<string, AppSalesInput>();
+      rows.set(app.appId, perApp);
+      const e = perApp.get(key);
+      if (!e) perApp.set(key, input);
+      else {
+        e.units += input.units;
+        e.refundUnits += input.refundUnits;
+        e.proceedsCents += input.proceedsCents;
+        e.refundProceedsCents += input.refundProceedsCents;
+        e.salesCents += input.salesCents;
+      }
+    },
+    /** Writes every app's rows; each app's covered days are replaced, also with no rows (no sales that day). */
+    async write(store: Store, extraDays: IsoDate[] = []): Promise<number> {
+      const dates = [...new Set([...days, ...extraDays])].sort();
+      if (dates.length === 0) return 0;
+      let written = 0;
+      for (const app of apps) written += await store.writeAppSales(app.appId, dates, [...(rows.get(app.appId)?.values() ?? [])]);
+      return written;
+    },
+  };
+}
+
+/** App Store Opt-in: first-time downloaders per day and how many of them share analytics with developers. */
+export function optInCollector(): ReportCollector {
+  const rows = new Map<IsoDate, AppOptInInput>();
+  const days = new Set<IsoDate>();
+  const col = columns();
+  return {
+    add(row) {
+      const date = cellDate(col(row, 'date'));
+      if (!date) return;
+      days.add(date);
+      const e = rows.get(date) ?? { date, downloadingUsers: 0, optingInUsers: 0 };
+      e.downloadingUsers += num(col(row, 'downloading users'));
+      e.optingInUsers += num(col(row, 'users opting-in', 'users opting in'));
+      rows.set(date, e);
+    },
+    async write(store, appId, before) {
+      const dates = coveredDays(days, before);
+      if (dates.length === 0) return { written: 0, oldest: null };
+      return { written: await store.writeAppOptIn(appId, dates, keep(rows.values(), before)), oldest: dates[0]! };
+    },
+  };
+}
+
+/** Framework report columns that hold numbers to sum; every other column (but the date and the app) is a dimension. */
+const FRAMEWORK_METRIC = /\b(counts?|devices|duration|seconds|minutes|hours|sum|total|number|sessions|events)\b/i;
+const FRAMEWORK_SKIP = new Set(['date', 'app name', 'app apple identifier']);
+/** Combinations of dimension values kept per day; the rest are summed into one `Other` row. */
+export const FRAMEWORK_VALUES_PER_DAY = 200;
+
+/**
+ * A Framework Usage report, whatever its columns: per day and combination of dimension values,
+ * its metric columns summed. Apple leaves out rows below its five-device threshold.
+ */
+export function frameworkCollector(report: string): ReportCollector {
+  const rows = new Map<string, AppFrameworkInput>();
+  const days = new Set<IsoDate>();
+  const col = columns();
+  let metricNames: string[] | null = null;
+  let dimNames: string[] = [];
+  return {
+    add(row) {
+      const date = cellDate(col(row, 'date', 'event date'));
+      if (!date) return;
+      days.add(date);
+      if (!metricNames) {
+        const keys = Object.keys(row).filter((k) => !FRAMEWORK_SKIP.has(k) && k !== 'event date');
+        metricNames = keys.filter((k) => FRAMEWORK_METRIC.test(k));
+        dimNames = keys.filter((k) => !FRAMEWORK_METRIC.test(k)).slice(0, 12);
+      }
+      const dims: Record<string, string> = {};
+      for (const d of dimNames) dims[d] = (row[d] ?? '').trim().slice(0, 80);
+      const key = `${date}|${JSON.stringify(dims)}`;
+      const e = rows.get(key) ?? { date, dims, metrics: {} };
+      for (const m of metricNames) {
+        const v = cellNumber(row[m] ?? '');
+        if (v !== null) e.metrics[m] = (e.metrics[m] ?? 0) + v;
+      }
+      rows.set(key, e);
+    },
+    async write(store, appId, before) {
+      const dates = coveredDays(days, before);
+      if (dates.length === 0) return { written: 0, oldest: null };
+      const weight = (r: AppFrameworkInput) => Object.values(r.metrics)[0] ?? 0;
+      const out: AppFrameworkInput[] = [];
+      for (const date of dates) {
+        const list = keep(rows.values(), before)
+          .filter((r) => r.date === date)
+          .sort((a, b) => weight(b) - weight(a));
+        out.push(...list.slice(0, FRAMEWORK_VALUES_PER_DAY));
+        const rest = list.slice(FRAMEWORK_VALUES_PER_DAY);
+        if (rest.length) {
+          const other: AppFrameworkInput = { date, dims: Object.fromEntries(dimNames.map((d) => [d, 'Other'])), metrics: {} };
+          for (const r of rest) for (const [m, v] of Object.entries(r.metrics)) other.metrics[m] = (other.metrics[m] ?? 0) + v;
+          out.push(other);
+        }
+      }
+      return { written: await store.writeAppFramework(appId, report, dates, out), oldest: dates[0]! };
+    },
+  };
+}
+
+/** The report specs of an app: the standard ones and the Framework Usage reports it asked for. */
+export function ascReportsFor(app: AppConfig): AscReportSpec[] {
+  return [
+    ...ASC_REPORTS,
+    ...(app.frameworkReports ?? []).map((name): AscReportSpec => {
+      const key = `fw_${slug(name)}`;
+      const want = slug(name);
+      return {
+        key,
+        label: name,
+        task: 'asc.framework',
+        // Apple names the report, sometimes with "Standard" or "Detailed" after it: the Standard one, or the plain name.
+        match: (n) => {
+          const s = slug(n);
+          return s === want || s === `${want}_standard`;
+        },
+        collector: () => frameworkCollector(slug(name)),
+      };
+    }),
+  ];
 }
 
 // ------------------------------------------------------------------ Google Play
@@ -699,6 +1079,7 @@ export function ascReviewInput(r: {
   body: string | null;
   createdDate: string;
   territory: string | null;
+  replied?: boolean;
 }): AppReviewInput | null {
   const at = new Date(r.createdDate);
   if (Number.isNaN(at.getTime()) || !(r.rating >= 1 && r.rating <= 5)) return null;
@@ -711,7 +1092,7 @@ export function ascReviewInput(r: {
     territory: r.territory?.trim().toUpperCase().slice(0, 10) || null,
     language: null,
     version: null,
-    replied: false,
+    replied: Boolean(r.replied),
   };
 }
 
@@ -719,6 +1100,8 @@ export function ascReviewInput(r: {
 export interface AscReportSpec {
   key: string;
   label: string;
+  /** Task name for progress and errors (default `asc.<key>`). */
+  task?: string;
   match: (name: string) => boolean;
   collector: () => ReportCollector;
 }
@@ -751,9 +1134,21 @@ export const ASC_REPORTS: readonly AscReportSpec[] = [
     collector: crashesCollector,
   },
   {
+    key: 'opt_in',
+    label: 'App Store Opt-in',
+    match: (n) => /opt-?in/i.test(n) && !/detailed/i.test(n),
+    collector: optInCollector,
+  },
+  {
+    key: 'crashes_expanded',
+    label: 'App Crashes Expanded',
+    match: (n) => /^app crashes expanded$/i.test(n.trim()),
+    collector: crashesExpandedCollector,
+  },
+  {
     key: 'purchases',
     label: 'App Store Purchases',
-    match: (n) => has(n, /\bpurchases\b/i, /standard/i) && !/pre-?order/i.test(n),
+    match: (n) => has(n, /\bpurchases\b/i, /standard/i) && !/pre-?order|subscription/i.test(n),
     collector: purchasesCollector,
   },
   {
@@ -761,6 +1156,18 @@ export const ASC_REPORTS: readonly AscReportSpec[] = [
     label: 'App Sessions',
     match: (n) => has(n, /\bsessions\b/i, /standard/i),
     collector: sessionsCollector,
+  },
+  {
+    key: 'subscription_state',
+    label: 'App Store Subscription State',
+    match: (n) => has(n, /subscription state/i, /standard/i),
+    collector: () => subscriptionMetricsCollector('state'),
+  },
+  {
+    key: 'subscription_event',
+    label: 'App Store Subscription Event',
+    match: (n) => has(n, /subscription event/i, /standard/i),
+    collector: () => subscriptionMetricsCollector('event'),
   },
   {
     key: 'engagement_referrers',

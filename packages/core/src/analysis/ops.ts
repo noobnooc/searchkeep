@@ -1,11 +1,14 @@
 import { findSite, SearchkeepError, segmentsEnabled } from '../config.js';
 import { safeMessage } from '../errors.js';
 import { SourceError } from '../http.js';
+
+/** Apple Ads roles that may change campaigns (the probe asks for a read-only one). */
+const APPLE_ADS_WRITE_ROLES = ['Admin', 'API Account Manager', 'Limited Access: API Read & Write'];
 import type { ReadinessReport } from '../auth/readiness.js';
 import type { SourceClients } from '../sources.js';
 import { pageToUrl } from '../url.js';
 import type { AppConfig, SearchSource, SiteConfig } from '../types.js';
-import { previousPeriod, rangeLength } from '../dates.js';
+import { addDays, previousPeriod, rangeLength, toIsoDate } from '../dates.js';
 import { clampLimit, metrics, resolve, type AnalysisContext, type CommonParams } from './common.js';
 import { aiCrawlers } from './geo.js';
 import { syncProgress, type SyncProgressReport } from '../sync/progress.js';
@@ -220,6 +223,18 @@ export async function setupStatus(ctx: OpsContext, p: { readiness: ReadinessRepo
     status: !anyApple ? 'skipped' : ascSet === 3 ? 'ok' : 'error',
     ...(!anyApple ? { detail: 'No app has an App Store Apple ID.' } : ascSet === 3 ? {} : { detail: 'Set all three secrets.' }),
   });
+  if (anyApple)
+    add({
+      id: 'config.asc_vendor',
+      label: 'App Store Sales and Trends (ASC_VENDOR_NUMBER, optional)',
+      status: config.asc.vendorNumber ? 'ok' : 'warn',
+      ...(config.asc.vendorNumber
+        ? {}
+        : {
+            detail:
+              "Optional: without it, revenue per product is Apple's USD estimate only. For exact revenue per product in local currencies, prices, refunds and new versus renewal subscription proceeds, copy the vendor number from App Store Connect → Payments and Financial Reports (shown next to your legal entity name) and set it as the ASC_VENDOR_NUMBER secret. The existing Sales and Reports key can read Sales and Trends.",
+          }),
+    });
   add({
     id: 'config.play',
     label: 'Google Play reports (PLAY_REPORTS_BUCKET and a service account)',
@@ -232,6 +247,30 @@ export async function setupStatus(ctx: OpsContext, p: { readiness: ReadinessRepo
           ? { detail: 'Set GSC_CLIENT_EMAIL and GSC_PRIVATE_KEY (or PLAY_CLIENT_EMAIL and PLAY_PRIVATE_KEY).' }
           : {}),
   });
+  if (anyPlay)
+    add({
+      id: 'config.play_metadata',
+      label: 'Google Play store listing snapshots (PLAY_METADATA, opt-in)',
+      status: config.play.metadata ? 'ok' : 'skipped',
+      detail: config.play.metadata
+        ? 'On: titles, descriptions, tracks and release notes are read daily through an edit that is deleted, never committed.'
+        : 'Off: app_changes has no Google Play changes. Set PLAY_METADATA=true to read store listings and tracks daily (needs the Android Publisher API; see probe.play_metadata once on).',
+    });
+  if (anyApple) {
+    const a = config.appleAds;
+    const set = [a.clientId, a.teamId, a.keyId, a.privateKey].filter(Boolean).length;
+    add({
+      id: 'config.apple_ads',
+      label: 'Apple Ads (APPLE_ADS_CLIENT_ID, APPLE_ADS_TEAM_ID, APPLE_ADS_KEY_ID, APPLE_ADS_PRIVATE_KEY; optional)',
+      status: set === 4 ? 'ok' : set === 0 ? 'skipped' : 'error',
+      detail:
+        set === 4
+          ? 'Set: search terms, impression share and search popularity of your own campaigns.'
+          : set === 0
+            ? 'Off: app_ads answers "not configured". Set the four secrets of an API user with the API Account Read Only role to turn it on.'
+            : 'Set all four APPLE_ADS_* secrets (client id, team id, key id, private key).',
+    });
+  }
   if (config.appStorePublic)
     add({
       id: 'config.app_store_public',
@@ -243,8 +282,39 @@ export async function setupStatus(ctx: OpsContext, p: { readiness: ReadinessRepo
     id: 'config.writes',
     label: 'Writes to external systems',
     status: 'ok',
-    detail: config.enableWrites ? 'Enabled (submit_sitemap allowed).' : 'Disabled (read-only, default).',
+    detail: config.enableWrites ? 'Enabled (submit_sitemap and reply_review allowed).' : 'Disabled (read-only, default).',
   });
+  if (anyPlay)
+    add({
+      id: 'config.play_reviews_api',
+      label: 'Google Play reviews through the API (PLAY_REVIEWS_API, opt-in)',
+      status: config.play.reviewsApi ? 'ok' : 'skipped',
+      detail: config.play.reviewsApi
+        ? 'On: the last week of reviews every 4 hours, ahead of the monthly files.'
+        : 'Off: Google Play reviews come from the monthly files, 3-7 days late. Set PLAY_REVIEWS_API=true for the last week every 4 hours (the service account needs "Reply to reviews", which also allows replies).',
+    });
+  if (config.enableWrites && (anyApple || anyPlay)) {
+    const appleReplies = Boolean(config.asc.replyKeyId && config.asc.replyPrivateKey);
+    add({
+      id: 'config.review_replies',
+      label: 'reply_review can post',
+      status: (anyApple && !appleReplies) || (anyPlay && !config.play.reviewsApi) ? 'warn' : 'ok',
+      detail: [
+        anyApple
+          ? appleReplies
+            ? 'App Store: with the ASC_REPLY_* key.'
+            : 'App Store: no reply key. In App Store Connect → Users and Access → Integrations → App Store Connect API, generate a key with the Customer Support role and set ASC_REPLY_KEY_ID and ASC_REPLY_PRIVATE_KEY (ASC_ISSUER_ID is shared). It is used only by reply_review.'
+          : '',
+        anyPlay
+          ? config.play.reviewsApi
+            ? 'Google Play: through the Android Publisher API.'
+            : 'Google Play: set PLAY_REVIEWS_API=true and grant the service account "Reply to reviews" in the Play Console.'
+          : '',
+      ]
+        .filter(Boolean)
+        .join(' '),
+    });
+  }
 
   if (p.probe !== false) {
     const probe = async (id: string, label: string, fn: () => Promise<SetupCheck['status'] | [SetupCheck['status'], string]>) => {
@@ -264,6 +334,123 @@ export async function setupStatus(ctx: OpsContext, p: { readiness: ReadinessRepo
         if (missing.length)
           return ['error', `Not visible to the App Store Connect key: ${missing.map((a) => `${a.name} (${a.appleId})`).join(', ')}.`];
         return 'ok';
+      });
+    }
+    if (asc?.listingSnapshot && anyApple) {
+      await probe('probe.asc_metadata', 'App Store Connect key can read app versions and listings', async () => {
+        const app = config.apps.find((a) => a.appleId)!;
+        try {
+          await asc.listingSnapshot!(app.appleId!);
+          return 'ok';
+        } catch (err) {
+          if (err instanceof SourceError && (err.status === 403 || err.status === 401))
+            return [
+              'warn',
+              `The App Store Connect key may not read ${app.name}'s versions and listings, so app_changes has no App Store changes. Apple offers no read-only role for app metadata: in App Store Connect → Users and Access → Integrations → App Store Connect API, the key's role must give access to App Information for this app (check the key's role and app access). Everything else syncs without it.`,
+            ];
+          throw err;
+        }
+      });
+    }
+    if (play && anyPlay && config.play.clientEmail && config.play.privateKey) {
+      await probe('probe.play_vitals', 'Service account can read Google Play crash and ANR rates', async () => {
+        const app = config.apps.find((a) => a.playPackage)!;
+        const today = toIsoDate(ctx.now ? ctx.now() : new Date());
+        try {
+          const rows = await play.vitals(app.playPackage!, 'crash', { start: addDays(today, -9), end: addDays(today, -2) });
+          return rows.length
+            ? 'ok'
+            : [
+                'ok',
+                `Readable, but Google has no crash rates for ${app.name} in the last week: the Reporting API computes them only above a minimum number of daily users. Crash counts still come from the monthly crash files.`,
+              ];
+        } catch (err) {
+          if (err instanceof SourceError && (err.status === 403 || err.status === 401))
+            return [
+              'warn',
+              `Crash and ANR rates stay empty: in Google Cloud, enable the "Google Play Developer Reporting API" in the service account's project, and in the Play Console → Users and permissions → ${config.play.clientEmail} make sure it has "View app information (read-only)" for the app (${safeMessage(err)}).`,
+            ];
+          throw err;
+        }
+      });
+    }
+    if (play && anyPlay && config.play.reviewsApi) {
+      await probe('probe.play_reviews', 'Service account can read Google Play reviews (PLAY_REVIEWS_API)', async () => {
+        const app = config.apps.find((a) => a.playPackage)!;
+        if (!play.listReviews) return ['warn', 'This deployment does not read Google Play reviews through the API.'];
+        try {
+          await play.listReviews(app.playPackage!);
+          return 'ok';
+        } catch (err) {
+          if (err instanceof SourceError && (err.status === 403 || err.status === 401))
+            return [
+              'warn',
+              `The service account may not read ${app.name}'s reviews. Enable the "Google Play Android Developer API" in its Google Cloud project, and in the Play Console → Users and permissions → ${config.play.clientEmail ?? 'the service account'} → App permissions turn on "Reply to reviews" (Google offers no read-only permission for this API). Reviews still come from the monthly files.`,
+            ];
+          throw err;
+        }
+      });
+    }
+    if (play && anyPlay && config.play.metadata) {
+      await probe('probe.play_metadata', 'Service account can read Google Play store listings (PLAY_METADATA)', async () => {
+        const app = config.apps.find((a) => a.playPackage)!;
+        if (!play.listingSnapshot) return ['warn', 'This deployment does not read Google Play store listings.'];
+        try {
+          await play.listingSnapshot(app.playPackage!);
+          return 'ok';
+        } catch (err) {
+          if (err instanceof SourceError && (err.status === 403 || err.status === 401))
+            return [
+              'warn',
+              `The service account may not read ${app.name}'s store listing through the Android Publisher API. In Google Cloud, enable the "Google Play Android Developer API" for the service account's project; in the Play Console → Users and permissions → ${config.play.clientEmail ?? 'the service account'} → App permissions, grant "View app information (read-only)" for the app. Searchkeep opens an edit, reads it and deletes it, never committing it; opening an edit closes any other edit the same service account has open, so use a service account your release tooling does not use (PLAY_CLIENT_EMAIL).`,
+            ];
+          throw err;
+        }
+      });
+    }
+    if (ctx.clients.appleAds && anyApple) {
+      const ads = ctx.clients.appleAds;
+      await probe('probe.apple_ads', 'Apple Ads credentials work and are read-only', async () => {
+        try {
+          const accounts = await ads.accounts();
+          if (accounts.length === 0)
+            return [
+              'warn',
+              'The Apple Ads credentials see no ad account: invite the API user to the account in ads.apple.com → Account Settings → User Management.',
+            ];
+          const writable = accounts.filter((x) => x.roles.some((role) => APPLE_ADS_WRITE_ROLES.includes(role)));
+          if (writable.length)
+            return [
+              'warn',
+              `The Apple Ads API user can change campaigns in ${writable.map((x) => x.name || x.id).join(', ')} (${[...new Set(writable.flatMap((x) => x.roles))].join(', ')}). Searchkeep only reads: in ads.apple.com → Account Settings → User Management, give it the API Account Read Only role.`,
+            ];
+          return 'ok';
+        } catch (err) {
+          if (err instanceof SourceError && (err.status === 400 || err.status === 401 || err.status === 403))
+            return [
+              'warn',
+              `Apple Ads refused the credentials (${safeMessage(err)}). Check APPLE_ADS_CLIENT_ID, APPLE_ADS_TEAM_ID and APPLE_ADS_KEY_ID against ads.apple.com → Account Settings → API, and that APPLE_ADS_PRIVATE_KEY is the private key of the uploaded public key.`,
+            ];
+          throw err;
+        }
+      });
+    }
+    if (asc?.salesReport && anyApple && config.asc.vendorNumber) {
+      await probe('probe.asc_sales', 'App Store Connect key can read Sales and Trends', async () => {
+        const day = addDays(toIsoDate(ctx.now ? ctx.now() : new Date()), -3);
+        try {
+          await asc.salesReport!(config.asc.vendorNumber!, day, () => undefined);
+          return 'ok';
+        } catch (err) {
+          if (err instanceof SourceError && (err.status === 403 || err.status === 401))
+            return [
+              'warn',
+              'The App Store Connect key may not read Sales and Trends. In App Store Connect → Users and Access → Integrations → App Store Connect API, use a key with the Sales and Reports (or Finance) role for ASC_KEY_ID, ASC_ISSUER_ID and ASC_PRIVATE_KEY, and check ASC_VENDOR_NUMBER matches Payments and Financial Reports.',
+            ];
+          if (err instanceof SourceError && err.status === 400)
+            return ['warn', `Apple refused the Sales and Trends request (${safeMessage(err)}). Check ASC_VENDOR_NUMBER.`];
+          throw err;
+        }
       });
     }
     if (play && anyPlay && config.play.bucket) {

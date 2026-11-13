@@ -7,7 +7,7 @@ import { addDays, assertRange, isIsoDate, previousPeriod, toIsoDate } from '../d
 import { safeMessage } from '../errors.js';
 import { SourceError } from '../http.js';
 import type { AscClient, AscReportRequest } from '../sources.js';
-import { parseJson, syncKeys, type AscRequestState } from '../sync/state.js';
+import { parseJson, syncKeys, type AppleAdsState, type AscPending, type AscRequestState } from '../sync/state.js';
 import {
   ALL_KEY,
   APP_BREAKDOWN_DIMENSIONS,
@@ -27,7 +27,7 @@ import {
 } from '../types.js';
 import { clampLimit, round } from '../analysis/common.js';
 import { APP_STORE_GENRES } from './genres.js';
-import { BREAKDOWN_VALUES_PER_DAY, playCurrencyKey } from './reports.js';
+import { BREAKDOWN_VALUES_PER_DAY, playCurrencyKey, slug } from './reports.js';
 import { appStorefronts, byStorefront } from './storefronts.js';
 import { appStoresOf, type OpsContext } from '../analysis/ops.js';
 
@@ -141,11 +141,91 @@ const STORE_NOTES: Record<AppStore, string> = {
 
 export interface AppPerformanceParams extends AppParams {
   /** Group rows by these (default none: per-store totals only). `referrer` lists referring websites, apps and UTM sources. */
-  groupBy?: Array<AppDimension | 'referrer'>;
+  groupBy?: Array<AppDimension | 'referrer' | 'page_type' | 'page_title'>;
   territory?: string;
   /** An app source type: search, browse, app_referrer, web_referrer, referral, ... */
   source?: string;
   referrerKind?: AppReferrerKind;
+  /** Attach the store changes of each day to the series (default true). */
+  includeChanges?: boolean;
+  /** Count institutional (volume) purchases in the totals, trend, conversion rates and proceeds per download (default false). */
+  includeVolumePurchases?: boolean;
+}
+
+/** A day at least this many times the median of the 28 days before it is flagged. */
+export const ANOMALY_FACTOR = 50;
+/** ...and only when it has at least this many (a few downloads on a quiet day are not an anomaly). */
+const ANOMALY_MIN = 100;
+const ANOMALY_METRICS = ['downloads', 'impressions', 'pageViewsUnique', 'installs'] as const;
+
+function median(xs: number[]): number {
+  if (xs.length === 0) return 0;
+  const s = [...xs].sort((a, b) => a - b);
+  const m = Math.floor(s.length / 2);
+  return s.length % 2 ? s[m]! : (s[m - 1]! + s[m]!) / 2;
+}
+
+/**
+ * Days in the range where a metric is at least 50 times the median of the 28 days before it (with
+ * the volume purchases included, so they are found), with the territory and source behind most of it.
+ */
+async function findAnomalies(
+  ctx: OpsContext,
+  appId: string,
+  store: AppStore,
+  range: DateRange,
+  filters: { territory?: string; source?: string },
+) {
+  const days = await ctx.store.queryAppStore({
+    appId,
+    store,
+    range: { start: addDays(range.start, -28), end: range.end },
+    dimensions: ['date'],
+    ...filters,
+    orderBy: 'date',
+    order: 'asc',
+    limit: 4000,
+  });
+  const byDate = new Map(days.map((d) => [d.date!, d]));
+  const out: Array<{
+    store: AppStore;
+    date: IsoDate;
+    metric: (typeof ANOMALY_METRICS)[number];
+    value: number;
+    median28: number;
+    ratio: number | null;
+    top?: { territory: string; source: string; value: number; share: number };
+  }> = [];
+  for (let d = range.start; d <= range.end; d = addDays(d, 1)) {
+    const today = byDate.get(d);
+    if (!today) continue;
+    for (const metric of ANOMALY_METRICS) {
+      const value = today[metric];
+      if (value < ANOMALY_MIN) continue;
+      const window: number[] = [];
+      for (let i = 1; i <= 28; i++) window.push(byDate.get(addDays(d, -i))?.[metric] ?? 0);
+      const m = median(window);
+      if (value < ANOMALY_FACTOR * Math.max(m, 1)) continue;
+      out.push({ store, date: d, metric, value, median28: m, ratio: m > 0 ? round(value / m, 1) : null });
+    }
+  }
+  // What was behind each flagged day: the territory and source with the most of it.
+  for (const a of out) {
+    const parts = await ctx.store.queryAppStore({
+      appId,
+      store,
+      range: { start: a.date, end: a.date },
+      dimensions: ['territory', 'source'],
+      ...filters,
+      orderBy: a.metric,
+      order: 'desc',
+      limit: 1,
+    });
+    const top = parts[0];
+    if (top && top[a.metric] > 0)
+      a.top = { territory: top.territory!, source: top.source!, value: top[a.metric], share: round(top[a.metric] / a.value, 4) };
+  }
+  return out;
 }
 
 /**
@@ -161,9 +241,19 @@ export async function appPerformance(ctx: OpsContext, p: AppPerformanceParams) {
     ...(p.territory ? { territory: p.territory.trim().toUpperCase() } : {}),
     ...(p.source ? { source: p.source.trim().toLowerCase() } : {}),
   };
-  // Licenses bought in bulk are not people finding the app: left out unless a source is asked for.
-  const hidden = p.source ? [] : VOLUME_PURCHASE_SOURCES;
+  // Licenses bought in bulk are not people finding the app: left out unless asked for (by source or the switch).
+  const hidden = p.source || p.includeVolumePurchases ? [] : VOLUME_PURCHASE_SOURCES;
   const exclude = hidden.length ? { excludeSources: hidden } : {};
+  const changes =
+    p.includeChanges === false
+      ? []
+      : await ctx.store.queryAppChanges({ appId: r.app.id, ...(r.store ? { store: r.store } : {}), range: r.range, limit: 2000 });
+  const changesOn = (store: AppStore, date: IsoDate) => {
+    const list = changes
+      .filter((c) => c.store === store && c.date === date)
+      .map((c) => ({ entity: c.entity, locale: c.locale, field: c.field }));
+    return list.length ? { changes: list } : {};
+  };
   const perStore = await Promise.all(
     stores.map(async (store) => {
       const q = {
@@ -184,18 +274,39 @@ export async function appPerformance(ctx: OpsContext, p: AppPerformanceParams) {
           : [],
       ]);
       const volumePurchaseDownloads = volume.filter((x) => hidden.includes(x.source as AppSourceType)).reduce((t, x) => t + x.downloads, 0);
+      // Share of first-time downloaders who share analytics (App Store Opt-in report).
+      const optIn = store === 'apple' ? await ctx.store.queryAppOptIn(r.app.id, r.range) : null;
+      const analyticsSharing =
+        optIn && optIn.days > 0
+          ? {
+              downloadingUsers: optIn.downloadingUsers,
+              optingInUsers: optIn.optingInUsers,
+              rate: optIn.downloadingUsers > 0 ? round(optIn.optingInUsers / optIn.downloadingUsers, 4) : null,
+            }
+          : undefined;
       return {
         store,
         currency: await storeCurrency(ctx, r.app.id, store),
         current: funnel(totalOf(cur)),
         previous: funnel(totalOf(before)),
-        series: cur.map((x) => ({ date: x.date!, ...funnel(x) })),
+        series: cur.map((x) => ({ date: x.date!, ...funnel(x), ...changesOn(store, x.date!) })),
         ...(volumePurchaseDownloads > 0 ? { volumePurchaseDownloads } : {}),
+        ...(analyticsSharing ? { analyticsSharing } : {}),
       };
     }),
   );
-  const groupBy = (p.groupBy ?? []).filter((g) => g !== 'referrer') as AppDimension[];
-  const valid: Array<AppDimension | 'referrer'> = ['date', 'week', 'month', 'store', 'territory', 'source', 'referrer'];
+  const groupBy = (p.groupBy ?? []).filter((g) => g !== 'referrer' && g !== 'page_type' && g !== 'page_title') as AppDimension[];
+  const valid: Array<AppDimension | 'referrer' | 'page_type' | 'page_title'> = [
+    'date',
+    'week',
+    'month',
+    'store',
+    'territory',
+    'source',
+    'referrer',
+    'page_type',
+    'page_title',
+  ];
   for (const g of p.groupBy ?? [])
     if (!valid.includes(g)) throw new SearchkeepError('bad_request', `groupBy must be any of ${valid.join(', ')}.`);
   const rows = groupBy.length
@@ -231,7 +342,24 @@ export async function appPerformance(ctx: OpsContext, p: AppPerformanceParams) {
       return { ...x, ownSite: x.kind !== 'app' && own.some((d) => host === d || host.endsWith(`.${d}`)) };
     });
   }
+  // App Store funnel per product page (type, or type and title for custom product pages and in-app events).
+  const pageLevel = p.groupBy?.includes('page_title') ? 'title' : p.groupBy?.includes('page_type') ? 'type' : null;
+  const pages =
+    pageLevel && r.store !== 'play' && r.app.appleId
+      ? (await ctx.store.queryAppPages({ appId: r.app.id, range: r.range, level: pageLevel, limit: r.limit })).map((x) => ({
+          pageType: x.pageType,
+          ...(pageLevel === 'title' ? { pageTitle: x.pageTitle } : {}),
+          impressions: x.impressions,
+          impressionsUnique: x.impressionsUnique,
+          pageViews: x.pageViews,
+          pageViewsUnique: x.pageViewsUnique,
+          downloads: x.downloads,
+          pageConversion: x.pageViewsUnique > 0 ? round(x.downloads / x.pageViewsUnique, 4) : null,
+        }))
+      : undefined;
   const charts = r.store !== 'play' && r.app.appleId ? await latestCharts(ctx, r.app, r.range) : [];
+  const anomalies = (await Promise.all(stores.map((s) => findAnomalies(ctx, r.app.id, s, r.range, filters)))).flat();
+  const history = r.store !== 'play' && r.app.appleId ? await appStoreHistory(ctx, r.app) : [];
   const notes = [...r.notes, ...stores.map((s) => STORE_NOTES[s])];
   for (const s of perStore)
     if (s.volumePurchaseDownloads)
@@ -240,6 +368,35 @@ export async function appPerformance(ctx: OpsContext, p: AppPerformanceParams) {
       );
   if (p.source && stores.includes('play') && p.territory)
     notes.push('Google Play reports sources and territories separately, so it has no rows for a territory and a source together.');
+  if (anomalies.length) {
+    const left = anomalies.filter((a) => a.top && hidden.includes(a.top.source as AppSourceType));
+    notes.push(
+      `Anomalies: ${anomalies.length} day(s) where a metric is at least ${ANOMALY_FACTOR}× the median of the 28 days before it (see anomalies, with the territory and source behind most of it). Such spikes are rarely people finding the app (bulk licenses, bots, a feature); check them before reading trends or rates.${left.length ? ` ${left.length} of them come mostly from institutional purchases, which are already left out of the totals and rates.` : ''}`,
+    );
+  }
+  if (p.includeVolumePurchases)
+    notes.push(
+      'includeVolumePurchases: institutional purchases are counted in the totals, trend, conversion rates and proceeds per download.',
+    );
+  const appleHistory = r.app.appleId
+    ? parseJson<AscRequestState>(await ctx.store.getMeta(syncKeys.ascRequests(r.app.id)))?.snapshotRequestedOn
+    : undefined;
+  notes.push(...historyNotes(history, appleHistory));
+  for (const s of perStore)
+    if (s.analyticsSharing?.rate)
+      notes.push(
+        `App Store: ${Math.round(s.analyticsSharing.rate * 1000) / 10}% of first-time downloaders in this range share analytics with developers (App Store Opt-in report). Installs, deletions, sessions and crashes count only them: divide those by ${s.analyticsSharing.rate} for a rough estimate of all users (an estimate, assuming people who share behave like those who do not; Apple's five-user thresholds still apply). Impressions, page views, downloads and purchases count everyone.`,
+      );
+  if (changes.length)
+    notes.push(
+      `Store changes: ${changes.length} change(s) to versions, listings or app info in this range are attached to the series days they were first seen (see app_changes for the values before and after).`,
+    );
+  if (pageLevel)
+    notes.push(
+      pageLevel === 'title'
+        ? 'Pages (App Store only): per page type and title from the Detailed reports (custom product pages, in-app events, "Default Product Page"); Apple adds small noise and leaves out rows with fewer than five people, so they need not add up to the totals. Downloads are first-time downloads by the page they came from; page conversion is downloads ÷ unique page views of the same page. Product page optimization treatments are in no report Apple offers.'
+        : 'Pages (App Store only): impressions, page views and first-time downloads per page type (product page, no page = list views, store sheet, in-app event, ...), from the Standard reports. Group by page_title for custom product pages. Product page optimization treatments are in no report Apple offers.',
+    );
   if (referrers !== undefined)
     notes.push(
       'Referrers: App Store web and app referrers come from the Detailed reports (small numbers are left out or noised by Apple); Google Play lists UTM sources of third-party referrals.',
@@ -252,6 +409,8 @@ export async function appPerformance(ctx: OpsContext, p: AppPerformanceParams) {
     stores: perStore,
     ...(rows.length || groupBy.length ? { rows } : {}),
     ...(referrers ? { referrers } : {}),
+    ...(pages ? { pages } : {}),
+    ...(anomalies.length ? { anomalies } : {}),
     ...(charts.length ? { charts } : {}),
     notes,
   };
@@ -350,6 +509,12 @@ export async function appSearchTerms(ctx: OpsContext, p: AppSearchTermsParams) {
     'Terms with few visitors are grouped by Google under "Other" and are not listed separately.',
   ];
   if (!r.app.playPackage) notes.unshift(`${r.app.name} has no Google Play package, so there are no search terms.`);
+  if (r.app.appleId)
+    notes.push(
+      appleAdsConfigured(ctx)
+        ? "App Store search terms are not in Apple's analytics reports; for the terms of your Apple Ads campaigns, with impression share and search popularity, see app_ads."
+        : `App Store search terms are not in Apple's analytics reports. ${APPLE_ADS_NOT_CONFIGURED}`,
+    );
   if (cur.length === 0 && r.app.playPackage)
     notes.push('No search terms in this range yet. The Play Console publishes them 3-7 days late.');
   return {
@@ -430,7 +595,11 @@ export async function appReviews(ctx: OpsContext, p: AppReviewsParams) {
     };
   });
   const notes = [
-    'Reviews are stored without reviewer names. App Store reviews come from App Store Connect; Google Play reviews from the monthly Play Console files (3-7 days late).',
+    `Reviews are stored without reviewer names. App Store reviews come from App Store Connect every 4 hours (replied marks those with a developer response); Google Play reviews ${
+      ctx.config.play.reviewsApi
+        ? 'from the Android Publisher API every 4 hours (the last week) and from the monthly Play Console files'
+        : 'from the monthly Play Console files (3-7 days late; PLAY_REVIEWS_API=true reads the last week every 4 hours)'
+    }.${ctx.config.enableWrites ? ' reply_review replies to one (preview first, then confirm).' : ''}`,
   ];
   if (summary.some((s) => s.store === 'apple' && !s.rating))
     notes.push(
@@ -465,6 +634,13 @@ export async function appStability(ctx: OpsContext, p: AppStabilityParams) {
     groupBy: 'version',
     limit: 500,
   });
+  // Google Play's monthly crash files count crashes and ANRs even when the Reporting API has no rates.
+  const files =
+    r.store !== 'apple' && r.app.playPackage
+      ? await ctx.store.queryAppBreakdowns({ appId: r.app.id, store: 'play', dimension: 'app_version', range: r.range, limit: 500 })
+      : [];
+  const fileCrashes = files.reduce((t, x) => t + x.crashes, 0);
+  const fileAnrs = files.reduce((t, x) => t + x.anrs, 0);
   const summary = storesOf(r.app, r.store).map((store) => {
     const all = totals.find((x) => x.store === store && x.version === '');
     return {
@@ -473,19 +649,44 @@ export async function appStability(ctx: OpsContext, p: AppStabilityParams) {
       userPerceivedCrashRate: all?.userPerceivedCrashRate ?? null,
       anrRate: all?.anrRate ?? null,
       userPerceivedAnrRate: all?.userPerceivedAnrRate ?? null,
-      crashes: all?.crashes ?? null,
+      crashes: store === 'play' ? (files.length ? fileCrashes : null) : (all?.crashes ?? null),
       crashDevices: all?.crashDevices ?? null,
+      ...(store === 'apple'
+        ? { crashesExpanded: all?.crashesExpanded ?? null, crashDevicesExpanded: all?.crashDevicesExpanded ?? null }
+        : {}),
+      ...(store === 'play' ? { anrs: files.length ? fileAnrs : null } : {}),
     };
   });
+  const notes = [
+    "Google Play rates are shares of daily users (Play Developer Reporting API); Google flags apps above 1.09% user-perceived crash rate or 0.47% user-perceived ANR rate; Google Play crash and ANR counts come from the Play Console's monthly crash files (3-7 days late). App Store crashes are those that made a crash log (App Crashes); crashesExpanded counts every crash on device (App Crashes Expanded, iOS and iPadOS 17.4 and later, up to 8 days late). Both count only people who share analytics with developers; crashing devices are summed across device models and OS versions, an upper bound.",
+  ];
+  for (const s of summary) {
+    if (s.store === 'apple' && s.crashes === null && (s.crashesExpanded ?? null) === null) {
+      const read = await ctx.store.getMeta(syncKeys.ascInstance(r.app.id, 'crashes'));
+      notes.push(
+        read
+          ? 'App Store: no crashes in this range among people who share analytics.'
+          : "App Store: Apple has not generated an App Crashes report for this app. Apple makes it only for days when at least five people who share analytics with developers had events, so a small app often has none; nothing is missing on Searchkeep's side. Use your own crash reporting (Xcode Organizer, a crash SDK) for these apps.",
+      );
+    }
+    if (s.store === 'play' && s.crashRate === null && s.anrRate === null) {
+      const st = parseJson<{ checkedOn?: string; empty?: boolean }>(await ctx.store.getMeta(syncKeys.playVitals(r.app.id)));
+      notes.push(
+        st?.empty
+          ? `Google Play: the Play Developer Reporting API answered without crash or ANR rates for this app: Google computes them only above a minimum number of daily users, so a small app has none.${files.length ? ' The crash and ANR counts above come from the monthly crash files.' : ''}`
+          : st?.checkedOn
+            ? 'Google Play: no crash or ANR rates in this range.'
+            : 'Google Play: crash and ANR rates have not been read yet; see setup_status (probe.play_vitals) if this stays so.',
+      );
+    }
+  }
   return {
     app: r.app.id,
     range: r.range,
     groupBy,
     summary,
     rows: groupBy === 'version' ? rows.filter((x) => x.version !== '') : rows,
-    notes: [
-      'Google Play rates are shares of daily users (Play Developer Reporting API); Google flags apps above 1.09% user-perceived crash rate or 0.47% user-perceived ANR rate. App Store numbers are crash counts from people who share analytics with developers.',
-    ],
+    notes,
   };
 }
 
@@ -554,20 +755,117 @@ export async function appBreakdown(ctx: OpsContext, p: AppBreakdownParams) {
   };
 }
 
-export interface AppSubscriptionsParams extends Omit<AppParams, 'store'> {
+export interface AppSubscriptionsParams extends AppParams {
   product?: string;
   territory?: string;
+  /** App Store only: an offer type (`free_trial`, `pay_up_front`, `pay_as_you_go`, ...; empty string for none). */
+  offerType?: string;
 }
 
-/**
- * Google Play subscriptions (ADR 0010): new, canceled and active subscriptions per product and
- * country over the range, against the previous period, with the daily trend.
- */
-export async function appSubscriptions(ctx: OpsContext, p: AppSubscriptionsParams) {
-  const r = await resolveApp(ctx, { ...p, store: 'play' }, { days: 28, limit: 50 });
-  if (!r.app.playPackage)
-    throw new SearchkeepError('bad_request', 'This app has no Google Play package; subscriptions come from Google Play.');
-  const prev = previousPeriod(r.range);
+interface MetricMatch {
+  metrics?: string[];
+  groups?: string[];
+  prefix?: string;
+}
+
+type AppleEventName =
+  | 'trialStarts'
+  | 'paidOfferStarts'
+  | 'trialConversions'
+  | 'paidOfferConversions'
+  | 'paidStarts'
+  | 'renewals'
+  | 'voluntaryChurn'
+  | 'involuntaryChurn'
+  | 'refunds'
+  | 'enteredBillingIssue'
+  | 'recoveredFromBillingIssue';
+type AppleStateName = 'activeSubscriptions' | 'freeTrials' | 'paidOffers' | 'paidPlans' | 'gracePeriod' | 'billingRetry' | 'suspended';
+
+/** App Store subscription event sub types and groupings (slugs) summed into each summary figure. */
+const APPLE_EVENTS: Record<AppleEventName, MetricMatch> = {
+  trialStarts: { metrics: ['free_trial_starts'] },
+  paidOfferStarts: { metrics: ['paid_offer_starts'] },
+  trialConversions: { metrics: ['full_price_from_free_trial', 'contingent_price_from_free_trial'] },
+  paidOfferConversions: { metrics: ['full_price_from_paid_offer', 'contingent_price_from_paid_offer'] },
+  paidStarts: { metrics: ['full_price_subscription_starts', 'contingent_price_subscription_starts'] },
+  renewals: { groups: ['renewals'] },
+  voluntaryChurn: { groups: ['voluntary_churn'] },
+  involuntaryChurn: { groups: ['involuntary_churn'] },
+  refunds: { prefix: 'refunds_' },
+  enteredBillingIssue: { groups: ['entered_billing_issue'] },
+  recoveredFromBillingIssue: { groups: ['recoveries_from_billing_issue'] },
+};
+/** App Store subscription states (levels) per summary figure; churned states are 2-year totals and left out. */
+const APPLE_STATES: Record<AppleStateName, MetricMatch> = {
+  activeSubscriptions: { groups: ['subscription_offers', 'paid_plans'] },
+  freeTrials: { metrics: ['free_trials'] },
+  paidOffers: { metrics: ['paid_offers'] },
+  paidPlans: { groups: ['paid_plans'] },
+  gracePeriod: { metrics: ['grace_period'] },
+  billingRetry: { metrics: ['billing_retry'] },
+  suspended: { metrics: ['suspended'] },
+};
+
+interface MetricRow {
+  metric?: string;
+  metricGroup?: string;
+  date?: string;
+  product?: string;
+  offerType?: string;
+  territory?: string;
+  source?: string;
+  count: number;
+}
+
+const matches = (d: MetricMatch, r: MetricRow) =>
+  Boolean(
+    d.metrics?.includes(r.metric ?? '') || d.groups?.includes(r.metricGroup ?? '') || (d.prefix && (r.metric ?? '').startsWith(d.prefix)),
+  );
+
+function sumBy<K extends string>(defs: Record<K, MetricMatch>, rows: MetricRow[]): Record<K, number> {
+  const out = {} as Record<K, number>;
+  for (const name of Object.keys(defs) as K[]) {
+    let total = 0;
+    for (const r of rows) if (matches(defs[name], r)) total += r.count;
+    out[name] = total;
+  }
+  return out;
+}
+
+type AppleSummary = Record<AppleEventName | AppleStateName | 'churn', number> & { trialConversionRate: number | null };
+
+function appleSummary(events: MetricRow[], states: MetricRow[]): AppleSummary {
+  const e = sumBy(APPLE_EVENTS, events);
+  const st = sumBy(APPLE_STATES, states);
+  return {
+    ...st,
+    ...e,
+    churn: e.voluntaryChurn + e.involuntaryChurn,
+    // Conversions ÷ trial starts in the same period: a rough rate, not a cohort.
+    trialConversionRate: e.trialStarts > 0 ? round(e.trialConversions / e.trialStarts, 4) : null,
+  };
+}
+
+type GroupKey = 'date' | 'product' | 'offerType' | 'territory' | 'source';
+
+/** Rows grouped by a key (plus metric and grouping) → one summary per value of the key. */
+function groupSummaries(key: GroupKey, events: MetricRow[], states: MetricRow[]): Array<AppleSummary & { value: string }> {
+  const by = new Map<string, { events: MetricRow[]; states: MetricRow[] }>();
+  const at = (v: string) => {
+    let e = by.get(v);
+    if (!e) by.set(v, (e = { events: [], states: [] }));
+    return e;
+  };
+  for (const r of events) at(r[key] ?? '').events.push(r);
+  for (const r of states) at(r[key] ?? '').states.push(r);
+  return [...by].map(([value, x]) => ({ value, ...appleSummary(x.events, x.states) }));
+}
+
+const APPLE_SUBSCRIPTION_NOTE =
+  "App Store (appStore): Apple's Subscription State report gives levels (activeSubscriptions = free trials, paid offers and paid plans; billing retry, grace period and suspended are listed apart; churned subscriptions are left out) on the last day with data; the Subscription Event report gives counts summed over the range (trialConversions = trials converted to full or contingent price; renewals = all renewals; churn = voluntary + involuntary; refunds = refunds requested). Sources are where the subscriber first downloaded the app (events only). Data is complete about 3 days after a day ends; history goes back to January 1, 2025 through the one-time snapshot.";
+
+async function playSubscriptions(ctx: OpsContext, r: ResolvedApp, p: AppSubscriptionsParams, prev: DateRange) {
   const q = {
     appId: r.app.id,
     ...(p.product ? { product: p.product.trim() } : {}),
@@ -585,18 +883,750 @@ export async function appSubscriptions(ctx: OpsContext, p: AppSubscriptionsParam
     const t = x ?? none;
     return { ...none, ...t, net: t.newSubscriptions - t.canceledSubscriptions };
   };
+  // Google Play keeps the top-level fields it has always had.
   return {
-    app: r.app.id,
-    range: r.range,
-    previousRange: prev,
     current: total(current[0]),
     previous: total(previous[0]),
     products: products.map((x) => ({ ...x, net: x.newSubscriptions - x.canceledSubscriptions })),
     territories: territories.map((x) => ({ ...x, net: x.newSubscriptions - x.canceledSubscriptions })),
     series,
-    notes: [
-      'Google Play subscription statistics: new and canceled subscriptions are summed over the range; active subscriptions are those on the last day with data. They need the service account to view financial data.',
-    ],
+  };
+}
+
+async function appleSubscriptions(ctx: OpsContext, r: ResolvedApp, p: AppSubscriptionsParams, prev: DateRange) {
+  const q = {
+    appId: r.app.id,
+    ...(p.product ? { product: p.product.trim() } : {}),
+    ...(p.territory ? { territory: p.territory.trim().toUpperCase() } : {}),
+    ...(p.offerType !== undefined ? { offerType: p.offerType.trim().toLowerCase() } : {}),
+  };
+  const md = ['metric', 'metricGroup'] as const;
+  const ev = (range: DateRange, extra: Array<'date' | 'product' | 'offerType' | 'territory' | 'source'> = []) =>
+    ctx.store.queryAppSubscriptionMetrics({ ...q, kind: 'event', range, dimensions: [...extra, ...md], limit: 10000 });
+  const st = (range: DateRange, extra: Array<'date' | 'product' | 'offerType' | 'territory'> = []) =>
+    ctx.store.queryAppSubscriptionMetrics({ ...q, kind: 'state', range, dimensions: [...extra, ...md], limit: 10000 });
+  const [evCur, evPrev, stCur, stPrev, evDays, stDays, evProd, stProd, evOffer, stOffer, evTerr, stTerr, evSrc] = await Promise.all([
+    ev(r.range),
+    ev(prev),
+    st(r.range),
+    st(prev),
+    ev(r.range, ['date']),
+    st(r.range, ['date']),
+    ev(r.range, ['product']),
+    st(r.range, ['product']),
+    ev(r.range, ['offerType']),
+    st(r.range, ['offerType']),
+    ev(r.range, ['territory']),
+    st(r.range, ['territory']),
+    ev(r.range, ['source']),
+  ]);
+  const rank = (xs: Array<AppleSummary & { value: string }>) =>
+    xs
+      .sort((a, b) => b.activeSubscriptions - a.activeSubscriptions || b.trialStarts + b.paidStarts - (a.trialStarts + a.paidStarts))
+      .slice(0, r.limit);
+  const as = <K extends string>(k: K, xs: Array<AppleSummary & { value: string }>) =>
+    xs.map(({ value, ...x }) => ({ [k]: value, ...x }) as AppleSummary & Record<K, string>);
+  const hasData = evCur.length > 0 || stCur.length > 0;
+  // Proceeds of first payments and renewals per currency, from Sales and Trends (when configured).
+  const split = await ctx.store.queryAppSales({
+    appId: r.app.id,
+    range: r.range,
+    dimensions: ['subscription', 'proceedsCurrency'],
+    ...(p.territory ? { territory: p.territory.trim().toUpperCase() } : {}),
+  });
+  const proceeds = [...new Set(split.filter((x) => x.subscription).map((x) => x.proceedsCurrency!))].sort().map((currency) => {
+    const of = (kind: string) => split.find((x) => x.subscription === kind && x.proceedsCurrency === currency);
+    return {
+      currency,
+      newSubscriptions: round((of('new')?.proceedsCents ?? 0) / 100, 2),
+      renewals: round((of('renewal')?.proceedsCents ?? 0) / 100, 2),
+      newUnits: of('new')?.units ?? 0,
+      renewalUnits: of('renewal')?.units ?? 0,
+    };
+  });
+  const result = {
+    proceeds: ctx.config.asc.vendorNumber || proceeds.length ? proceeds : null,
+    current: appleSummary(evCur, stCur),
+    previous: appleSummary(evPrev, stPrev),
+    products: as('product', rank(groupSummaries('product', evProd, stProd))),
+    offerTypes: as(
+      'offerType',
+      rank(groupSummaries('offerType', evOffer, stOffer)).map((x) => ({ ...x, value: x.value || 'none' })),
+    ),
+    territories: as('territory', rank(groupSummaries('territory', evTerr, stTerr))),
+    sources: rank(groupSummaries('source', evSrc, [])).map((x) => ({
+      source: x.value,
+      trialStarts: x.trialStarts,
+      paidOfferStarts: x.paidOfferStarts,
+      paidStarts: x.paidStarts,
+      trialConversions: x.trialConversions,
+      renewals: x.renewals,
+      churn: x.churn,
+      refunds: x.refunds,
+    })),
+    series: as(
+      'date',
+      groupSummaries('date', evDays, stDays).sort((a, b) => a.value.localeCompare(b.value)),
+    ),
+    events: evCur
+      .map((x) => ({ metric: x.metric, metricGroup: x.metricGroup, count: x.count }))
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 100),
+  };
+  return { result, hasData };
+}
+
+/**
+ * Subscriptions per store. Google Play (ADR 0010): new, canceled and active subscriptions per
+ * product and country. App Store: subscription states (active, trials, offers, billing retry,
+ * grace period) and lifecycle events (trial starts and conversions, paid starts, renewals,
+ * voluntary and involuntary churn, refunds) per subscription, offer type, storefront and download
+ * source. Both against the previous period of the same length, with the daily trend.
+ */
+export async function appSubscriptions(ctx: OpsContext, p: AppSubscriptionsParams) {
+  const r = await resolveApp(ctx, p, { days: 28, limit: 50 });
+  const stores = storesOf(r.app, r.store);
+  const prev = previousPeriod(r.range);
+  const notes: string[] = [...r.notes];
+  let play: Awaited<ReturnType<typeof playSubscriptions>> | undefined;
+  let appStore: Awaited<ReturnType<typeof appleSubscriptions>> | undefined;
+
+  if (stores.includes('play')) {
+    play = await playSubscriptions(ctx, r, p, prev);
+    notes.push(
+      'Google Play subscription statistics (top-level current, previous, products, territories, series): new and canceled subscriptions are summed over the range; active subscriptions are those on the last day with data. They need the service account to view financial data.',
+    );
+  }
+  if (stores.includes('apple')) {
+    appStore = await appleSubscriptions(ctx, r, p, prev);
+    notes.push(APPLE_SUBSCRIPTION_NOTE);
+    if (!appStore.hasData)
+      notes.push(
+        'App Store: no subscription data in this range yet. The reports come with the App Store reports already started for the app (no new permission); the first ones appear a day or two after this version syncs, history through the next monthly snapshot (Settings → Apps).',
+      );
+  }
+  if (p.product) notes.push('Product filters by the Google Play product id and by the App Store subscription name.');
+  if (appStore)
+    notes.push(
+      appStore.result.proceeds
+        ? 'App Store proceeds (appStore.proceeds) split auto-renewable subscription payments into first payments and renewals per proceeds currency, from Sales and Trends; the product filter does not apply to them (see app_revenue per product).'
+        : 'App Store proceeds split into first payments and renewals need Sales and Trends: set the ASC_VENDOR_NUMBER secret (see app_revenue).',
+    );
+  notes.push(
+    'Install retention and subscriber cohorts are offered by neither store: use your own app analytics or a subscription platform for those.',
+  );
+  return {
+    app: r.app.id,
+    range: r.range,
+    previousRange: prev,
+    ...(play ?? {}),
+    ...(appStore ? { appStore: appStore.result } : {}),
+    notes,
+  };
+}
+
+export interface AppRevenueParams extends Omit<AppParams, 'store'> {
+  /** Group rows by these (default product). */
+  groupBy?: Array<'date' | 'product' | 'territory' | 'type'>;
+  /** Only this product: the App Store product name (Content Name) or Sales and Trends SKU or title. */
+  product?: string;
+  territory?: string;
+}
+
+const REVENUE_GROUPS = ['date', 'product', 'territory', 'type'] as const;
+const money = (cents: number) => round(cents / 100, 2);
+
+/**
+ * App Store revenue per product. Always: Apple's estimate in USD per product (App Store Purchases),
+ * with refunds kept apart. With Sales and Trends (ASC_VENDOR_NUMBER): the exact units, proceeds and
+ * refunds per product in each proceeds currency, the customer price and whether a subscription
+ * payment was new or a renewal. Amounts in different currencies are never added up.
+ */
+export async function appRevenue(ctx: OpsContext, p: AppRevenueParams) {
+  const r = await resolveApp(ctx, { ...p, store: 'apple' }, { days: 28, limit: 50 });
+  const groupBy = p.groupBy ?? ['product'];
+  for (const g of groupBy)
+    if (!(REVENUE_GROUPS as readonly string[]).includes(g))
+      throw new SearchkeepError('bad_request', `groupBy must be any of ${REVENUE_GROUPS.join(', ')}.`);
+  const prev = previousPeriod(r.range);
+  const territory = p.territory?.trim().toUpperCase();
+  const product = p.product?.trim();
+
+  // Analytics Reports (USD estimate).
+  const aq = { appId: r.app.id, ...(product ? { product } : {}), ...(territory ? { territory } : {}) };
+  const aDims = groupBy.map((g) => (g === 'type' ? 'purchaseType' : g)) as Array<'date' | 'product' | 'territory' | 'purchaseType'>;
+  const [aCur, aPrev, aRows, aRefunds] = await Promise.all([
+    ctx.store.queryAppProducts({ ...aq, range: r.range, dimensions: [] }),
+    ctx.store.queryAppProducts({ ...aq, range: prev, dimensions: [] }),
+    ctx.store.queryAppProducts({ ...aq, range: r.range, dimensions: aDims, limit: groupBy.includes('date') ? 5000 : r.limit }),
+    ctx.store.queryAppProducts({ ...aq, range: r.range, dimensions: ['date', 'product', 'territory'], limit: 5000 }),
+  ]);
+  const aOut = (x: (typeof aCur)[number] | undefined) => ({
+    purchases: x?.purchases ?? 0,
+    refunds: x?.refunds ?? 0,
+    proceeds: money(x?.proceedsCents ?? 0),
+    refundedProceeds: money(x?.refundProceedsCents ?? 0),
+    sales: money(x?.salesCents ?? 0),
+  });
+  const analytics = {
+    currency: 'USD',
+    current: aOut(aCur[0]),
+    previous: aOut(aPrev[0]),
+    rows: aRows.map((x) => ({
+      ...(x.date ? { date: x.date } : {}),
+      ...(x.product !== undefined ? { product: x.product } : {}),
+      ...(x.purchaseType !== undefined ? { type: x.purchaseType } : {}),
+      ...(x.territory !== undefined ? { territory: x.territory } : {}),
+      ...aOut(x),
+    })),
+  };
+
+  // Sales and Trends (exact, per currency).
+  const sq = { appId: r.app.id, ...(product ? { sku: product } : {}), ...(territory ? { territory } : {}) };
+  const sDims = [
+    ...groupBy.flatMap((g) => (g === 'product' ? (['sku', 'title'] as const) : g === 'type' ? (['productType'] as const) : ([g] as const))),
+    'proceedsCurrency' as const,
+  ];
+  const [sCur, sPrev, sRows, sSubs, sRefunds] = await Promise.all([
+    ctx.store.queryAppSales({ ...sq, range: r.range, dimensions: ['proceedsCurrency'] }),
+    ctx.store.queryAppSales({ ...sq, range: prev, dimensions: ['proceedsCurrency'] }),
+    ctx.store.queryAppSales({ ...sq, range: r.range, dimensions: sDims, limit: groupBy.includes('date') ? 5000 : r.limit }),
+    ctx.store.queryAppSales({ ...sq, range: r.range, dimensions: ['subscription', 'proceedsCurrency'] }),
+    ctx.store.queryAppSales({ ...sq, range: r.range, dimensions: ['date', 'sku', 'title', 'territory', 'proceedsCurrency'], limit: 5000 }),
+  ]);
+  const sOut = (x: (typeof sCur)[number] | undefined) => ({
+    units: x?.units ?? 0,
+    refundUnits: x?.refundUnits ?? 0,
+    proceeds: money(x?.proceedsCents ?? 0),
+    refundedProceeds: money(x?.refundProceedsCents ?? 0),
+  });
+  const configured = Boolean(ctx.config.asc.vendorNumber);
+  const currencies = [...new Set([...sCur, ...sPrev].map((x) => x.proceedsCurrency!))].sort();
+  const sales =
+    configured || sCur.length || sRows.length
+      ? {
+          configured,
+          currencies: currencies.map((currency) => {
+            const sub = (kind: string) => sSubs.find((x) => x.subscription === kind && x.proceedsCurrency === currency)?.proceedsCents ?? 0;
+            return {
+              currency,
+              current: sOut(sCur.find((x) => x.proceedsCurrency === currency)),
+              previous: sOut(sPrev.find((x) => x.proceedsCurrency === currency)),
+              newSubscriptionProceeds: money(sub('new')),
+              renewalProceeds: money(sub('renewal')),
+            };
+          }),
+          rows: sRows.map((x) => ({
+            ...(x.date ? { date: x.date } : {}),
+            ...(x.sku !== undefined ? { sku: x.sku, title: x.title ?? '' } : {}),
+            ...(x.productType !== undefined ? { type: x.productType } : {}),
+            ...(x.territory !== undefined ? { territory: x.territory } : {}),
+            currency: x.proceedsCurrency!,
+            ...sOut(x),
+          })),
+        }
+      : null;
+
+  // Refunds per day and product, newest first: answers "which product was refunded that day".
+  const refunds = [
+    ...aRefunds
+      .filter((x) => x.refunds > 0 || x.refundProceedsCents > 0)
+      .map((x) => ({
+        source: 'analytics' as const,
+        date: x.date!,
+        product: x.product!,
+        territory: x.territory!,
+        refunds: x.refunds,
+        refundedProceeds: money(x.refundProceedsCents),
+        currency: 'USD',
+      })),
+    ...sRefunds
+      .filter((x) => x.refundUnits > 0)
+      .map((x) => ({
+        source: 'sales' as const,
+        date: x.date!,
+        product: x.title || x.sku!,
+        sku: x.sku!,
+        territory: x.territory!,
+        refunds: x.refundUnits,
+        refundedProceeds: money(x.refundProceedsCents),
+        currency: x.proceedsCurrency!,
+      })),
+  ]
+    .sort((a, b) => b.date.localeCompare(a.date) || b.refundedProceeds - a.refundedProceeds)
+    .slice(0, 100);
+
+  const notes = [
+    "analytics: Apple's App Store Purchases report per product (Content Name: the in-app purchase's reference name, or the app for paid apps), in USD estimated by Apple, attributed to the day of purchase or refund; refunds are kept apart (refunds, refundedProceeds) and proceeds are net of them.",
+  ];
+  if (sales)
+    notes.push(
+      'sales: Sales and Trends Summary Sales, exact units and proceeds per product (SKU) in each proceeds currency, never added across currencies; refunds are negative units on the day Apple processed them; newSubscriptionProceeds and renewalProceeds split auto-renewable subscription proceeds into first payments and renewals. Free downloads, updates and redownloads are left out.',
+    );
+  else
+    notes.push(
+      'sales: not configured. Set the ASC_VENDOR_NUMBER secret (App Store Connect → Payments and Financial Reports, the number next to your legal entity name) for exact revenue per product in local currencies, prices, and new versus renewal subscription proceeds; the existing Sales and Reports key can read it.',
+    );
+  if (!aCur.length && !sCur.length) notes.push('No App Store revenue in this range.');
+  return { app: r.app.id, range: r.range, previousRange: prev, groupBy, analytics, sales, refunds, notes };
+}
+
+export interface AppChangesParams extends AppParams {
+  /** Entity: `version`, `listing`, `app_info` (App Store) or `listing`, `track` (Google Play), or an exact one like `listing:IOS`. */
+  entity?: string;
+  field?: string;
+  locale?: string;
+}
+
+const CHANGE_TEXT = 1500;
+const clip = (v: string | null) => (v === null || v.length <= CHANGE_TEXT ? v : `${v.slice(0, CHANGE_TEXT)}…`);
+
+/**
+ * What changed on the app's store presence and when: versions going on sale or into review,
+ * phased releases, names, subtitles, keywords, descriptions, promotional text, release notes, and
+ * on Google Play titles, descriptions, track releases and rollouts. One change per field and day
+ * it was first seen, with the value before and after, newest first.
+ */
+export async function appChanges(ctx: OpsContext, p: AppChangesParams) {
+  // Snapshots are taken today, ahead of the store reports: the range ends today by default.
+  const today = toIsoDate(ctx.now ? ctx.now() : new Date());
+  const r = await resolveApp(ctx, { ...p, ...(p.end === undefined ? { end: today } : {}) }, { days: 90, limit: 100 });
+  const rows = await ctx.store.queryAppChanges({
+    appId: r.app.id,
+    ...(r.store ? { store: r.store } : {}),
+    range: r.range,
+    ...(p.entity ? { entity: p.entity.trim() } : {}),
+    ...(p.field ? { field: p.field.trim() } : {}),
+    ...(p.locale ? { locale: p.locale.trim() } : {}),
+    limit: 2000,
+  });
+  const days = new Map<string, number>();
+  for (const x of rows) days.set(`${x.store}|${x.date}`, (days.get(`${x.store}|${x.date}`) ?? 0) + 1);
+  const changes = rows.slice(0, r.limit).map((x) => ({
+    ...x,
+    kind: x.before === null ? 'added' : x.after === null ? 'removed' : 'changed',
+    before: clip(x.before),
+    after: clip(x.after),
+  }));
+  const notes = [
+    'Changes are found by comparing daily snapshots, so a change is dated the day it was first seen (up to a day late) and changes before the first snapshot are not known. Long texts are cut at 1,500 characters. Version fields: live (the version on sale), live_phased_release, next, next_state, next_release_type, next_earliest_release.',
+  ];
+  const stores = storesOf(r.app, r.store);
+  const status = await Promise.all(
+    stores.map(
+      async (s) =>
+        [s, parseJson<{ day?: string; problem?: string }>(await ctx.store.getMeta(syncKeys.listingChecked(r.app.id, s)))] as const,
+    ),
+  );
+  for (const [s, st] of status) {
+    if (st?.problem)
+      notes.push(
+        s === 'apple'
+          ? `App Store: the App Store Connect key may not read the app's versions and listings (${st.problem}); see setup_status.`
+          : `Google Play: the service account may not read the store listing through the Android Publisher API (${st.problem}); see setup_status.`,
+      );
+    else if (!st?.day)
+      notes.push(
+        s === 'apple'
+          ? 'App Store: no snapshot yet; the first one is taken with the next sync and is the baseline changes are measured against.'
+          : ctx.config.play.metadata
+            ? 'Google Play: no snapshot yet; the first one is taken with the next sync.'
+            : 'Google Play: store listing snapshots are off. Set PLAY_METADATA=true to turn them on (see setup_status).',
+      );
+  }
+  return {
+    app: r.app.id,
+    range: r.range,
+    days: [...days].map(([k, n]) => ({ store: k.split('|')[0] as AppStore, date: k.split('|')[1]!, changes: n })),
+    changes,
+    notes,
+  };
+}
+
+/** App Store report kinds whose history the one-time snapshot fills, with what arrived so far. */
+const HISTORY_REPORTS: Array<[string, string]> = [
+  ['engagement', 'impressions and page views'],
+  ['downloads', 'downloads'],
+  ['installs', 'installs and deletions'],
+  ['purchases', 'purchases'],
+  ['sessions', 'sessions'],
+  ['subscription_state', 'subscription states'],
+  ['subscription_event', 'subscription events'],
+];
+
+/**
+ * Where each App Store report's history stands: the first day the ongoing report wrote, and what the
+ * one-time snapshot delivered (daily instances read, waiting, or only monthly ones).
+ */
+export async function appStoreHistory(ctx: OpsContext, app: AppConfig) {
+  const st = parseJson<AscRequestState>(await ctx.store.getMeta(syncKeys.ascRequests(app.id)));
+  if (!app.appleId || !st?.ongoing) return [];
+  return Promise.all(
+    HISTORY_REPORTS.map(async ([key, what]) => {
+      const [from, read, pending] = await Promise.all([
+        ctx.store.getMeta(syncKeys.ascFrom(app.id, key)),
+        ctx.store.getMeta(syncKeys.ascSnapshot(app.id, key)),
+        ctx.store.getMeta(syncKeys.ascPending(app.id, 'snapshot', key)),
+      ]);
+      const p = parseJson<AscPending>(pending);
+      const snapshotRead = parseJson<string[]>(read)?.length ?? 0;
+      const status = !st.snapshot
+        ? 'no_snapshot'
+        : snapshotRead > 0
+          ? p?.instances.length
+            ? 'reading'
+            : 'filled'
+          : p?.instances.length
+            ? 'reading'
+            : p?.monthly
+              ? 'monthly_only'
+              : 'waiting';
+      return {
+        report: key,
+        counts: what,
+        ongoingFrom: from,
+        snapshot: status as 'no_snapshot' | 'reading' | 'filled' | 'monthly_only' | 'waiting',
+        ...(p?.monthly ? { monthlyInstances: p.monthly } : {}),
+      };
+    }),
+  );
+}
+
+/** One sentence per report whose history is not filled, for notes. */
+function historyNotes(history: Awaited<ReturnType<typeof appStoreHistory>>, requestedOn: string | undefined): string[] {
+  const waiting = history.filter((h) => h.snapshot === 'waiting').map((h) => h.counts);
+  const monthly = history.filter((h) => h.snapshot === 'monthly_only').map((h) => h.counts);
+  const out: string[] = [];
+  const since = (keys: string[]) =>
+    history
+      .filter((h) => keys.includes(h.counts) && h.ongoingFrom)
+      .map((h) => `${h.counts} from ${h.ongoingFrom}`)
+      .join(', ');
+  if (waiting.length)
+    out.push(
+      `App Store history: the one-time snapshot${requestedOn ? ` (requested ${requestedOn})` : ''} has not delivered daily history for ${waiting.join(', ')} yet, so they start where the daily reports start (${since(waiting) || 'no day yet'}). Apple can take days to deliver a snapshot; the sync checks every day and fills only the days before those, so nothing is counted twice.`,
+    );
+  if (monthly.length)
+    out.push(
+      `App Store history: Apple delivered the snapshot of ${monthly.join(', ')} only as monthly totals, which Searchkeep does not split into days; those numbers start where the daily reports start (${since(monthly) || 'no day yet'}).`,
+    );
+  return out;
+}
+
+export interface ReplyReviewParams {
+  app?: string;
+  store: AppStore;
+  reviewId: string;
+  text: string;
+  /** From the preview: posts the reply. Without it, nothing is sent. */
+  confirmToken?: string;
+}
+
+/** Longest reply each store accepts. */
+export const REPLY_MAX_CHARS: Record<AppStore, number> = { apple: 5970, play: 350 };
+/** A preview can be confirmed for this long. */
+const REPLY_TTL_MS = 15 * 60_000;
+
+interface PendingReply {
+  appId: string;
+  store: AppStore;
+  reviewId: string;
+  text: string;
+  expiresAt: string;
+}
+
+/**
+ * Replies to a review, in two steps: without `confirmToken` it only shows what would be posted
+ * and returns a token valid for 15 minutes; with the token (and the same reply) it posts. Needs
+ * ENABLE_WRITES; App Store replies use their own key (ASC_REPLY_*), Google Play replies need
+ * PLAY_REVIEWS_API and the "Reply to reviews" permission. A reply is public and the reviewer is
+ * notified.
+ */
+export async function replyReview(ctx: OpsContext, p: ReplyReviewParams) {
+  if (!ctx.config.enableWrites)
+    throw new SearchkeepError('writes_disabled', 'Writes are disabled. Set the ENABLE_WRITES secret to "true" to reply to reviews.');
+  const app = findApp(ctx.config, p.app);
+  if (!APP_STORES.includes(p.store)) throw new SearchkeepError('bad_request', 'store must be "apple" or "play".');
+  const text = (p.text ?? '').trim();
+  if (!text) throw new SearchkeepError('bad_request', 'text is empty.');
+  if (text.length > REPLY_MAX_CHARS[p.store])
+    throw new SearchkeepError(
+      'bad_request',
+      `A ${p.store === 'apple' ? 'App Store' : 'Google Play'} reply has at most ${REPLY_MAX_CHARS[p.store]} characters (this one has ${text.length}).`,
+    );
+  const post =
+    p.store === 'apple'
+      ? app.appleId && ctx.clients.ascReplies?.replyToReview
+        ? (id: string, t: string) => ctx.clients.ascReplies!.replyToReview!(id, t)
+        : null
+      : app.playPackage && ctx.config.play.reviewsApi && ctx.clients.play?.replyToReview
+        ? (id: string, t: string) => ctx.clients.play!.replyToReview!(app.playPackage!, id, t)
+        : null;
+  if (!post)
+    throw new SearchkeepError(
+      'not_configured',
+      p.store === 'apple'
+        ? 'App Store replies need their own key: create an App Store Connect API key with the Customer Support role and set ASC_REPLY_KEY_ID and ASC_REPLY_PRIVATE_KEY (see setup_status).'
+        : 'Google Play replies need PLAY_REVIEWS_API=true and the "Reply to reviews" permission for the service account (see setup_status).',
+    );
+  const review = (
+    await ctx.store.listAppReviews({
+      appId: app.id,
+      store: p.store,
+      range: { start: '2000-01-01', end: '2999-12-31' },
+      id: p.reviewId,
+      limit: 1,
+    })
+  )[0];
+  if (!review)
+    throw new SearchkeepError(
+      'not_found',
+      `No ${p.store === 'apple' ? 'App Store' : 'Google Play'} review ${p.reviewId} of ${app.name}; see app_reviews.`,
+    );
+  const summary = {
+    id: review.id,
+    rating: review.rating,
+    createdAt: review.createdAt,
+    title: review.title,
+    body: review.body && review.body.length > 500 ? `${review.body.slice(0, 500)}…` : review.body,
+    alreadyReplied: review.replied,
+  };
+  const now = ctx.now ? ctx.now() : new Date();
+
+  if (!p.confirmToken) {
+    const token = crypto.randomUUID();
+    const expiresAt = new Date(now.getTime() + REPLY_TTL_MS).toISOString();
+    const pending: PendingReply = { appId: app.id, store: p.store, reviewId: review.id, text, expiresAt };
+    await ctx.store.setMeta(syncKeys.pendingReply(token), JSON.stringify(pending));
+    return {
+      status: 'preview' as const,
+      app: app.id,
+      store: p.store,
+      review: summary,
+      reply: text,
+      confirmToken: token,
+      expiresAt,
+      notes: [
+        'Nothing was posted. Show this reply to the user and ask them to confirm; only then call reply_review again with the same app, store, reviewId and text plus confirmToken. The reply is public and the reviewer is notified.',
+        ...(review.replied ? ['This review already has a reply: posting replaces it.'] : []),
+      ],
+    };
+  }
+
+  const key = syncKeys.pendingReply(p.confirmToken);
+  const pending = parseJson<PendingReply>(await ctx.store.getMeta(key));
+  if (
+    !pending ||
+    pending.appId !== app.id ||
+    pending.store !== p.store ||
+    pending.reviewId !== review.id ||
+    pending.text !== text ||
+    Date.parse(pending.expiresAt) < now.getTime()
+  )
+    throw new SearchkeepError(
+      'bad_request',
+      'confirmToken is unknown, expired or for a different reply. Call reply_review without confirmToken to preview the reply again.',
+    );
+  // One use only, also when posting fails.
+  await ctx.store.deleteMeta(key);
+  await post(review.id, text);
+  const { store: _s, ...input } = review;
+  await ctx.store.writeAppReviews(app.id, p.store, [{ ...input, replied: true }]);
+  return {
+    status: 'posted' as const,
+    app: app.id,
+    store: p.store,
+    review: { ...summary, alreadyReplied: true },
+    reply: text,
+    notes: [] as string[],
+  };
+}
+
+export interface AppFrameworkParams extends Omit<AppParams, 'store'> {
+  /** The report's name as configured for the app, e.g. `Notification Summary Engagement`. */
+  report: string;
+  /** Dimension columns (as the report names them) and/or `date` to group by; none gives the totals. */
+  groupBy?: string[];
+  /** Only rows whose dimension has this value, by column name. */
+  filters?: Record<string, string>;
+}
+
+/**
+ * One of the app's chosen Framework Usage reports (App Store Connect Analytics), grouped by any of
+ * its dimensions: one tool for every such report instead of one per report.
+ */
+export async function appFrameworkReport(ctx: OpsContext, p: AppFrameworkParams) {
+  const r = await resolveApp(ctx, { ...p, store: 'apple' }, { days: 28, limit: 50 });
+  const chosen = r.app.frameworkReports ?? [];
+  const name = chosen.find((n) => slug(n) === slug(p.report ?? ''));
+  if (!name)
+    throw new SearchkeepError(
+      'bad_request',
+      chosen.length
+        ? `${r.app.name} keeps these Framework Usage reports: ${chosen.join(', ')}. Add others in Settings → Apps (frameworkReports).`
+        : `${r.app.name} keeps no Framework Usage reports. Add their names in Settings → Apps (frameworkReports), e.g. "Notification Summary Engagement"; they come with the App Store reports already started.`,
+    );
+  const rows = await ctx.store.queryAppFramework(r.app.id, slug(name), r.range);
+  const dims = [...new Set(rows.flatMap((x) => Object.keys(x.dims)))].sort();
+  const metrics = [...new Set(rows.flatMap((x) => Object.keys(x.metrics)))].sort();
+  const pick = (want: string) => (want.trim().toLowerCase() === 'date' ? 'date' : dims.find((d) => d === want.trim().toLowerCase()));
+  const groupBy = (p.groupBy ?? []).map((g) => {
+    const d = pick(g);
+    if (!d)
+      throw new SearchkeepError(
+        'bad_request',
+        `groupBy "${g.slice(0, 40)}" is not a dimension of ${name}: ${['date', ...dims].join(', ')}.`,
+      );
+    return d;
+  });
+  const filters = Object.entries(p.filters ?? {}).map(([k, v]) => {
+    const d = pick(k);
+    if (!d || d === 'date')
+      throw new SearchkeepError('bad_request', `filter "${k.slice(0, 40)}" is not a dimension of ${name}: ${dims.join(', ')}.`);
+    return [d, String(v).trim().toLowerCase()] as const;
+  });
+  const agg = new Map<string, { key: Record<string, string>; metrics: Record<string, number> }>();
+  for (const x of rows) {
+    if (filters.some(([d, v]) => (x.dims[d] ?? '').toLowerCase() !== v)) continue;
+    const key = Object.fromEntries(groupBy.map((g) => [g, g === 'date' ? x.date : (x.dims[g] ?? '')]));
+    const id = JSON.stringify(key);
+    const e = agg.get(id) ?? { key, metrics: {} };
+    for (const [m, v] of Object.entries(x.metrics)) e.metrics[m] = (e.metrics[m] ?? 0) + v;
+    agg.set(id, e);
+  }
+  const first = metrics[0];
+  const out = [...agg.values()]
+    .map((x) => ({ ...x.key, ...Object.fromEntries(Object.entries(x.metrics).map(([m, v]) => [m, round(v, 4)])) }))
+    .sort((a, b) =>
+      groupBy.includes('date')
+        ? String(a.date).localeCompare(String(b.date))
+        : first
+          ? Number((b as Record<string, unknown>)[first] ?? 0) - Number((a as Record<string, unknown>)[first] ?? 0)
+          : 0,
+    );
+  const notes = [
+    `${name}: Apple's Framework Usage report, from people who share analytics with developers; rows with fewer than five devices are left out, and device counts are summed across rows (an upper bound). Dimensions: ${dims.join(', ') || 'none yet'}. Metrics: ${metrics.join(', ') || 'none yet'}.`,
+  ];
+  if (rows.length === 0)
+    notes.push(
+      "No rows in this range. A report added to the app is picked up with the next listing of the App Store reports (within a week), history through the monthly snapshot; small apps often stay below Apple's five-device threshold.",
+    );
+  return {
+    app: r.app.id,
+    report: name,
+    range: r.range,
+    dimensions: dims,
+    metrics,
+    groupBy,
+    rows: out.slice(0, groupBy.includes('date') ? 1000 : r.limit),
+    notes,
+  };
+}
+
+export interface AppAdsParams extends Omit<AppParams, 'store'> {
+  termContains?: string;
+  /** Impression share of this storefront only (e.g. US). */
+  territory?: string;
+  sortBy?: 'impressions' | 'installs' | 'spend' | 'popularity';
+}
+
+/** How to set Apple Ads up, for every answer when it is not. */
+export const APPLE_ADS_NOT_CONFIGURED =
+  "Apple Ads is not configured. In ads.apple.com → Account Settings → User Management, invite an API user with the API Account Read Only role; as that user, upload a P-256 public key under Account Settings → API, then set APPLE_ADS_CLIENT_ID, APPLE_ADS_TEAM_ID, APPLE_ADS_KEY_ID and APPLE_ADS_PRIVATE_KEY (the private-key.pem). Optional: APPLE_ADS_ACCOUNT_ID for one ad account. Only your own campaigns' search terms, impression share and search popularity are read.";
+
+export function appleAdsConfigured(ctx: OpsContext): boolean {
+  const a = ctx.config.appleAds;
+  return Boolean(a.clientId && a.teamId && a.keyId && a.privateKey);
+}
+
+/**
+ * Apple Ads search terms of the user's own campaigns (impressions, taps, installs, spend), with the
+ * app's impression share and Apple's search popularity per term and storefront: keyword-level data
+ * the App Store's own reports do not have.
+ */
+export async function appAds(ctx: OpsContext, p: AppAdsParams) {
+  const today = toIsoDate(ctx.now ? ctx.now() : new Date());
+  const r = await resolveApp(
+    ctx,
+    { ...p, store: 'apple', ...(p.end === undefined ? { end: addDays(today, -1) } : {}) },
+    { days: 28, limit: 50 },
+  );
+  if (!appleAdsConfigured(ctx)) return { app: r.app.id, range: r.range, configured: false as const, notes: [APPLE_ADS_NOT_CONFIGURED] };
+  const contains = p.termContains?.trim();
+  const [terms, shares] = await Promise.all([
+    ctx.store.queryAppAdsTerms({ appId: r.app.id, range: r.range, ...(contains ? { contains } : {}), limit: 5000 }),
+    ctx.store.queryAppAdsShare({
+      appId: r.app.id,
+      range: r.range,
+      ...(p.territory ? { territory: p.territory } : {}),
+      ...(contains ? { contains } : {}),
+      limit: 5000,
+    }),
+  ]);
+  const byTerm = new Map<string, typeof shares>();
+  for (const s of shares) byTerm.set(s.term.toLowerCase(), [...(byTerm.get(s.term.toLowerCase()) ?? []), s]);
+  const shareOut = (s: (typeof shares)[number]) => ({
+    territory: s.territory,
+    date: s.date,
+    impressionShare: s.lowShare === null ? null : { low: s.lowShare, high: s.highShare },
+    rank: s.rank,
+    popularity: s.popularity,
+  });
+  const rows = terms.map((t) => ({
+    term: t.term,
+    keywords: t.keywords,
+    impressions: t.impressions,
+    taps: t.taps,
+    installs: t.installs,
+    newDownloads: t.newDownloads,
+    spend: round(t.spendCents / 100, 2),
+    currency: t.currency,
+    tapThroughRate: t.impressions > 0 ? round(t.taps / t.impressions, 4) : null,
+    installRate: t.taps > 0 ? round(t.installs / t.taps, 4) : null,
+    costPerInstall: t.installs > 0 ? round(t.spendCents / 100 / t.installs, 2) : null,
+    share: (byTerm.get(t.term.toLowerCase()) ?? []).map(shareOut),
+  }));
+  const pop = (x: (typeof rows)[number]) => Math.max(0, ...x.share.map((s) => s.popularity ?? 0));
+  const sortBy = p.sortBy ?? 'impressions';
+  rows.sort((a, b) =>
+    sortBy === 'installs'
+      ? b.installs - a.installs
+      : sortBy === 'spend'
+        ? b.spend - a.spend
+        : sortBy === 'popularity'
+          ? pop(b) - pop(a)
+          : b.impressions - a.impressions,
+  );
+  const currencies = [...new Set(terms.map((t) => t.currency))].sort().map((currency) => {
+    const of = terms.filter((t) => t.currency === currency);
+    const sum = (k: 'impressions' | 'taps' | 'installs' | 'spendCents') => of.reduce((s, t) => s + t[k], 0);
+    return {
+      currency,
+      impressions: sum('impressions'),
+      taps: sum('taps'),
+      installs: sum('installs'),
+      spend: round(sum('spendCents') / 100, 2),
+      costPerInstall: sum('installs') ? round(sum('spendCents') / 100 / sum('installs'), 2) : null,
+    };
+  });
+  // Terms with an impression share but no search term row (shown, not tapped enough to be reported).
+  const seen = new Set(terms.map((t) => t.term.toLowerCase()));
+  const shareOnly = shares.filter((s) => !seen.has(s.term.toLowerCase())).map((s) => ({ term: s.term, ...shareOut(s) }));
+  const st = parseJson<AppleAdsState>(await ctx.store.getMeta(syncKeys.appleAds(r.app.id)));
+  const notes = [
+    "Apple Ads data covers only your own paid campaigns: search terms people typed when your ad showed (Apple withholds terms with few impressions), with impressions, taps, installs and spend in the ad account's currency. impressionShare is Apple's 10% bucket (low-high) of the searches in which your ad appeared, rank is your app's position by share (1 = highest), popularity is Apple's 1-5 search volume score. Organic App Store keyword rankings are offered by no official API: use an ASO tool for them.",
+  ];
+  if (st?.problem) notes.push(`The last Apple Ads read was refused (${st.problem}); see setup_status (probe.apple_ads).`);
+  else if (!st?.checkedOn)
+    notes.push('Apple Ads has not been read yet; the first sync reads 90 days of search terms and 30 days of impression share.');
+  return {
+    app: r.app.id,
+    range: r.range,
+    configured: true as const,
+    currencies,
+    terms: rows.slice(0, r.limit),
+    shareOnly: shareOnly.slice(0, r.limit),
+    notes,
   };
 }
 
@@ -613,6 +1643,7 @@ export async function listApps(ctx: OpsContext) {
         ...(app.playPackage ? { playPackage: app.playPackage } : {}),
         ...(app.siteId ? { siteId: app.siteId } : {}),
         ...(app.territories ? { territories: app.territories } : {}),
+        ...(app.frameworkReports ? { frameworkReports: app.frameworkReports } : {}),
         origin: app.origin ?? 'secret',
         stores: appStoresOf(ctx, app),
         ...(app.appleId
@@ -623,6 +1654,7 @@ export async function listApps(ctx: OpsContext) {
                 snapshot: Boolean(st?.snapshot),
                 ...(st?.snapshotRequestedOn ? { snapshotRequestedOn: st.snapshotRequestedOn } : {}),
                 ...(st?.problem ? { problem: st.problem } : {}),
+                history: await appStoreHistory(ctx, app),
               },
             }
           : {}),

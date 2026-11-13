@@ -11,6 +11,8 @@ const PACKAGE_RE = /^[A-Za-z][A-Za-z0-9_]*(\.[A-Za-z][A-Za-z0-9_]*)+$/;
 const TERRITORY_RE = /^[a-z]{2}$/;
 /** Storefronts read per app by the opt-in public feeds (each costs calls every day). */
 export const MAX_PUBLIC_TERRITORIES = 5;
+/** Framework Usage reports kept per app (each is a report file a day to read and store). */
+export const MAX_FRAMEWORK_REPORTS = 10;
 
 export function appIdFrom(name: string): string {
   return name
@@ -79,6 +81,16 @@ export function validateApp(input: unknown, label = 'app'): { app: AppConfig } |
     const unique = [...new Set(list)];
     if (unique.length > MAX_PUBLIC_TERRITORIES) return { error: `${label}.territories: at most ${MAX_PUBLIC_TERRITORIES} storefronts.` };
     if (unique.length) app.territories = unique;
+  }
+  const fw = o.frameworkReports;
+  if (fw !== undefined && fw !== null && fw !== '') {
+    const list = (Array.isArray(fw) ? fw : String(fw).split(/[\n,]+/)).map((t) => String(t).trim()).filter(Boolean);
+    const bad = list.find((t) => !/^[A-Za-z0-9][A-Za-z0-9 ()&/+.'-]{1,79}$/.test(t));
+    if (bad !== undefined)
+      return { error: `${label}.frameworkReports must be report names like "Notification Summary Engagement" ("${bad.slice(0, 40)}").` };
+    const unique = list.filter((t, i) => list.findIndex((x) => x.toLowerCase() === t.toLowerCase()) === i);
+    if (unique.length > MAX_FRAMEWORK_REPORTS) return { error: `${label}.frameworkReports: at most ${MAX_FRAMEWORK_REPORTS} reports.` };
+    if (unique.length) app.frameworkReports = unique;
   }
   return { app };
 }

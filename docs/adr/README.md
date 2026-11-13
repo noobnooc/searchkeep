@@ -30,6 +30,7 @@ choice without knowing why it was made.
 | [0008](0008-sites-managed-in-the-dashboard.md)       | Sites can be managed in the dashboard                 | Accepted |
 | [0009](0009-apps-as-a-second-kind-of-property.md)    | Apps as a second kind of property                     | Accepted |
 | [0010](0010-app-revenue-and-engagement.md)           | App revenue and engagement, attributed to acquisition | Accepted |
+| [0011](0011-app-store-data-gaps.md)                  | Closing the app data gaps                             | Accepted |
 
 ## Template
 

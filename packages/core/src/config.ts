@@ -38,6 +38,11 @@ export interface SearchkeepConfig {
     keyId: string | null;
     issuerId: string | null;
     privateKey: string | null;
+    /** Vendor number for Sales and Trends (ASC_VENDOR_NUMBER); optional, enables revenue per product in local currencies. */
+    vendorNumber: string | null;
+    /** A second key only for review responses (ASC_REPLY_KEY_ID, ASC_REPLY_PRIVATE_KEY; Customer Support role), used only with ENABLE_WRITES. */
+    replyKeyId: string | null;
+    replyPrivateKey: string | null;
   };
   /** Google Play: the Search Console service account unless PLAY_CLIENT_EMAIL/PLAY_PRIVATE_KEY are set. */
   play: {
@@ -45,9 +50,22 @@ export interface SearchkeepConfig {
     privateKey: string | null;
     /** Cloud Storage bucket of the Play Console reports (`pubsite_prod_…`). */
     bucket: string | null;
+    /** Opt-in (PLAY_METADATA): daily snapshot of store listings and tracks through an uncommitted edit. */
+    metadata: boolean;
+    /** Opt-in (PLAY_REVIEWS_API): reviews from the Android Publisher API every few hours (needs "Reply to reviews"). */
+    reviewsApi: boolean;
   };
   /** Opt-in plugin: Apple's public App Store feeds (own app's rating and chart position only). */
   appStorePublic: boolean;
+  /** Apple Ads Platform API credentials (optional): an API user with the API Account Read Only role. */
+  appleAds: {
+    clientId: string | null;
+    teamId: string | null;
+    keyId: string | null;
+    privateKey: string | null;
+    /** Only this ad account (APPLE_ADS_ACCOUNT_ID); default every account the credentials see. */
+    accountId: string | null;
+  };
   brandRegex: string | null;
   enableWrites: boolean;
   sync: {
@@ -258,6 +276,17 @@ export function normalizeBucket(raw: string | null, errors: string[]): string | 
   return name;
 }
 
+/** The App Store Connect vendor number (digits, shown in Payments and Financial Reports). */
+export function vendorNumber(raw: string | null, errors: string[]): string | null {
+  if (!raw) return null;
+  const v = raw.trim();
+  if (!/^\d{5,12}$/.test(v)) {
+    errors.push('ASC_VENDOR_NUMBER must be the vendor number shown in App Store Connect → Payments and Financial Reports (digits only).');
+    return null;
+  }
+  return v;
+}
+
 export function loadConfig(env: RawEnv): SearchkeepConfig {
   const errors: string[] = [];
   const sites = parseSites(str(env, 'SITES'), errors);
@@ -291,13 +320,25 @@ export function loadConfig(env: RawEnv): SearchkeepConfig {
       keyId: str(env, 'ASC_KEY_ID'),
       issuerId: str(env, 'ASC_ISSUER_ID'),
       privateKey: normalizePem(str(env, 'ASC_PRIVATE_KEY')),
+      vendorNumber: vendorNumber(str(env, 'ASC_VENDOR_NUMBER'), errors),
+      replyKeyId: str(env, 'ASC_REPLY_KEY_ID'),
+      replyPrivateKey: normalizePem(str(env, 'ASC_REPLY_PRIVATE_KEY')),
     },
     play: {
       clientEmail: str(env, 'PLAY_CLIENT_EMAIL') ?? str(env, 'GSC_CLIENT_EMAIL'),
       privateKey: normalizePem(str(env, 'PLAY_PRIVATE_KEY') ?? str(env, 'GSC_PRIVATE_KEY')),
       bucket: normalizeBucket(str(env, 'PLAY_REPORTS_BUCKET'), errors),
+      metadata: str(env, 'PLAY_METADATA')?.toLowerCase() === 'true',
+      reviewsApi: str(env, 'PLAY_REVIEWS_API')?.toLowerCase() === 'true',
     },
     appStorePublic: str(env, 'APP_STORE_PUBLIC_DATA')?.toLowerCase() === 'true',
+    appleAds: {
+      clientId: str(env, 'APPLE_ADS_CLIENT_ID'),
+      teamId: str(env, 'APPLE_ADS_TEAM_ID'),
+      keyId: str(env, 'APPLE_ADS_KEY_ID'),
+      privateKey: normalizePem(str(env, 'APPLE_ADS_PRIVATE_KEY')),
+      accountId: str(env, 'APPLE_ADS_ACCOUNT_ID'),
+    },
     brandRegex: brandRegex && compileBrandRegex(brandRegex) ? brandRegex : null,
     enableWrites: str(env, 'ENABLE_WRITES')?.toLowerCase() === 'true',
     sync: {

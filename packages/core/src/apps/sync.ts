@@ -14,7 +14,7 @@ import { safeMessage } from '../errors.js';
 import { SourceError } from '../http.js';
 import type { AscClient, AscReportRequest, SourceClients } from '../sources.js';
 import type { Store } from '../store.js';
-import type { AppChartRankInput, AppConfig, AppRatingInput, AppVitalsInput, IsoDate } from '../types.js';
+import type { AppChartRankInput, AppConfig, AppListingValue, AppRatingInput, AppVitalsInput, IsoDate } from '../types.js';
 import {
   appTaskId,
   parseJson,
@@ -26,11 +26,13 @@ import {
   type AscRequestState,
   type PlayListing,
   type ReviewCursor,
+  type AscSalesState,
+  type AppleAdsState,
 } from '../sync/state.js';
 import type { Budget, Unit } from '../sync/unit.js';
 import {
   ascReviewInput,
-  ASC_REPORTS,
+  ascReportsFor,
   classifyPlayFile,
   PLAY_COLLECTORS,
   PLAY_FINANCIAL_KINDS,
@@ -38,7 +40,9 @@ import {
   playReadMark,
   playFinancialPrefixes,
   playPrefixes,
+  salesSummaryCollector,
   type AscReportSpec,
+  type SalesApp,
 } from './reports.js';
 import { appStorefronts } from './storefronts.js';
 
@@ -52,6 +56,8 @@ export interface AppSyncContext {
 export interface AppPlanArgs {
   ctx: AppSyncContext;
   today: IsoDate;
+  /** The run's clock (milliseconds). */
+  nowMs?: number;
   /** Meta read at the start of the run. */
   get: (key: string) => string | null;
   budget: Budget;
@@ -63,6 +69,8 @@ export interface AppPlanArgs {
 export const ASC_RECENT_INSTANCES = 6;
 /** Report ids of a request are listed again after this many days. */
 const ASC_REPORT_IDS_DAYS = 7;
+/** Reviews are read again after this long (App Store; Google Play through its API when on). */
+export const REVIEWS_EVERY_MS = 4 * 3_600_000;
 /** App Store reviews read on an app's first sync (200 per page). */
 export const ASC_REVIEW_HISTORY_PAGES = 10;
 /** Play crash and ANR rates are read for this many days on the first sync; Google keeps more. */
@@ -84,8 +92,268 @@ export function planAppUnits(args: AppPlanArgs): { daily: Unit[][]; history: Uni
     if (ctx.clients.asc && app.appleId) planAppStore(args, app, ctx.clients.asc, place);
     if (ctx.clients.play && app.playPackage && ctx.config.play.bucket) planPlay(args, app, place);
     if (ctx.clients.appStore && app.appleId) planPublic(args, app, list);
+    if (ctx.clients.asc?.listingSnapshot && app.appleId) planListing(args, app, 'apple', list);
+    if (ctx.clients.play?.listingSnapshot && app.playPackage && ctx.config.play.metadata) planListing(args, app, 'play', list);
+    if (ctx.clients.appleAds && app.appleId) planAppleAds(args, app, list);
+  }
+  const salesOwner = ctx.config.apps.find((a) => a.appleId);
+  if (ctx.clients.asc?.salesReport && ctx.config.asc.vendorNumber && salesOwner) {
+    const i = ctx.config.apps.indexOf(salesOwner);
+    planSales(args, ctx.clients.asc, ctx.config.asc.vendorNumber, (u) => (u.backfill ? history.push(u) : daily[i]!.push(u)));
   }
   return { daily, history };
+}
+
+// ------------------------------------------------------------------ Store changes
+
+/**
+ * Once a day, a snapshot of the app's store presence (versions, listings, app info; Google Play
+ * listings and tracks through an edit that is never committed); fields that differ from the last
+ * snapshot are recorded as changes. A key that may not read them is noted, not retried all day.
+ */
+function planListing(args: AppPlanArgs, app: AppConfig, storeId: 'apple' | 'play', list: Unit[]): void {
+  const { ctx, today, get, budget } = args;
+  const key = syncKeys.listingChecked(app.id, storeId);
+  const saved = parseJson<{ day?: IsoDate; problem?: string }>(get(key));
+  if (saved?.day === today) return;
+  const calls = 4;
+  list.push({
+    task: storeId === 'apple' ? 'asc.listing' : 'play.listing',
+    siteId: appTaskId(app.id),
+    source: storeId === 'apple' ? 'asc' : 'play',
+    backfill: false,
+    calls,
+    key: `${storeId}.listing:${app.id}:${today}`,
+    run: async () => {
+      let snap: { scopes: string[]; values: AppListingValue[]; calls: number };
+      try {
+        snap =
+          storeId === 'apple'
+            ? await ctx.clients.asc!.listingSnapshot!(app.appleId!)
+            : await ctx.clients.play!.listingSnapshot!(app.playPackage!);
+      } catch (err) {
+        if (!(err instanceof SourceError) || (err.status !== 403 && err.status !== 401)) throw err;
+        await ctx.store.setMeta(key, JSON.stringify({ day: today, problem: safeMessage(err) }));
+        ctx.log?.(`${storeId} ${app.id}: the key may not read the store listing (${err.status})`);
+        return null;
+      }
+      // Calls beyond the reserved ones (more platforms) were made already; take them from the budget.
+      for (let i = calls; i < snap.calls; i++) {
+        try {
+          budget.spend(storeId === 'apple' ? 'asc' : 'play');
+        } catch {
+          break;
+        }
+      }
+      const changes = await ctx.store.snapshotAppListing(app.id, storeId, today, snap.scopes, snap.values);
+      await ctx.store.setMeta(key, JSON.stringify({ day: today }));
+      return changes;
+    },
+    skip: () => ctx.store.setMeta(key, JSON.stringify({ day: today })),
+  });
+}
+
+// ------------------------------------------------------------------ Apple Ads
+
+/** Search terms of the first sync (Apple allows at most 90 days per daily report). */
+export const APPLE_ADS_TERMS_DAYS = 90;
+/** Impression share of the first sync (at most 30 days per daily query). */
+export const APPLE_ADS_SHARE_DAYS = 30;
+/** Apple Ads attributes installs up to a few days late: the last days are read again. */
+const APPLE_ADS_REREAD_DAYS = 3;
+
+/**
+ * Once a day: the app's App Store campaigns in each ad account the credentials see (or only
+ * APPLE_ADS_ACCOUNT_ID), their search terms per day, and the app's impression share per search
+ * term and storefront with Apple's popularity. Read-only; refused credentials are noted.
+ */
+function planAppleAds(args: AppPlanArgs, app: AppConfig, list: Unit[]): void {
+  const { ctx, today, get, budget } = args;
+  const ads = ctx.clients.appleAds!;
+  const key = syncKeys.appleAds(app.id);
+  const st = parseJson<AppleAdsState>(get(key)) ?? {};
+  if (st.checkedOn === today) return;
+  const yesterday = addDays(today, -1);
+  list.push({
+    task: 'ads.daily',
+    siteId: appTaskId(app.id),
+    source: 'appleads',
+    backfill: false,
+    calls: 3,
+    key: `ads.daily:${app.id}:${today}`,
+    run: async () => {
+      let n = 0;
+      const spend = () => {
+        if (n++ >= 3) budget.spend('appleads');
+      };
+      let written = 0;
+      try {
+        spend();
+        const accounts = (await ads.accounts()).filter((a) => !ctx.config.appleAds.accountId || a.id === ctx.config.appleAds.accountId);
+        const from = (through: IsoDate | undefined, days: number) => {
+          const first = addDays(yesterday, -(days - 1));
+          return through && addDays(through, -APPLE_ADS_REREAD_DAYS) > first ? addDays(through, -APPLE_ADS_REREAD_DAYS) : first;
+        };
+        const terms = { start: from(st.termsThrough, APPLE_ADS_TERMS_DAYS), end: yesterday };
+        const share = { start: from(st.shareThrough, APPLE_ADS_SHARE_DAYS), end: yesterday };
+        const days = (r: { start: IsoDate; end: IsoDate }) => {
+          const out: IsoDate[] = [];
+          for (let d = r.start; d <= r.end; d = addDays(d, 1)) out.push(d);
+          return out;
+        };
+        const shareRows: Awaited<ReturnType<typeof ads.impressionShare>> = [];
+        for (const account of accounts) {
+          spend();
+          for (const c of await ads.campaigns(account.id, app.appleId!)) {
+            spend();
+            written += await ctx.store.writeAppAdsTerms(app.id, c.id, days(terms), await ads.searchTerms(account.id, c.id, terms));
+          }
+          spend();
+          shareRows.push(...(await ads.impressionShare(account.id, app.appleId!, share)));
+        }
+        written += await ctx.store.writeAppAdsShare(app.id, days(share), shareRows);
+      } catch (err) {
+        if (!(err instanceof SourceError) || (err.status !== 401 && err.status !== 403)) throw err;
+        await ctx.store.setMeta(key, JSON.stringify({ ...st, checkedOn: today, problem: safeMessage(err) } satisfies AppleAdsState));
+        return null;
+      }
+      await ctx.store.setMeta(
+        key,
+        JSON.stringify({ checkedOn: today, termsThrough: yesterday, shareThrough: yesterday } satisfies AppleAdsState),
+      );
+      return written;
+    },
+    skip: () => ctx.store.setMeta(key, JSON.stringify({ ...st, checkedOn: today })),
+  });
+}
+
+// ------------------------------------------------------------------ App Store Sales and Trends
+
+const maxDay = (a: IsoDate, b: IsoDate) => (a > b ? a : b);
+
+/** Apple keeps daily Sales and Trends reports for a year. */
+export const ASC_SALES_HISTORY_DAYS = 365;
+/** Days read per unit before the next one takes over (each is one call). */
+const ASC_SALES_DAYS_PER_UNIT = 30;
+/** A day's report is out the next morning (Pacific time); a missing newer day is asked again after this. */
+const ASC_SALES_RETRY_MS = 3 * 3_600_000;
+
+/**
+ * Summary Sales of the vendor account, one call per day, split between the apps by Apple ID and
+ * SKU (ADR 0011). The latest days first, then history back a year, newest first.
+ */
+function planSales(args: AppPlanArgs, asc: AscClient, vendorNumber: string, place: Place): void {
+  const { ctx, today, get, budget } = args;
+  const { store } = ctx;
+  const nowMs = args.nowMs ?? Date.now();
+  const appleApps = ctx.config.apps.filter((a) => a.appleId);
+  const siteId = appTaskId(appleApps[0]!.id);
+  const saved = parseJson<AscSalesState>(get(syncKeys.ascSales)) ?? {};
+  // The cursor covers the apps it was read for: an app added since starts the year over for all
+  // (a day read again replaces each app's rows, so nothing is counted twice).
+  const ids = appleApps.map((a) => a.id).sort();
+  const reset = ids.some((id) => !(saved.apps ?? []).includes(id));
+  const state: AscSalesState = reset ? {} : saved;
+  const yesterday = addDays(today, -1);
+  const floor = addDays(today, -ASC_SALES_HISTORY_DAYS);
+
+  /** Apps with their SKUs (refreshed daily; in-app purchase rows name the app by its SKU). */
+  const salesApps = async (): Promise<SalesApp[]> => {
+    let saved = parseJson<{ day: IsoDate; skus: Record<string, string> }>(await store.getMeta(syncKeys.ascSkus));
+    if (!saved || saved.day !== today) {
+      budget.spend('asc');
+      const skus: Record<string, string> = {};
+      for (const a of await asc.listApps()) if (a.sku) skus[a.id] = a.sku;
+      saved = { day: today, skus };
+      await store.setMeta(syncKeys.ascSkus, JSON.stringify(saved));
+    }
+    return appleApps.map((a) => ({ appId: a.id, appleId: a.appleId!, sku: saved!.skus[a.appleId!] ?? null }));
+  };
+
+  const readDay = async (apps: SalesApp[], day: IsoDate): Promise<{ written: number; found: boolean }> => {
+    const collector = salesSummaryCollector(apps);
+    const rows = await asc.salesReport!(vendorNumber, day, (row) => collector.add(row));
+    // No report: no sales that day (every app's day is cleared), unless it is just not out yet.
+    return { written: await collector.write(store, [day]), found: rows !== null };
+  };
+
+  const save = async (patch: Partial<AscSalesState>) => {
+    const stored = parseJson<AscSalesState>(await store.getMeta(syncKeys.ascSales)) ?? {};
+    const cur: AscSalesState = reset && !stored.apps?.length ? {} : stored;
+    const next: AscSalesState = { ...cur, ...patch, apps: ids };
+    // The first day read is where history starts from.
+    if (patch.through && !cur.from) next.from = patch.through;
+    for (const k of Object.keys(next) as Array<keyof AscSalesState>) if (next[k] === undefined) delete next[k];
+    await store.setMeta(syncKeys.ascSales, JSON.stringify(next));
+  };
+
+  // Latest days: after `through` up to yesterday (at most a month; history fills the rest).
+  const waiting = state.waitUntil && Date.parse(state.waitUntil) > nowMs;
+  if ((!state.through || state.through < yesterday) && !waiting) {
+    place({
+      task: 'asc.sales',
+      siteId,
+      source: 'asc',
+      backfill: false,
+      calls: 1,
+      key: `asc.sales:${today}:${state.through ?? 'none'}`,
+      run: async () => {
+        const apps = await salesApps();
+        let written = 0;
+        if (reset) await store.setMeta(syncKeys.ascSales, JSON.stringify({ apps: ids } satisfies AscSalesState));
+        // First run: from three days back, so at least one day that is surely out starts the history.
+        // After a pause, every missed day in order (Apple keeps a year), a month per unit at most.
+        const start = state.through ? maxDay(addDays(state.through, 1), floor) : addDays(today, -3);
+        let n = 0;
+        for (let day = start; day <= yesterday && n < ASC_SALES_DAYS_PER_UNIT; day = addDays(day, 1)) {
+          if (n++ > 0) {
+            if (budget.expired()) break;
+            budget.spend('asc');
+          }
+          const res = await readDay(apps, day);
+          written += res.written;
+          // The two newest days may simply not be out yet: try again later.
+          if (!res.found && day >= addDays(today, -2)) {
+            await save({ waitUntil: new Date(nowMs + ASC_SALES_RETRY_MS).toISOString() });
+            break;
+          }
+          await save({ through: day, waitUntil: undefined });
+        }
+        return written;
+      },
+      skip: () => save({ waitUntil: new Date(nowMs + ASC_SALES_RETRY_MS).toISOString() }),
+    });
+  }
+
+  // History: before `from`, back a year, newest first.
+  const from = state.from;
+  if (from && from > floor) {
+    place({
+      task: 'asc.sales_history',
+      siteId,
+      source: 'asc',
+      backfill: true,
+      date: addDays(from, -1),
+      calls: 1,
+      key: `asc.sales_history:${from}`,
+      run: async () => {
+        const apps = await salesApps();
+        let written = 0;
+        let n = 0;
+        for (let day = addDays(from, -1); day >= floor && n < ASC_SALES_DAYS_PER_UNIT; day = addDays(day, -1)) {
+          if (n++ > 0) {
+            if (budget.expired()) break;
+            budget.spend('asc');
+          }
+          written += (await readDay(apps, day)).written;
+          await save({ from: day });
+        }
+        return written;
+      },
+      // A day that keeps failing is passed over.
+      skip: () => save({ from: addDays(from, -1) }),
+    });
+  }
 }
 
 // ------------------------------------------------------------------ App Store
@@ -96,6 +364,7 @@ function planAppStore(args: AppPlanArgs, app: AppConfig, asc: AscClient, place: 
   const appleId = app.appleId!;
   const siteId = appTaskId(app.id);
   const state = parseJson<AscRequestState>(get(syncKeys.ascRequests(app.id))) ?? {};
+  const specs = ascReportsFor(app);
 
   const afterRequests = (st: AscRequestState, to: Place) => {
     if (st.ongoing) planReports(st, 'ongoing', st.ongoing, to);
@@ -120,16 +389,18 @@ function planAppStore(args: AppPlanArgs, app: AppConfig, asc: AscClient, place: 
     });
   } else afterRequests(state, place);
 
-  // Customer reviews, once a day.
-  const cursor = parseJson<ReviewCursor & { checkedOn?: IsoDate }>(get(syncKeys.ascReviews(app.id))) ?? {};
-  if (cursor.checkedOn !== today) {
+  // Customer reviews, every few hours.
+  const cursor = parseJson<ReviewCursor & { checkedOn?: IsoDate; checkedAt?: string }>(get(syncKeys.ascReviews(app.id))) ?? {};
+  const nowMs = args.nowMs ?? Date.now();
+  const lastReviews = cursor.checkedAt ? Date.parse(cursor.checkedAt) : cursor.checkedOn ? Date.parse(`${cursor.checkedOn}T00:00:00Z`) : 0;
+  if (nowMs - lastReviews >= REVIEWS_EVERY_MS) {
     place({
       task: 'asc.reviews',
       siteId,
       source: 'asc',
       backfill: false,
       calls: 1,
-      key: `asc.reviews:${app.id}:${today}`,
+      key: `asc.reviews:${app.id}:${new Date(nowMs).toISOString().slice(0, 13)}`,
       run: async () => {
         const maxPages = cursor.historyDone ? 5 : ASC_REVIEW_HISTORY_PAGES;
         let next: string | null = null;
@@ -143,7 +414,9 @@ function planAppStore(args: AppPlanArgs, app: AppConfig, asc: AscClient, place: 
           pages++;
           const rows = page.reviews.map(ascReviewInput).filter((r) => r !== null);
           const fresh = cursor.newest ? rows.filter((r) => r.createdAt > cursor.newest!) : rows;
-          if (fresh.length) written += await store.writeAppReviews(app.id, 'apple', fresh);
+          // Reviews already stored that have a developer response by now are written again, so they read replied.
+          const answered = cursor.newest ? rows.filter((r) => r.createdAt <= cursor.newest! && r.replied) : [];
+          if (fresh.length || answered.length) written += await store.writeAppReviews(app.id, 'apple', [...fresh, ...answered]);
           for (const r of rows) if (!newest || r.createdAt > newest) newest = r.createdAt;
           next = page.next;
           // Newest first: once a page reaches reviews already synced, the rest are too.
@@ -156,11 +429,20 @@ function planAppStore(args: AppPlanArgs, app: AppConfig, asc: AscClient, place: 
         const historyDone = cursor.historyDone || reachedEnd || pages >= ASC_REVIEW_HISTORY_PAGES;
         await store.setMeta(
           syncKeys.ascReviews(app.id),
-          JSON.stringify({ ...(newest ? { newest } : {}), historyDone, checkedOn: today } satisfies ReviewCursor & { checkedOn: IsoDate }),
+          JSON.stringify({
+            ...(newest ? { newest } : {}),
+            historyDone,
+            checkedOn: today,
+            checkedAt: new Date(nowMs).toISOString(),
+          } satisfies ReviewCursor & { checkedOn: IsoDate; checkedAt: string }),
         );
         return written;
       },
-      skip: () => store.setMeta(syncKeys.ascReviews(app.id), JSON.stringify({ ...cursor, checkedOn: today })),
+      skip: () =>
+        store.setMeta(
+          syncKeys.ascReviews(app.id),
+          JSON.stringify({ ...cursor, checkedOn: today, checkedAt: new Date(nowMs).toISOString() }),
+        ),
     });
   }
 
@@ -175,10 +457,10 @@ function planAppStore(args: AppPlanArgs, app: AppConfig, asc: AscClient, place: 
     const fresh =
       ids &&
       ids.requestId === requestId &&
-      ASC_REPORTS.every((s) => looked.has(s.key)) &&
+      specs.every((s) => looked.has(s.key)) &&
       (ids.checkedOn === today || (found > 0 && daysBetween(ids.checkedOn, today) < ASC_REPORT_IDS_DAYS));
     if (fresh) {
-      for (const spec of ASC_REPORTS) if (ids.reports[spec.key]) planInstances(st, kind, spec, ids.reports[spec.key]!, to);
+      for (const spec of specs) if (ids.reports[spec.key]) planInstances(st, kind, spec, ids.reports[spec.key]!, to);
       return;
     }
     to({
@@ -192,13 +474,13 @@ function planAppStore(args: AppPlanArgs, app: AppConfig, asc: AscClient, place: 
       run: async () => {
         const reports = await asc.listReports(requestId);
         const map: Record<string, string> = {};
-        for (const spec of ASC_REPORTS) {
+        for (const spec of specs) {
           const hit = reports.find((r) => spec.match(r.name));
           if (hit) map[spec.key] = hit.id;
         }
-        const saved: AscReportIds = { requestId, checkedOn: today, reports: map, looked: ASC_REPORTS.map((s) => s.key) };
+        const saved: AscReportIds = { requestId, checkedOn: today, reports: map, looked: specs.map((s) => s.key) };
         await store.setMeta(syncKeys.ascReports(app.id, kind), JSON.stringify(saved));
-        for (const spec of ASC_REPORTS) if (map[spec.key]) planInstances(st, kind, spec, map[spec.key]!, enqueue);
+        for (const spec of specs) if (map[spec.key]) planInstances(st, kind, spec, map[spec.key]!, enqueue);
         return 0;
       },
       skip: async () => undefined,
@@ -209,7 +491,7 @@ function planAppStore(args: AppPlanArgs, app: AppConfig, asc: AscClient, place: 
   function planInstances(st: AscRequestState, kind: AscRequestKind, spec: AscReportSpec, reportId: string, to: Place) {
     const pendingKey = syncKeys.ascPending(app.id, kind, spec.key);
     const pending = parseJson<AscPending>(get(pendingKey));
-    const task = `asc.${spec.key}${kind === 'snapshot' ? '_history' : ''}`;
+    const task = `${spec.task ?? `asc.${spec.key}`}${kind === 'snapshot' ? '_history' : ''}`;
     if (pending && pending.listedOn === today) {
       for (const inst of pending.instances) to(instanceUnit(kind, spec, task, inst));
       return;
@@ -235,6 +517,15 @@ function planAppStore(args: AppPlanArgs, app: AppConfig, asc: AscClient, place: 
           todo = all.filter((i) => !done.has(i.id));
         }
         const next: AscPending = { listedOn: today, instances: todo.map((i) => ({ id: i.id, processingDate: i.processingDate })) };
+        // A snapshot with no daily instance for this report: check once whether Apple made monthly ones,
+        // so the missing daily history can be explained instead of waited for.
+        if (kind === 'snapshot' && all.length === 0) {
+          if (pending?.monthly !== undefined) next.monthly = pending.monthly;
+          else if (budget.left() > 1) {
+            budget.spend('asc');
+            next.monthly = (await asc.listInstances(reportId, 'MONTHLY')).length;
+          }
+        }
         await store.setMeta(pendingKey, JSON.stringify(next));
         for (const inst of next.instances) enqueue(instanceUnit(kind, spec, task, inst));
         return 0;
@@ -479,6 +770,57 @@ function planPlay(args: AppPlanArgs, app: AppConfig, place: Place): void {
   planListing('reports');
   planListing('finance');
 
+  // Reviews through the Android Publisher API (opt-in): the last week's, every few hours, ahead of the monthly files.
+  if (ctx.config.play.reviewsApi && play.listReviews) {
+    const key = syncKeys.playReviewsApi(app.id);
+    const st = parseJson<{ checkedAt?: string; problem?: string }>(get(key)) ?? {};
+    const nowMs = args.nowMs ?? Date.now();
+    const wait = st.problem ? 24 * 3_600_000 : REVIEWS_EVERY_MS;
+    if (!st.checkedAt || nowMs - Date.parse(st.checkedAt) >= wait) {
+      place({
+        task: 'play.reviews_api',
+        siteId,
+        source: 'play',
+        backfill: false,
+        calls: 1,
+        key: `play.reviews_api:${app.id}:${new Date(nowMs).toISOString().slice(0, 13)}`,
+        run: async () => {
+          let written = 0;
+          let token: string | null = null;
+          try {
+            for (let i = 0; i < 5; i++) {
+              if (i > 0) budget.spend('play');
+              const page = await play.listReviews!(pkg, token);
+              const rows = page.reviews
+                .filter((r) => r.rating >= 1 && r.rating <= 5)
+                .map((r) => ({
+                  id: r.id.slice(0, 200),
+                  createdAt: r.modifiedAt,
+                  rating: Math.round(r.rating),
+                  title: null,
+                  body: r.text?.slice(0, 4000) ?? null,
+                  territory: null,
+                  language: r.language?.slice(0, 20) ?? null,
+                  version: r.version?.slice(0, 60) ?? null,
+                  replied: r.replied,
+                }));
+              if (rows.length) written += await store.writeAppReviews(app.id, 'play', rows);
+              token = page.next;
+              if (!token) break;
+            }
+          } catch (err) {
+            if (!(err instanceof SourceError) || (err.status !== 403 && err.status !== 401)) throw err;
+            await store.setMeta(key, JSON.stringify({ checkedAt: new Date(nowMs).toISOString(), problem: safeMessage(err) }));
+            return null;
+          }
+          await store.setMeta(key, JSON.stringify({ checkedAt: new Date(nowMs).toISOString() }));
+          return written;
+        },
+        skip: () => store.setMeta(key, JSON.stringify({ checkedAt: new Date(nowMs).toISOString() })),
+      });
+    }
+  }
+
   // Crash and ANR rates, once a day.
   const vitals = parseJson<{ through?: IsoDate; checkedOn?: IsoDate }>(get(syncKeys.playVitals(app.id))) ?? {};
   const end = addDays(today, -PLAY_VITALS_LAG_DAYS);
@@ -489,7 +831,8 @@ function planPlay(args: AppPlanArgs, app: AppConfig, place: Place): void {
       siteId,
       source: 'play',
       backfill: false,
-      calls: 2,
+      // Per metric: its freshness, then the query.
+      calls: 4,
       key: `play.vitals:${app.id}:${today}`,
       run: async () => {
         if (start > end) return null;
@@ -544,7 +887,13 @@ function planPlay(args: AppPlanArgs, app: AppConfig, place: Place): void {
           metrics: ['crashRate', 'userPerceivedCrashRate', 'anrRate', 'userPerceivedAnrRate', 'distinctUsers'],
           rows: [...rows.values()],
         });
-        await store.setMeta(syncKeys.playVitals(app.id), JSON.stringify({ through: end, checkedOn: today }));
+        // Up to the newest day Google had (its freshness can lag); without rows, the window stays.
+        const newest = [...crash, ...anr].reduce<IsoDate | null>((m, r) => (!m || r.date > m ? r.date : m), null);
+        const through = newest && newest < end ? newest : newest ? end : vitals.through;
+        await store.setMeta(
+          syncKeys.playVitals(app.id),
+          JSON.stringify({ ...(through ? { through } : {}), checkedOn: today, ...(newest ? {} : { empty: true }) }),
+        );
         return written;
       },
       skip: () => store.setMeta(syncKeys.playVitals(app.id), JSON.stringify({ ...vitals, checkedOn: today })),

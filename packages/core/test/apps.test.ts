@@ -11,6 +11,15 @@ import {
   findApp,
   cellDate,
   playInstallsCollector,
+  subscriptionMetricsCollector,
+  frameworkCollector,
+  ascReportsFor,
+  type AppFrameworkInput,
+  salesSummaryCollector,
+  productsCollector,
+  type AppSalesInput,
+  type AppProductInput,
+  type AppSubscriptionMetricWrite,
   type AppStoreWrite,
   type Store,
 } from '../src/index.js';
@@ -119,7 +128,7 @@ describe('apps config', () => {
       ASC_PRIVATE_KEY: '-----BEGIN PRIVATE KEY-----\\nabc\\n-----END PRIVATE KEY-----',
     });
     expect(cfg.apps[0]).toMatchObject({ id: 'acme', origin: 'secret' });
-    expect(cfg.play).toEqual({ clientEmail: 'sa@x', privateKey: 'k', bucket: 'pubsite_prod_rev_0123' });
+    expect(cfg.play).toEqual({ clientEmail: 'sa@x', privateKey: 'k', bucket: 'pubsite_prod_rev_0123', metadata: false, reviewsApi: false });
     expect(cfg.asc.privateKey).toContain('\nabc\n');
     expect(cfg.appStorePublic).toBe(false);
     expect(findApp(cfg, 'com.acme.app').id).toBe('acme');
@@ -140,7 +149,11 @@ describe('app report recognition', () => {
     expect(match('App Downloads Standard')).toEqual(['downloads']);
     expect(match('App Store Installation and Deletion Standard')).toEqual(['installs']);
     expect(match('App Crashes')).toEqual(['crashes']);
-    expect(match('App Crashes Expanded')).toEqual([]);
+    expect(match('App Crashes Expanded')).toEqual(['crashes_expanded']);
+    expect(match('App Store Purchases Standard')).toEqual(['purchases']);
+    expect(match('App Store Subscription State Standard')).toEqual(['subscription_state']);
+    expect(match('App Store Subscription Event Standard')).toEqual(['subscription_event']);
+    expect(match('App Store Subscription Event Detailed')).toEqual([]);
     expect(match('Streaming Downloads Performance')).toEqual([]);
     expect(classifyPlayFile('stats/store_performance/store_performance_com.acme.app_202610_traffic_source.csv', 'com.acme.app')).toEqual({
       kind: 'store_traffic',
@@ -291,5 +304,287 @@ describe('Google Play financial files', () => {
     expect(
       classifyPlayFile('financial-stats/subscriptions/subscriptions_com.acme.app.pro_x_202610_country.csv', 'com.acme.app'),
     ).toBeNull();
+  });
+});
+
+describe('App Store subscription reports', () => {
+  /** A Subscription Event report (Standard) as Apple delivers it: tab separated, columns read by name. */
+  const EVENT_TSV = [
+    'Event Date\tApp Name\tApp Apple Identifier\tEvent Sub Type\tEvent Grouping\tSubscription Name\tSubscription Identifier\tSubscription Duration\tBilling Frequency\tBilling Period\tSubscription Group\tSubscription Group Identifier\tOffer Type\tOffer Name\tOffer ID\tVanity Code\tOffer Pricing\tOffer Duration\tPlan Change Type\tPrevious Subscription Name\tPrevious Subscription Identifier\tFamily Sharing\tCancellation Reason\tPaid Service Days Recovered\tApp Download Source Type\tPage Type\tPre-Order\tOriginal Purchase Device\tTerritory\tCounts',
+    '2026-11-08\tEchobell\t6400000000\tFree Trial Starts\tOffer Starts\tPro Monthly\t6450000001\t1 Month\tMonthly\t\tPro\t21000000\tFree Trial\tLaunch\tL1\t\tFree\t1 Week\t\t\t\tIndividual\t\t\tApp Store search\tProduct page\tNo\tiPhone\tUS\t2',
+    '2026-11-08\tEchobell\t6400000000\tFree Trial Starts\tOffer Starts\tPro Monthly\t6450000001\t1 Month\tMonthly\t\tPro\t21000000\tFree Trial\tLaunch\tL1\t\tFree\t1 Week\t\t\t\tIndividual\t\t\tApp Store search\tProduct page\tNo\tiPad\tUS\t1',
+    '2026-11-08\tEchobell\t6400000000\tVoluntary Churn from Full Price\tVoluntary Churn\tPro Monthly\t6450000001\t1 Month\tMonthly\t\tPro\t21000000\t\t\t\t\t\t\t\t\t\tIndividual\tTurned off auto-renew\t\tUnavailable\tNo Page\tNo\tiPhone\tde\t1',
+    '2026-11-09\tEchobell\t6400000000\tFull Price Renewals\tRenewals\tPro Annual\t6450000002\t1 Year\tYearly\t\tPro\t21000000\t\t\t\t\t\t\t\t\t\tShared with family\t\t\tInstitutional purchase\tProduct page\tNo\tMac\tJP\t0',
+  ].join('\n');
+
+  it('aggregates event rows per day, metric, subscription, offer, storefront and source, and replaces every covered day', async () => {
+    const writes: AppSubscriptionMetricWrite[] = [];
+    const store = {
+      writeAppSubscriptionMetrics: async (_id: string, w: AppSubscriptionMetricWrite) => (writes.push(w), w.rows.length),
+    } as unknown as Store;
+    const c = subscriptionMetricsCollector('event');
+    await readDelimited(stream(new TextEncoder().encode(EVENT_TSV)), (r) => c.add(r));
+    const res = await c.write(store, 'echobell');
+    expect(res).toEqual({ written: 2, oldest: '2026-11-08' });
+    expect(writes[0]!.kind).toBe('event');
+    // 2026-11-09 only had a zero row: still replaced, so older numbers for it go.
+    expect(writes[0]!.dates).toEqual(['2026-11-08', '2026-11-09']);
+    expect(writes[0]!.rows).toEqual([
+      {
+        date: '2026-11-08',
+        metric: 'free_trial_starts',
+        metricGroup: 'offer_starts',
+        product: 'Pro Monthly',
+        offerType: 'free_trial',
+        territory: 'US',
+        source: 'search',
+        count: 3,
+      },
+      {
+        date: '2026-11-08',
+        metric: 'voluntary_churn_from_full_price',
+        metricGroup: 'voluntary_churn',
+        product: 'Pro Monthly',
+        offerType: '',
+        territory: 'DE',
+        source: 'unavailable',
+        count: 1,
+      },
+    ]);
+  });
+
+  it('keeps states without the download source, and only days before the snapshot limit', async () => {
+    const tsv = [
+      'Date\tApp Name\tApp Apple Identifier\tState Metric\tState Metric Grouping\tSubscription Name\tSubscription Identifier\tOffer Type\tAuto-Renew Status\tApp Download Source Type\tTerritory\tCounts',
+      '2026-11-05\tEchobell\t6400000000\tFull price\tPaid plans\tPro Monthly\t6450000001\t\tAuto-renew on\tApp Store search\tUS\t7',
+      '2026-11-05\tEchobell\t6400000000\tFull price\tPaid plans\tPro Monthly\t6450000001\t\tAuto-renew off\tWeb referrer\tUS\t2',
+      '2026-11-06\tEchobell\t6400000000\tGrace period\tBilling issue\tPro Monthly\t6450000001\t\tAuto-renew on\tApp Store search\tUS\t1',
+    ].join('\n');
+    const writes: AppSubscriptionMetricWrite[] = [];
+    const store = {
+      writeAppSubscriptionMetrics: async (_id: string, w: AppSubscriptionMetricWrite) => (writes.push(w), w.rows.length),
+    } as unknown as Store;
+    const c = subscriptionMetricsCollector('state');
+    await readDelimited(stream(new TextEncoder().encode(tsv)), (r) => c.add(r));
+    await c.write(store, 'echobell', '2026-11-06');
+    expect(writes[0]!.dates).toEqual(['2026-11-05']);
+    expect(writes[0]!.rows).toEqual([
+      {
+        date: '2026-11-05',
+        metric: 'full_price',
+        metricGroup: 'paid_plans',
+        product: 'Pro Monthly',
+        offerType: '',
+        territory: 'US',
+        source: '*',
+        count: 9,
+      },
+    ]);
+  });
+});
+
+describe('App Store revenue per product', () => {
+  const SALES_HEADER =
+    'Provider\tProvider Country\tSKU\tDeveloper\tTitle\tVersion\tProduct Type Identifier\tUnits\tDeveloper Proceeds\tBegin Date\tEnd Date\tCustomer Currency\tCountry Code\tCurrency of Proceeds\tApple Identifier\tCustomer Price\tPromo Code\tParent Identifier\tSubscription\tPeriod\tCategory\tCMB\tDevice\tSupported Platforms\tProceeds Reason\tPreserved Pricing\tClient\tOrder Type';
+  const sale = (
+    sku: string,
+    type: string,
+    units: string,
+    proceeds: string,
+    cur: string,
+    country: string,
+    appleId: string,
+    price: string,
+    parent: string,
+    sub: string,
+    period: string,
+  ) =>
+    [
+      'APPLE',
+      'US',
+      sku,
+      'Acme',
+      sku,
+      '',
+      type,
+      units,
+      proceeds,
+      '11/08/2026',
+      '11/08/2026',
+      cur,
+      country,
+      cur,
+      appleId,
+      price,
+      '',
+      parent,
+      sub,
+      period,
+      'Utilities',
+      '',
+      'iPhone',
+      'iOS',
+      '',
+      '',
+      '',
+      '',
+    ].join('\t');
+
+  it('splits Summary Sales between apps by Apple ID and SKU, keeps refunds apart and skips updates', async () => {
+    const tsv = [
+      SALES_HEADER,
+      sale('echobell.pro.monthly', 'IAY', '3', '3.49', 'USD', 'US', '6450000001', '4.99', 'ECHOBELL', 'New', '1 Month'),
+      sale('echobell.pro.monthly', 'IAY', '2', '3.49', 'USD', 'US', '6450000001', '4.99', 'ECHOBELL', 'Renewal', '1 Month'),
+      sale('echobell.pro.monthly', 'IAY', '-1', '3.49', 'USD', 'US', '6450000001', '-4.99', 'ECHOBELL', 'New', '1 Month'),
+      sale('echobell.pro.monthly', 'IAY', '1', '4.15', 'EUR', 'DE', '6450000001', '5.99', 'ECHOBELL', 'New', '1 Month'),
+      sale('ECHOBELL', '7', '40', '0', 'USD', 'US', '6400000000', '0', '', '', ''),
+      sale('ECHOBELL', '1F', '12', '0', 'USD', 'US', '6400000000', '0', '', '', ''),
+      sale('OTHER.tip', 'IA1', '1', '0.70', 'USD', 'US', '6460000009', '0.99', 'OTHERAPP', '', ''),
+    ].join('\n');
+    const writes: Array<{ appId: string; dates: string[]; rows: AppSalesInput[] }> = [];
+    const store = {
+      writeAppSales: async (appId: string, dates: string[], rows: AppSalesInput[]) => (writes.push({ appId, dates, rows }), rows.length),
+    } as unknown as Store;
+    const c = salesSummaryCollector([
+      { appId: 'echobell', appleId: '6400000000', sku: 'ECHOBELL' },
+      { appId: 'other', appleId: '6400000001', sku: null },
+    ]);
+    await readDelimited(stream(new TextEncoder().encode(tsv)), (r) => c.add(r));
+    expect(await c.write(store, ['2026-11-08'])).toBe(4);
+    const echobell = writes.find((w) => w.appId === 'echobell')!;
+    expect(echobell.dates).toEqual(['2026-11-08']);
+    const pick = (sub: string, cur: string) =>
+      echobell.rows.find((r) => r.subscription === sub && r.proceedsCurrency === cur && r.productType === 'subscription');
+    // New: 3 bought, 1 refunded (same price point).
+    expect(pick('new', 'USD')).toMatchObject({
+      units: 3,
+      refundUnits: 1,
+      proceedsCents: 698,
+      refundProceedsCents: 349,
+      salesCents: 998,
+      customerPriceCents: 499,
+      territory: 'US',
+      period: '1 Month',
+    });
+    expect(pick('renewal', 'USD')).toMatchObject({ units: 2, proceedsCents: 698 });
+    expect(pick('new', 'EUR')).toMatchObject({ units: 1, proceedsCents: 415, territory: 'DE', customerCurrency: 'EUR' });
+    // Downloads of the app itself are kept (free: no proceeds), updates are not.
+    expect(echobell.rows.filter((r) => r.productType === 'app')).toEqual([
+      expect.objectContaining({ sku: 'ECHOBELL', units: 12, proceedsCents: 0 }),
+    ]);
+    // Rows of an app that is not configured go nowhere; a configured app with no rows still has its day replaced.
+    expect(writes.find((w) => w.appId === 'other')).toEqual({ appId: 'other', dates: ['2026-11-08'], rows: [] });
+  });
+
+  it('keeps App Store purchases per product with refunds apart', async () => {
+    const tsv = [
+      'Date\tApp Name\tApp Apple Identifier\tPurchase Type\tContent Name\tPayment Method\tSource Type\tPage Type\tTerritory\tPurchases\tProceeds in USD\tSales in USD\tPaying Users',
+      '2026-11-08\tEchobell\t6400000000\tIn-app purchases\tPro Monthly\tApple Pay\tApp Store search\tProduct page\tUS\t3\t10.47\t14.97\t3',
+      '2026-11-08\tEchobell\t6400000000\tIn-app purchases\tPro Monthly\tApple Pay\tWeb referrer\tProduct page\tUS\t-1\t-3.49\t-4.99\t0',
+      '2026-11-08\tEchobell\t6400000000\tIn-app purchases\tPro Annual\tApple Pay\tApp Store search\tProduct page\tDE\t1\t25.00\t35.99\t1',
+    ].join('\n');
+    const writes: Array<{ dates: string[]; rows: AppProductInput[] }> = [];
+    const store = {
+      writeAppProducts: async (_id: string, dates: string[], rows: AppProductInput[]) => (writes.push({ dates, rows }), rows.length),
+    } as unknown as Store;
+    const c = productsCollector();
+    await readDelimited(stream(new TextEncoder().encode(tsv)), (r) => c.add(r));
+    await c.write(store, 'echobell');
+    expect(writes[0]!.rows).toEqual([
+      {
+        date: '2026-11-08',
+        product: 'Pro Monthly',
+        purchaseType: 'in_app_purchases',
+        territory: 'US',
+        purchases: 3,
+        refunds: 1,
+        proceedsCents: 698,
+        refundProceedsCents: 349,
+        salesCents: 998,
+      },
+      {
+        date: '2026-11-08',
+        product: 'Pro Annual',
+        purchaseType: 'in_app_purchases',
+        territory: 'DE',
+        purchases: 1,
+        refunds: 0,
+        proceedsCents: 2500,
+        refundProceedsCents: 0,
+        salesCents: 3599,
+      },
+    ]);
+  });
+});
+
+describe('Framework Usage reports', () => {
+  it("validates the report names chosen for an app and matches Apple's report names", () => {
+    const ok = validateApp({
+      name: 'Echobell',
+      appleId: '6400000000',
+      frameworkReports: 'Mode Activity Notifications, App Added to Focus, mode activity notifications',
+    });
+    expect(ok).toEqual({
+      app: {
+        id: 'echobell',
+        name: 'Echobell',
+        appleId: '6400000000',
+        frameworkReports: ['Mode Activity Notifications', 'App Added to Focus'],
+      },
+    });
+    expect(validateApp({ name: 'X', appleId: '6400000000', frameworkReports: ['<script>'] })).toHaveProperty('error');
+    const specs = ascReportsFor((ok as { app: Parameters<typeof ascReportsFor>[0] }).app);
+    const match = (n: string) => specs.filter((s) => s.match(n)).map((s) => s.key);
+    expect(match('Mode Activity Notifications')).toEqual(['fw_mode_activity_notifications']);
+    expect(match('App Added to Focus Standard')).toEqual(['fw_app_added_to_focus']);
+    expect(match('App Added to Focus Detailed')).toEqual([]);
+    expect(specs.find((s) => s.key === 'fw_app_added_to_focus')!.task).toBe('asc.framework');
+  });
+
+  it("keeps any report's dimensions and sums its metric columns per day", async () => {
+    // Mode Activity Notifications, as Apple documents its columns.
+    const tsv = [
+      'Count\tTerritory\tDate\tPlatform\tDevice\tBuild\tUnique Devices\tRelease Type\tResolution Type',
+      '12\tUS\t2026-11-08\tiOS 26.1\tiPhone\t23B85\t9\tProduction\tTapped',
+      '8\tUS\t2026-11-08\tiOS 26.1\tiPhone\t23B85\t6\tProduction\tTapped',
+      '30\tDE\t2026-11-08\tiOS 26.0\tiPad\t23A341\t20\tProduction\tCleared',
+    ].join('\n');
+    const writes: Array<{ report: string; dates: string[]; rows: AppFrameworkInput[] }> = [];
+    const store = {
+      writeAppFramework: async (_a: string, report: string, dates: string[], rows: AppFrameworkInput[]) => (
+        writes.push({ report, dates, rows }),
+        rows.length
+      ),
+    } as unknown as Store;
+    const c = frameworkCollector('mode_activity_notifications');
+    await readDelimited(stream(new TextEncoder().encode(tsv)), (r) => c.add(r));
+    await c.write(store, 'echobell');
+    expect(writes[0]!.report).toBe('mode_activity_notifications');
+    expect(writes[0]!.rows).toEqual([
+      {
+        date: '2026-11-08',
+        dims: {
+          territory: 'DE',
+          platform: 'iOS 26.0',
+          device: 'iPad',
+          build: '23A341',
+          'release type': 'Production',
+          'resolution type': 'Cleared',
+        },
+        metrics: { count: 30, 'unique devices': 20 },
+      },
+      {
+        date: '2026-11-08',
+        dims: {
+          territory: 'US',
+          platform: 'iOS 26.1',
+          device: 'iPhone',
+          build: '23B85',
+          'release type': 'Production',
+          'resolution type': 'Tapped',
+        },
+        metrics: { count: 20, 'unique devices': 15 },
+      },
+    ]);
   });
 });

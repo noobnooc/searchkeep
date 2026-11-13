@@ -50,6 +50,62 @@
       "when": 1794400390012,
       "tag": "0006_app_breakdowns",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "6",
+      "when": 1794575008114,
+      "tag": "0007_app_subscription_metrics",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1794575737772,
+      "tag": "0008_app_products_sales",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "6",
+      "when": 1794576596018,
+      "tag": "0009_app_listing_changes",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "6",
+      "when": 1794577222088,
+      "tag": "0010_app_store_pages",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "6",
+      "when": 1794577617963,
+      "tag": "0011_app_crashes_expanded",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "6",
+      "when": 1794578117179,
+      "tag": "0012_app_optin",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "6",
+      "when": 1794579750347,
+      "tag": "0013_app_framework_reports",
+      "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "6",
+      "when": 1794580798151,
+      "tag": "0014_app_ads",
+      "breakpoints": true
     }
   ]
 }

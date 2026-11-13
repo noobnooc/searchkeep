@@ -1,3 +1,4 @@
+import type { AppleAdsImpressionShareRow, AppleAdsSearchTermRow } from './sources.js';
 import type {
   AppBreakdownDimension,
   AppBreakdownQuery,
@@ -26,6 +27,26 @@ import type {
   AppStoreRow,
   AppStoreWrite,
   AppSubscriptionInput,
+  AppAdsShareRow,
+  AppAdsTermRow,
+  AppFrameworkInput,
+  AppFrameworkRow,
+  AppOptInInput,
+  AppPageLevel,
+  AppPageRow,
+  AppPageWrite,
+  AppChangeQuery,
+  AppChangeRow,
+  AppListingValue,
+  AppProductInput,
+  AppProductQuery,
+  AppProductRow,
+  AppSalesInput,
+  AppSalesQuery,
+  AppSalesRow,
+  AppSubscriptionMetricQuery,
+  AppSubscriptionMetricRow,
+  AppSubscriptionMetricWrite,
   AppSubscriptionQuery,
   AppSubscriptionRow,
   AppVitalsQuery,
@@ -197,6 +218,43 @@ export interface Store {
   queryAppBreakdowns(q: AppBreakdownQuery): Promise<AppBreakdownRow[]>;
   /** Replaces a subscription product's rows on the days in `dates` (Google Play, ADR 0010). */
   writeAppSubscriptions(appId: string, product: string, dates: IsoDate[], rows: AppSubscriptionInput[]): Promise<number>;
+  /** Replaces App Store subscription states or events (one kind) on the days in `w.dates`. */
+  writeAppSubscriptionMetrics(appId: string, w: AppSubscriptionMetricWrite): Promise<number>;
+  /** Replaces the App Store purchases per product (Analytics Reports) on the days in `dates`. */
+  writeAppProducts(appId: string, dates: IsoDate[], rows: AppProductInput[]): Promise<number>;
+  /** Replaces one Apple Ads campaign's search terms on the days in `dates`. */
+  writeAppAdsTerms(appId: string, campaignId: string, dates: IsoDate[], rows: AppleAdsSearchTermRow[]): Promise<number>;
+  /** Replaces the app's Apple Ads impression share on the days in `dates`. */
+  writeAppAdsShare(appId: string, dates: IsoDate[], rows: AppleAdsImpressionShareRow[]): Promise<number>;
+  /** Apple Ads search terms summed over the range, per term and currency. */
+  queryAppAdsTerms(q: { appId: string; range: DateRange; contains?: string; limit?: number }): Promise<AppAdsTermRow[]>;
+  /** The latest impression share per term and storefront in the range. */
+  queryAppAdsShare(q: {
+    appId: string;
+    range: DateRange;
+    territory?: string;
+    contains?: string;
+    limit?: number;
+  }): Promise<AppAdsShareRow[]>;
+  /** Replaces a Framework Usage report's rows (report: its slug) on the days in `dates`. */
+  writeAppFramework(appId: string, report: string, dates: IsoDate[], rows: AppFrameworkInput[]): Promise<number>;
+  /** A Framework Usage report's rows in the range, oldest first. */
+  queryAppFramework(appId: string, report: string, range: DateRange, limit?: number): Promise<AppFrameworkRow[]>;
+  /** Replaces the App Store opt-in counts of the days in `dates`. */
+  writeAppOptIn(appId: string, dates: IsoDate[], rows: AppOptInInput[]): Promise<number>;
+  /** First-time downloaders and those sharing analytics, summed over the range (with the days that had data). */
+  queryAppOptIn(appId: string, range: DateRange): Promise<{ downloadingUsers: number; optingInUsers: number; days: number }>;
+  /** Sets `w.metrics` of the App Store funnel per page; for the days in `w.dates`, pages not mentioned get 0. */
+  writeAppPages(appId: string, w: AppPageWrite): Promise<number>;
+  /**
+   * Compares today's snapshot of a store's fields (only entities starting with one of `scopes`)
+   * with the stored one, records a change per field that differs (added, changed or removed) on
+   * `date`, and keeps the snapshot. The first snapshot of a scope records no changes. Returns the
+   * number of changes.
+   */
+  snapshotAppListing(appId: string, store: AppStore, date: IsoDate, scopes: string[], values: AppListingValue[]): Promise<number>;
+  /** Replaces the Sales and Trends rows of the days in `dates`. */
+  writeAppSales(appId: string, dates: IsoDate[], rows: AppSalesInput[]): Promise<number>;
 
   /**
    * Store funnel metrics grouped by the dimensions. Rows are chosen so nothing is counted twice:
@@ -216,6 +274,16 @@ export interface Store {
   queryAppChartRanks(appId: string, range: DateRange): Promise<AppChartRankInput[]>;
   /** New and canceled subscriptions summed, active subscriptions as a level (see the row type). */
   queryAppSubscriptions(q: AppSubscriptionQuery): Promise<AppSubscriptionRow[]>;
+  /** App Store subscription states (levels, see the row type) or events (summed). */
+  queryAppSubscriptionMetrics(q: AppSubscriptionMetricQuery): Promise<AppSubscriptionMetricRow[]>;
+  /** Purchases per product summed over the range. */
+  queryAppProducts(q: AppProductQuery): Promise<AppProductRow[]>;
+  /** The App Store funnel per page type (or page type and title) summed over the range. */
+  queryAppPages(q: { appId: string; range: DateRange; level: AppPageLevel; limit?: number }): Promise<AppPageRow[]>;
+  /** Store changes in the range, newest first. */
+  queryAppChanges(q: AppChangeQuery): Promise<AppChangeRow[]>;
+  /** Sales and Trends rows summed over the range. */
+  queryAppSales(q: AppSalesQuery): Promise<AppSalesRow[]>;
   /** Per app, store and dataset: first and last date. */
   appCoverage(appId?: string): Promise<AppDataCoverage[]>;
   /** Latest day with store funnel data for an app (and store). */

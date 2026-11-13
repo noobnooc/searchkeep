@@ -13,10 +13,16 @@ import {
   type PlayClient,
   type PlayObject,
   type PlayVitalsRow,
+  type AppListingValue,
+  type PlayListingSnapshot,
+  type PlayReview,
 } from '@searchkeep/core';
 import { signServiceAccountJwt } from '@searchkeep/source-gsc';
 
 export const PLAY_SCOPES = 'https://www.googleapis.com/auth/devstorage.read_only https://www.googleapis.com/auth/playdeveloperreporting';
+/** Added only when an opt-in feature needs the Android Publisher API (it has no read-only scope). */
+export const PUBLISHER_SCOPE = 'https://www.googleapis.com/auth/androidpublisher';
+const PUBLISHER = 'https://androidpublisher.googleapis.com/androidpublisher/v3/applications';
 const TOKEN_URL = 'https://oauth2.googleapis.com/token';
 const STORAGE = 'https://storage.googleapis.com/storage/v1';
 const REPORTING = 'https://playdeveloperreporting.googleapis.com/v1beta1';
@@ -27,6 +33,10 @@ const MAX_PAGES = 10;
 export interface PlayClientOptions {
   clientEmail: string;
   privateKey: string;
+  /** Request the Android Publisher scope (PLAY_METADATA or PLAY_REVIEWS_API). */
+  publisher?: boolean;
+  /** Offer the reviews API (PLAY_REVIEWS_API; needs the "Reply to reviews" permission). */
+  reviews?: boolean;
   fetch?: typeof fetch;
 }
 
@@ -58,12 +68,13 @@ export function createPlayClient(opts: PlayClientOptions): PlayClient {
   const f = opts.fetch ?? fetch;
 
   async function token(): Promise<string> {
-    const key = `${opts.clientEmail}|${PLAY_SCOPES}`;
+    const scopes = opts.publisher ? `${PLAY_SCOPES} ${PUBLISHER_SCOPE}` : PLAY_SCOPES;
+    const key = `${opts.clientEmail}|${scopes}`;
     const cached = tokenCache.get(key);
     if (cached && cached.expiresAt > Date.now() + 60_000) return cached.token;
     let assertion: string;
     try {
-      assertion = await signServiceAccountJwt(opts.clientEmail, opts.privateKey, PLAY_SCOPES);
+      assertion = await signServiceAccountJwt(opts.clientEmail, opts.privateKey, scopes);
     } catch {
       throw new SourceError('play', 0, 'the service account key (PLAY_PRIVATE_KEY, or GSC_PRIVATE_KEY) could not be imported');
     }
@@ -96,13 +107,26 @@ export function createPlayClient(opts: PlayClientOptions): PlayClient {
     const names =
       metric === 'crash' ? ['crashRate', 'userPerceivedCrashRate', 'distinctUsers'] : ['anrRate', 'userPerceivedAnrRate', 'distinctUsers'];
     const out: PlayVitalsRow[] = [];
+    // A timeline that ends after the newest complete day is refused: end at the metric set's freshness.
+    const info: {
+      freshnessInfo?: {
+        freshnesses?: Array<{ aggregationPeriod?: string; latestEndTime?: { year?: number; month?: number; day?: number } }>;
+      };
+    } = await call(`${REPORTING}/apps/${encodeURIComponent(pkg)}/${set}`);
+    const latest = info?.freshnessInfo?.freshnesses?.find((f) => f.aggregationPeriod === 'DAILY')?.latestEndTime;
+    let endExclusive = addDay(range.end);
+    if (latest?.year) {
+      const fresh = `${latest.year}-${pad(latest.month)}-${pad(latest.day)}`;
+      if (fresh < endExclusive) endExclusive = fresh;
+    }
+    if (endExclusive <= range.start) return out;
     let pageToken: string | undefined;
     for (let i = 0; i < MAX_PAGES; i++) {
       const res: { rows?: MetricsRow[]; nextPageToken?: string } = await call(`${REPORTING}/apps/${encodeURIComponent(pkg)}/${set}:query`, {
         method: 'POST',
         body: {
           // The end of the timeline is exclusive.
-          timelineSpec: { aggregationPeriod: 'DAILY', startTime: dateTime(range.start), endTime: dateTime(addDay(range.end)) },
+          timelineSpec: { aggregationPeriod: 'DAILY', startTime: dateTime(range.start), endTime: dateTime(endExclusive) },
           dimensions: ['versionCode'],
           metrics: names,
           pageSize: 10_000,
@@ -185,6 +209,113 @@ export function createPlayClient(opts: PlayClientOptions): PlayClient {
     },
 
     vitals: queryVitals,
+
+    ...(opts.publisher && opts.reviews
+      ? {
+          async listReviews(pkg: string, pageToken?: string | null) {
+            const qs = new URLSearchParams({ maxResults: '100', ...(pageToken ? { token: pageToken } : {}) });
+            type Comment = {
+              userComment?: {
+                text?: string;
+                lastModified?: { seconds?: string };
+                starRating?: number;
+                reviewerLanguage?: string;
+                appVersionName?: string;
+              };
+              developerComment?: { text?: string };
+            };
+            const res: { reviews?: Array<{ reviewId?: string; comments?: Comment[] }>; tokenPagination?: { nextPageToken?: string } } =
+              await call(`${PUBLISHER}/${encodeURIComponent(pkg)}/reviews?${qs.toString()}`);
+            const reviews: PlayReview[] = [];
+            for (const r of res?.reviews ?? []) {
+              const user = r.comments?.find((c) => c.userComment)?.userComment;
+              if (!r.reviewId || !user) continue;
+              const seconds = Number(user.lastModified?.seconds);
+              if (!Number.isFinite(seconds)) continue;
+              // The author's name is never read.
+              reviews.push({
+                id: r.reviewId,
+                modifiedAt: new Date(seconds * 1000).toISOString(),
+                rating: Number(user.starRating ?? 0),
+                text: user.text?.trim() || null,
+                language: user.reviewerLanguage ?? null,
+                version: user.appVersionName ?? null,
+                replied: Boolean(r.comments?.some((c) => c.developerComment)),
+              });
+            }
+            return { reviews, next: res?.tokenPagination?.nextPageToken ?? null };
+          },
+          async replyToReview(pkg: string, reviewId: string, text: string) {
+            await call(`${PUBLISHER}/${encodeURIComponent(pkg)}/reviews/${encodeURIComponent(reviewId)}:reply`, {
+              method: 'POST',
+              body: { replyText: text },
+            });
+          },
+        }
+      : {}),
+    ...(opts.publisher
+      ? {
+          async listingSnapshot(pkg: string): Promise<PlayListingSnapshot> {
+            const base = `${PUBLISHER}/${encodeURIComponent(pkg)}/edits`;
+            const edit: { id?: string } = await call(base, { method: 'POST', body: {} });
+            if (!edit?.id) throw new SourceError('play', 0, 'the Android Publisher API returned no edit');
+            let calls = 1;
+            const values: AppListingValue[] = [];
+            const put = (entity: string, locale: string, field: string, v: unknown) => {
+              const value = typeof v === 'string' ? v.trim().slice(0, 4000) : '';
+              if (value) values.push({ entity, locale, field, value });
+            };
+            try {
+              const listings: {
+                listings?: Array<{ language?: string; title?: string; shortDescription?: string; fullDescription?: string }>;
+              } = await call(`${base}/${encodeURIComponent(edit.id)}/listings`);
+              calls++;
+              for (const l of listings?.listings ?? []) {
+                if (!l.language) continue;
+                put('listing', l.language, 'title', l.title);
+                put('listing', l.language, 'short_description', l.shortDescription);
+                put('listing', l.language, 'full_description', l.fullDescription);
+              }
+              const tracks: {
+                tracks?: Array<{
+                  track?: string;
+                  releases?: Array<{
+                    name?: string;
+                    versionCodes?: string[];
+                    status?: string;
+                    userFraction?: number;
+                    releaseNotes?: Array<{ language?: string; text?: string }>;
+                  }>;
+                }>;
+              } = await call(`${base}/${encodeURIComponent(edit.id)}/tracks`);
+              calls++;
+              for (const t of tracks?.tracks ?? []) {
+                if (!t.track) continue;
+                const entity = `track:${t.track}`;
+                const releases = t.releases ?? [];
+                const describe = (r: (typeof releases)[number]) =>
+                  [
+                    r.name ?? '',
+                    r.versionCodes?.length ? `[${r.versionCodes.join(',')}]` : '',
+                    r.status ?? '',
+                    r.userFraction ? `${Math.round(r.userFraction * 1000) / 10}%` : '',
+                  ]
+                    .filter(Boolean)
+                    .join(' ');
+                put(entity, '', 'releases', releases.map(describe).join('; '));
+                // Release notes of the release users get (completed or in progress), per language.
+                const current = releases.find((r) => r.status === 'inProgress') ?? releases.find((r) => r.status === 'completed');
+                for (const n of current?.releaseNotes ?? []) if (n.language) put(entity, n.language, 'release_notes', n.text);
+              }
+            } finally {
+              // Never committed: the edit is deleted right away (it would expire on its own).
+              await call(`${base}/${encodeURIComponent(edit.id)}`, { method: 'DELETE' }).catch(() => undefined);
+              calls++;
+            }
+            return { scopes: ['listing', 'track'], values, calls };
+          },
+        }
+      : {}),
 
     async listApps() {
       const out: Array<{ packageName: string; name: string }> = [];

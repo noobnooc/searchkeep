@@ -63,8 +63,8 @@ _Screenshots use the built-in demo data (`pnpm dev`, then `POST /api/dev/seed`).
   with a temporary Admin key that is never stored; the sync reads them with a Sales and Reports key.
 - **Your data stays in your account**: no telemetry, no vendor server, no third party in the path.
   It runs on the Cloudflare free tier.
-- **Read-only by default**: the only write to an external system (`submit_sitemap`) is off until
-  you turn it on.
+- **Read-only by default**: the only writes to external systems (`submit_sitemap`, `reply_review`)
+  are off until you turn them on.
 - **Secure by default**: protected by Cloudflare Access, with Managed OAuth for MCP clients
   (dynamic client registration and PKCE). The Worker re-verifies the Access JWT on every request
   and locks itself until Access is set up correctly.
@@ -200,32 +200,38 @@ AGENTS.md              Instructions for AI agents working on this repository
 
 ## MCP tools
 
-| Tool                   | What it does                                                                                     |
-| ---------------------- | ------------------------------------------------------------------------------------------------ |
-| `list_sites`           | Lists configured sites, their connected sources and the date range stored per dataset.           |
-| `query_performance`    | Clicks, impressions, CTR and position by date, dimension and filter, from GSC or Bing.           |
-| `compare_periods`      | Compares two periods and surfaces the queries and pages that moved most.                         |
-| `find_quick_wins`      | Queries ranking 8–20 (by default) with high impressions, ranked by clicks available.             |
-| `find_cannibalization` | Queries where several of your pages compete for the same ranking.                                |
-| `find_ctr_anomalies`   | Queries whose CTR is clearly below what their position predicts.                                 |
-| `find_content_decay`   | Pages whose clicks keep declining.                                                               |
-| `geo_funnel`           | Per page: AI crawler requests, imported Bing AI citations, AI referral visits and clicks.        |
-| `ai_crawlers`          | AI crawler requests by crawler, operator, purpose, path, status or date.                         |
-| `search_crawlers`      | Search engine crawler requests (Googlebot, Bingbot, ...): Search Console's Crawl stats, kept.    |
-| `index_coverage`       | Indexed and not-indexed sitemap URLs by coverage state, rich result issues and recent changes.   |
-| `inspect_url`          | Live Google Search Console URL inspection.                                                       |
-| `list_sitemaps`        | Lists the sitemaps Search Console knows and their status.                                        |
-| `submit_sitemap`       | Submits a sitemap to GSC. **Only registered with `ENABLE_WRITES=true`**; needs GSC Full access.  |
-| `setup_status`         | Reports configuration, readiness and the last sync, so you (or an agent) can verify a deploy.    |
-| `list_apps`            | Lists configured apps, their connected stores, App Store report status and stored data.          |
-| `app_performance`      | Store funnel, revenue and sessions per store and period; by date, territory, source or referrer. |
-| `app_search_terms`     | Google Play search terms: visitors, acquisitions, conversion, change and low converters.         |
-| `app_reviews`          | Ratings over time, star distribution and reviews, filtered by stars, territory, version, text.   |
-| `app_stability`        | Crash and ANR rates (Google Play) and crash counts (App Store) per day or app version.           |
-| `app_subscriptions`    | Google Play subscriptions: new, canceled and active per product and country, with the trend.     |
-| `app_breakdown`        | Per app version, device or OS version: installs, ratings, sessions, crashes and ANRs.            |
+| Tool                   | What it does                                                                                            |
+| ---------------------- | ------------------------------------------------------------------------------------------------------- |
+| `list_sites`           | Lists configured sites, their connected sources and the date range stored per dataset.                  |
+| `query_performance`    | Clicks, impressions, CTR and position by date, dimension and filter, from GSC or Bing.                  |
+| `compare_periods`      | Compares two periods and surfaces the queries and pages that moved most.                                |
+| `find_quick_wins`      | Queries ranking 8–20 (by default) with high impressions, ranked by clicks available.                    |
+| `find_cannibalization` | Queries where several of your pages compete for the same ranking.                                       |
+| `find_ctr_anomalies`   | Queries whose CTR is clearly below what their position predicts.                                        |
+| `find_content_decay`   | Pages whose clicks keep declining.                                                                      |
+| `geo_funnel`           | Per page: AI crawler requests, imported Bing AI citations, AI referral visits and clicks.               |
+| `ai_crawlers`          | AI crawler requests by crawler, operator, purpose, path, status or date.                                |
+| `search_crawlers`      | Search engine crawler requests (Googlebot, Bingbot, ...): Search Console's Crawl stats, kept.           |
+| `index_coverage`       | Indexed and not-indexed sitemap URLs by coverage state, rich result issues and recent changes.          |
+| `inspect_url`          | Live Google Search Console URL inspection.                                                              |
+| `list_sitemaps`        | Lists the sitemaps Search Console knows and their status.                                               |
+| `submit_sitemap`       | Submits a sitemap to GSC. **Only registered with `ENABLE_WRITES=true`**; needs GSC Full access.         |
+| `setup_status`         | Reports configuration, readiness and the last sync, so you (or an agent) can verify a deploy.           |
+| `list_apps`            | Lists configured apps, their connected stores, App Store report status and stored data.                 |
+| `app_performance`      | Store funnel, revenue and sessions per store and period; by date, territory, source or referrer.        |
+| `app_search_terms`     | Google Play search terms: visitors, acquisitions, conversion, change and low converters.                |
+| `app_reviews`          | Ratings over time, star distribution and reviews, filtered by stars, territory, version, text.          |
+| `app_stability`        | Crash and ANR rates and counts (Google Play), crash counts and all crashes (App Store), with why empty. |
+| `app_subscriptions`    | Subscriptions: Google Play new, canceled and active; App Store states, trials, renewals, churn.         |
+| `app_breakdown`        | Per app version, device or OS version: installs, ratings, sessions, crashes and ANRs.                   |
+| `app_changes`          | What changed on the store page and when: versions, names, keywords, texts, tracks, before/after.        |
+| `app_revenue`          | App Store revenue per product: USD estimate, or exact per currency with Sales and Trends; refunds.      |
 
-All tools are read-only except `submit_sitemap`. Common parameters: `site`, `start` and `end`
+| `app_framework_report` | An app's chosen App Store Framework Usage report (notifications, Focus, calls, ...), by any dimension. |
+| `app_ads` | Apple Ads search terms of your campaigns, with impression share and search popularity (optional). |
+| `reply_review` | Replies to an App Store or Google Play review, preview first. **Only with `ENABLE_WRITES=true`**. |
+
+All tools are read-only except `submit_sitemap` and `reply_review`. Common parameters: `site`, `start` and `end`
 (`YYYY-MM-DD`), `days` (default 28), `source` (`gsc` or `bing`, default `gsc`), `searchType` (`web`,
 `image`, `video`, `news`, `discover` or `googleNews`, default `web`), `brand` (`all`, `brand` or
 `non_brand`) and `limit` (at most 500). `query_performance` also groups by search `appearance`, and
