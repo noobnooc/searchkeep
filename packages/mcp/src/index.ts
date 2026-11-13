@@ -443,7 +443,7 @@ export function createSearchkeepMcpServer(deps: McpDeps): McpServer {
     {
       title: 'App store performance',
       description:
-        "An app's store funnel per store: impressions (App Store), page views (App Store product page views, Google Play store listing visitors), downloads (first-time downloads, store listing acquisitions), redownloads, installs, deletions, active devices and conversion rates, plus App Store revenue (purchases, proceeds and sales in USD, paying users, proceeds per download) and sessions (sessions, average length, sessions per device), compared with the previous period. groupBy adds rows by date, week, month, store, territory, source (search, browse, app_referrer, web_referrer, referral, ...) or referrer (websites, apps and UTM sources that sent people to the store page; ownSite marks the owner's own site), and App Store pages by page_type or page_title (custom product pages, in-app events). Institutional purchases (App Store licenses bought in bulk through Apple Business Manager or Apple School Manager) are left out of the totals and trends and listed only by source. Includes the App Store chart position when the opt-in public feeds are on.",
+        "An app's store funnel per store: impressions (App Store), page views (App Store product page views, Google Play store listing visitors), downloads (first-time downloads, store listing acquisitions), redownloads, installs, deletions, active devices and conversion rates, plus App Store revenue (purchases, proceeds and sales in USD, paying users, proceeds per download) and sessions (sessions, average length, sessions per device), compared with the previous period. groupBy adds rows by date, week, month, store, territory, source (search, browse, app_referrer, web_referrer, referral, ...) or referrer (websites, apps and UTM sources that sent people to the store page; ownSite marks the owner's own site), and App Store pages by page_type or page_title (custom product pages, in-app events). Institutional purchases (App Store licenses bought in bulk through Apple Business Manager or Apple School Manager) are left out of the totals, trends and rates unless includeVolumePurchases is true, and listed by source. anomalies lists days where a metric is at least 50 times the median of the 28 days before, with the territory and source behind most of it. Includes the App Store chart position when the opt-in public feeds are on.",
       inputSchema: {
         ...appCommon,
         store: appStore,
@@ -460,6 +460,10 @@ export function createSearchkeepMcpServer(deps: McpDeps): McpServer {
           .optional()
           .describe('Only this source: search, browse, app_referrer, web_referrer, referral, app_clip, notification, other.'),
         includeChanges: z.boolean().optional().describe('Attach the store changes of each day to the series (default true).'),
+        includeVolumePurchases: z
+          .boolean()
+          .optional()
+          .describe('Count institutional purchases (bulk licenses) in the totals, trend and rates. Default false.'),
         referrerKind: z.enum(['web', 'app', 'utm']).optional().describe('With groupBy referrer: only websites, apps or UTM sources.'),
       },
       annotations: READ_ONLY,

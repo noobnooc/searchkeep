@@ -415,6 +415,15 @@ function planAppStore(args: AppPlanArgs, app: AppConfig, asc: AscClient, place: 
           todo = all.filter((i) => !done.has(i.id));
         }
         const next: AscPending = { listedOn: today, instances: todo.map((i) => ({ id: i.id, processingDate: i.processingDate })) };
+        // A snapshot with no daily instance for this report: check once whether Apple made monthly ones,
+        // so the missing daily history can be explained instead of waited for.
+        if (kind === 'snapshot' && all.length === 0) {
+          if (pending?.monthly !== undefined) next.monthly = pending.monthly;
+          else if (budget.left() > 1) {
+            budget.spend('asc');
+            next.monthly = (await asc.listInstances(reportId, 'MONTHLY')).length;
+          }
+        }
         await store.setMeta(pendingKey, JSON.stringify(next));
         for (const inst of next.instances) enqueue(instanceUnit(kind, spec, task, inst));
         return 0;

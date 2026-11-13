@@ -26,6 +26,17 @@ Because users sync `main` at any time, the `Unreleased` section is always accura
 
 ### Added
 
+- Data quality checks. `app_performance` flags `anomalies`: days where downloads, impressions,
+  unique page views or installs are at least 50 times the median of the 28 days before (and at
+  least 100), with the territory and source behind most of it; volume purchases are included in
+  the check so a bulk license day is found. `includeVolumePurchases: true` counts institutional
+  purchases in the totals, trend, conversion rates and proceeds per download (they stay out by
+  default). For App Store history, `list_apps` shows per report where the daily reports start and
+  what the one-time snapshot delivered (`filled`, `reading`, `waiting`, or `monthly_only` when Apple
+  made only monthly instances, which Searchkeep does not split into days), and `app_performance`'s
+  notes say which numbers start late and why. A regression test covers a snapshot that arrives after
+  the daily reports and overlaps them: only earlier days are written, nothing is counted twice.
+
 - Analytics sharing rate. The App Store Opt-in report (first-time downloaders and how many share
   analytics with developers) is read from the same report requests. `app_performance` returns
   `analyticsSharing` (downloading users, users opting in, rate) for the App Store, and its notes

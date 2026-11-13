@@ -69,6 +69,8 @@ function fakeAsc(
     requests?: AscReportRequest[];
     salesForbidden?: boolean;
     listing?: AppListingValue[] | 'forbidden';
+    /** Installs reports: the snapshot's daily instance is not there yet, there, or there only as monthly instances. */
+    installs?: 'waiting' | 'ready' | 'monthly';
   } = {},
 ) {
   const calls: string[] = [];
@@ -85,6 +87,8 @@ function fakeAsc(
     subst: [{ id: 'subst-2026-10-19', processingDate: '2026-10-19' }],
     subev: [{ id: 'subev-2026-10-19', processingDate: '2026-10-19' }],
     'snap-eng': [{ id: 'snap-eng-1', processingDate: '2026-10-19' }],
+    inst: [{ id: 'inst-2026-10-19', processingDate: '2026-10-19' }],
+    ...(opts.installs === 'ready' ? { 'snap-inst': [{ id: 'snap-inst-1', processingDate: '2026-10-21' }] } : {}),
   };
   const rowsFor = (instanceId: string): DelimitedRow[] => {
     if (instanceId === 'snap-eng-1') {
@@ -92,6 +96,21 @@ function fakeAsc(
       const out: DelimitedRow[] = [];
       for (let d = '2026-09-01'; d <= '2026-10-17'; d = addDays(d, 1))
         out.push(eng(d, 'US', 'App Store search', 'Impression', 'No page', 999, 500));
+      return out;
+    }
+    const ins = (date: string, counts: number): DelimitedRow => ({
+      date,
+      event: 'Install',
+      'download type': 'First-time download',
+      'source type': 'App Store search',
+      territory: 'US',
+      counts: String(counts),
+    });
+    // Ongoing installs: Oct 17 and 18. History: every day from Oct 1 to Oct 18 (overlapping).
+    if (instanceId === 'inst-2026-10-19') return [ins('2026-10-17', 5), ins('2026-10-18', 6)];
+    if (instanceId === 'snap-inst-1') {
+      const out: DelimitedRow[] = [];
+      for (let d = '2026-10-01'; d <= '2026-10-18'; d = addDays(d, 1)) out.push(ins(d, 100));
       return out;
     }
     const [kind, ...rest] = instanceId.split('-');
@@ -313,9 +332,13 @@ function fakeAsc(
     },
     async listReports(requestId) {
       calls.push(`listReports:${requestId}`);
+      const installs = opts.installs
+        ? [{ id: requestId === 'snap' ? 'snap-inst' : 'inst', name: 'App Store Installation and Deletion Standard', category: 'APP_USAGE' }]
+        : [];
       return requestId === 'snap'
-        ? [{ id: 'snap-eng', name: 'App Store Discovery and Engagement Standard', category: 'APP_STORE_ENGAGEMENT' }]
+        ? [{ id: 'snap-eng', name: 'App Store Discovery and Engagement Standard', category: 'APP_STORE_ENGAGEMENT' }, ...installs]
         : [
+            ...installs,
             { id: 'eng', name: 'App Store Discovery and Engagement Standard', category: 'APP_STORE_ENGAGEMENT' },
             { id: 'dl', name: 'App Downloads Standard', category: 'APP_STORE_COMMERCE' },
             { id: 'crash', name: 'App Crashes', category: 'APP_USAGE' },
@@ -328,8 +351,13 @@ function fakeAsc(
             { id: 'subevd', name: 'App Store Subscription Event Detailed', category: 'APP_STORE_COMMERCE' },
           ];
     },
-    async listInstances(reportId) {
-      calls.push(`listInstances:${reportId}`);
+    async listInstances(reportId, granularity) {
+      calls.push(`listInstances:${reportId}${granularity === 'DAILY' ? '' : `:${granularity}`}`);
+      if (granularity === 'MONTHLY')
+        return reportId === 'snap-inst' && opts.installs === 'monthly'
+          ? [{ id: 'snap-inst-m1', granularity: 'MONTHLY', processingDate: '2026-10-21' }]
+          : [];
+      if (granularity !== 'DAILY') return [];
       return [...(instances[reportId] ?? [])].reverse().map((i) => ({ ...i, granularity: 'DAILY' }));
     },
     async listSegments(instanceId) {
@@ -1140,6 +1168,39 @@ export function appContract(name: string, makeStore: () => Promise<Store>): void
         expect(only.stores[0]!.volumePurchaseDownloads).toBeUndefined();
         // They do not make Germany one of the app's biggest storefronts.
         expect(await appStorefronts(store, APP, '2026-10-20')).toEqual(['us', 'fr', 'cn', 'jp', 'gb']);
+        // Counted only when asked for.
+        const all = await appPerformance(ctx, { ...p, includeVolumePurchases: true });
+        expect(all.stores[0]!.current.downloads).toBe(100012);
+        expect(all.notes.some((n) => n.startsWith('includeVolumePurchases'))).toBe(true);
+      });
+
+      it('flags days far above the 28 days before them, with the territory and source behind them', async () => {
+        const cfg = config({ APP_STORE_PUBLIC_DATA: 'false' });
+        const rows = [];
+        for (let d = '2026-08-20'; d <= '2026-10-18'; d = addDays(d, 1))
+          rows.push({ date: d, territory: 'US', source: 'search', pageViewsUnique: 40, downloads: 20 });
+        rows.push({ date: '2026-09-15', territory: 'DE', source: 'institutional', pageViewsUnique: 0, downloads: 100000 });
+        await store.writeAppStoreDaily(APP.id, 'apple', { metrics: ['pageViewsUnique', 'downloads'], shape: 'cross', dates: [], rows });
+        const ctx = { store, config: cfg, clients: {}, now: () => NOW };
+        const perf = await appPerformance(ctx, { app: APP.id, store: 'apple', start: '2026-07-21', end: '2026-10-18' });
+        // 90 days: the institutional spike neither inflates the totals nor the conversion rate...
+        expect(perf.stores[0]!.current).toMatchObject({ downloads: 60 * 20, pageConversion: 0.5 });
+        // ...and is flagged, with what was behind it.
+        expect(perf.anomalies).toEqual([
+          {
+            store: 'apple',
+            date: '2026-09-15',
+            metric: 'downloads',
+            value: 100020,
+            median28: 20,
+            ratio: 5001,
+            top: { territory: 'DE', source: 'institutional', value: 100000, share: 0.9998 },
+          },
+        ]);
+        expect(perf.notes.some((n) => n.startsWith('Anomalies: 1 day') && n.includes('institutional'))).toBe(true);
+        // A steady app has none.
+        const quiet = await appPerformance(ctx, { app: APP.id, store: 'apple', start: '2026-10-01', end: '2026-10-18' });
+        expect(quiet).not.toHaveProperty('anomalies');
       });
 
       it("checks the app's biggest storefronts first and only the charts it can be in", async () => {
@@ -1778,6 +1839,101 @@ export function appContract(name: string, makeStore: () => Promise<Store>): void
         // A range without opt-in data has no rate.
         const old = await appPerformance(ctx, { app: APP.id, store: 'apple', start: '2026-09-01', end: '2026-09-07' });
         expect(old.stores[0]).not.toHaveProperty('analyticsSharing');
+      });
+
+      it('fills installs history when the snapshot arrives after the daily reports, without counting a day twice', async () => {
+        const cfg = config({ APP_STORE_PUBLIC_DATA: 'false' });
+        const sync = (installs: 'waiting' | 'ready' | 'monthly', now: string) =>
+          runSync({
+            store,
+            config: cfg,
+            clients: { asc: fakeAsc({ installs }).client },
+            trigger: 'manual',
+            now: new Date(now),
+            pacing: {},
+          });
+        const installsOn = async () =>
+          (
+            await store.queryAppStore({
+              appId: APP.id,
+              store: 'apple',
+              range: { start: '2026-09-25', end: '2026-10-19' },
+              dimensions: ['date'],
+              orderBy: 'date',
+              order: 'asc',
+            })
+          )
+            .filter((r) => r.installs > 0)
+            .map((r) => [r.date, r.installs]);
+        const ctx = (now: string) => ({ store, config: cfg, clients: {}, now: () => new Date(now) });
+
+        // Day 1: the daily report starts on Oct 17; the snapshot's installs are not there yet.
+        await sync('waiting', '2026-10-20T04:00:00Z');
+        expect(await installsOn()).toEqual([
+          ['2026-10-17', 5],
+          ['2026-10-18', 6],
+        ]);
+        const apps = await listApps(ctx('2026-10-20T04:00:00Z'));
+        expect(apps.apps[0]!.appStoreReports!.history.find((h) => h.report === 'installs')).toMatchObject({
+          ongoingFrom: '2026-10-17',
+          snapshot: 'waiting',
+        });
+        const perf = await appPerformance(ctx('2026-10-20T04:00:00Z'), {
+          app: APP.id,
+          store: 'apple',
+          start: '2026-10-01',
+          end: '2026-10-18',
+        });
+        expect(
+          perf.notes.some((n) => n.includes('has not delivered daily history') && n.includes('installs and deletions from 2026-10-17')),
+        ).toBe(true);
+
+        // Day 2: the snapshot arrives, overlapping the daily report's days: only the days before are written.
+        await sync('ready', '2026-10-21T04:00:00Z');
+        const days = await installsOn();
+        expect(days).toHaveLength(18);
+        expect(days.slice(0, 2)).toEqual([
+          ['2026-10-01', 100],
+          ['2026-10-02', 100],
+        ]);
+        expect(days.slice(-2)).toEqual([
+          ['2026-10-17', 5],
+          ['2026-10-18', 6],
+        ]);
+        expect(
+          (await listApps(ctx('2026-10-21T04:00:00Z'))).apps[0]!.appStoreReports!.history.find((h) => h.report === 'installs'),
+        ).toMatchObject({ snapshot: 'filled' });
+        // Another day's sync: still not doubled.
+        await sync('ready', '2026-10-22T04:00:00Z');
+        expect((await installsOn()).slice(-2)).toEqual([
+          ['2026-10-17', 5],
+          ['2026-10-18', 6],
+        ]);
+      });
+
+      it("says so when Apple delivers a report's snapshot only as monthly instances", async () => {
+        const cfg = config({ APP_STORE_PUBLIC_DATA: 'false' });
+        const asc = fakeAsc({ installs: 'monthly' });
+        await runSync({ store, config: cfg, clients: { asc: asc.client }, trigger: 'manual', now: NOW, pacing: {} });
+        expect(asc.calls).toContain('listInstances:snap-inst:MONTHLY');
+        const again = fakeAsc({ installs: 'monthly' });
+        await runSync({
+          store,
+          config: cfg,
+          clients: { asc: again.client },
+          trigger: 'manual',
+          now: new Date('2026-10-21T04:00:00Z'),
+          pacing: {},
+        });
+        // Checked once.
+        expect(again.calls).not.toContain('listInstances:snap-inst:MONTHLY');
+        const ctx = { store, config: cfg, clients: {}, now: () => NOW };
+        expect((await listApps(ctx)).apps[0]!.appStoreReports!.history.find((h) => h.report === 'installs')).toMatchObject({
+          snapshot: 'monthly_only',
+          monthlyInstances: 1,
+        });
+        const perf = await appPerformance(ctx, { app: APP.id, store: 'apple', start: '2026-10-01', end: '2026-10-18' });
+        expect(perf.notes.some((n) => n.includes('only as monthly totals'))).toBe(true);
       });
 
       it('looks for report kinds added since the last listing right away', async () => {

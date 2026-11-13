@@ -709,6 +709,7 @@ app.get(
         source: x.get('source'),
         referrerKind: x.get('referrerKind') as AppReferrerKind | undefined,
         ...(x.get('includeChanges') === 'false' ? { includeChanges: false } : {}),
+        ...(x.get('includeVolumePurchases') === 'true' ? { includeVolumePurchases: true } : {}),
       }),
     );
   }),

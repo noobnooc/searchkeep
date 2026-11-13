@@ -7,7 +7,7 @@ import { addDays, assertRange, isIsoDate, previousPeriod, toIsoDate } from '../d
 import { safeMessage } from '../errors.js';
 import { SourceError } from '../http.js';
 import type { AscClient, AscReportRequest } from '../sources.js';
-import { parseJson, syncKeys, type AscRequestState } from '../sync/state.js';
+import { parseJson, syncKeys, type AscPending, type AscRequestState } from '../sync/state.js';
 import {
   ALL_KEY,
   APP_BREAKDOWN_DIMENSIONS,
@@ -148,6 +148,84 @@ export interface AppPerformanceParams extends AppParams {
   referrerKind?: AppReferrerKind;
   /** Attach the store changes of each day to the series (default true). */
   includeChanges?: boolean;
+  /** Count institutional (volume) purchases in the totals, trend, conversion rates and proceeds per download (default false). */
+  includeVolumePurchases?: boolean;
+}
+
+/** A day at least this many times the median of the 28 days before it is flagged. */
+export const ANOMALY_FACTOR = 50;
+/** ...and only when it has at least this many (a few downloads on a quiet day are not an anomaly). */
+const ANOMALY_MIN = 100;
+const ANOMALY_METRICS = ['downloads', 'impressions', 'pageViewsUnique', 'installs'] as const;
+
+function median(xs: number[]): number {
+  if (xs.length === 0) return 0;
+  const s = [...xs].sort((a, b) => a - b);
+  const m = Math.floor(s.length / 2);
+  return s.length % 2 ? s[m]! : (s[m - 1]! + s[m]!) / 2;
+}
+
+/**
+ * Days in the range where a metric is at least 50 times the median of the 28 days before it (with
+ * the volume purchases included, so they are found), with the territory and source behind most of it.
+ */
+async function findAnomalies(
+  ctx: OpsContext,
+  appId: string,
+  store: AppStore,
+  range: DateRange,
+  filters: { territory?: string; source?: string },
+) {
+  const days = await ctx.store.queryAppStore({
+    appId,
+    store,
+    range: { start: addDays(range.start, -28), end: range.end },
+    dimensions: ['date'],
+    ...filters,
+    orderBy: 'date',
+    order: 'asc',
+    limit: 4000,
+  });
+  const byDate = new Map(days.map((d) => [d.date!, d]));
+  const out: Array<{
+    store: AppStore;
+    date: IsoDate;
+    metric: (typeof ANOMALY_METRICS)[number];
+    value: number;
+    median28: number;
+    ratio: number | null;
+    top?: { territory: string; source: string; value: number; share: number };
+  }> = [];
+  for (let d = range.start; d <= range.end; d = addDays(d, 1)) {
+    const today = byDate.get(d);
+    if (!today) continue;
+    for (const metric of ANOMALY_METRICS) {
+      const value = today[metric];
+      if (value < ANOMALY_MIN) continue;
+      const window: number[] = [];
+      for (let i = 1; i <= 28; i++) window.push(byDate.get(addDays(d, -i))?.[metric] ?? 0);
+      const m = median(window);
+      if (value < ANOMALY_FACTOR * Math.max(m, 1)) continue;
+      out.push({ store, date: d, metric, value, median28: m, ratio: m > 0 ? round(value / m, 1) : null });
+    }
+  }
+  // What was behind each flagged day: the territory and source with the most of it.
+  for (const a of out) {
+    const parts = await ctx.store.queryAppStore({
+      appId,
+      store,
+      range: { start: a.date, end: a.date },
+      dimensions: ['territory', 'source'],
+      ...filters,
+      orderBy: a.metric,
+      order: 'desc',
+      limit: 1,
+    });
+    const top = parts[0];
+    if (top && top[a.metric] > 0)
+      a.top = { territory: top.territory!, source: top.source!, value: top[a.metric], share: round(top[a.metric] / a.value, 4) };
+  }
+  return out;
 }
 
 /**
@@ -163,8 +241,8 @@ export async function appPerformance(ctx: OpsContext, p: AppPerformanceParams) {
     ...(p.territory ? { territory: p.territory.trim().toUpperCase() } : {}),
     ...(p.source ? { source: p.source.trim().toLowerCase() } : {}),
   };
-  // Licenses bought in bulk are not people finding the app: left out unless a source is asked for.
-  const hidden = p.source ? [] : VOLUME_PURCHASE_SOURCES;
+  // Licenses bought in bulk are not people finding the app: left out unless asked for (by source or the switch).
+  const hidden = p.source || p.includeVolumePurchases ? [] : VOLUME_PURCHASE_SOURCES;
   const exclude = hidden.length ? { excludeSources: hidden } : {};
   const changes =
     p.includeChanges === false
@@ -280,6 +358,8 @@ export async function appPerformance(ctx: OpsContext, p: AppPerformanceParams) {
         }))
       : undefined;
   const charts = r.store !== 'play' && r.app.appleId ? await latestCharts(ctx, r.app, r.range) : [];
+  const anomalies = (await Promise.all(stores.map((s) => findAnomalies(ctx, r.app.id, s, r.range, filters)))).flat();
+  const history = r.store !== 'play' && r.app.appleId ? await appStoreHistory(ctx, r.app) : [];
   const notes = [...r.notes, ...stores.map((s) => STORE_NOTES[s])];
   for (const s of perStore)
     if (s.volumePurchaseDownloads)
@@ -288,6 +368,20 @@ export async function appPerformance(ctx: OpsContext, p: AppPerformanceParams) {
       );
   if (p.source && stores.includes('play') && p.territory)
     notes.push('Google Play reports sources and territories separately, so it has no rows for a territory and a source together.');
+  if (anomalies.length) {
+    const left = anomalies.filter((a) => a.top && hidden.includes(a.top.source as AppSourceType));
+    notes.push(
+      `Anomalies: ${anomalies.length} day(s) where a metric is at least ${ANOMALY_FACTOR}× the median of the 28 days before it (see anomalies, with the territory and source behind most of it). Such spikes are rarely people finding the app (bulk licenses, bots, a feature); check them before reading trends or rates.${left.length ? ` ${left.length} of them come mostly from institutional purchases, which are already left out of the totals and rates.` : ''}`,
+    );
+  }
+  if (p.includeVolumePurchases)
+    notes.push(
+      'includeVolumePurchases: institutional purchases are counted in the totals, trend, conversion rates and proceeds per download.',
+    );
+  const appleHistory = r.app.appleId
+    ? parseJson<AscRequestState>(await ctx.store.getMeta(syncKeys.ascRequests(r.app.id)))?.snapshotRequestedOn
+    : undefined;
+  notes.push(...historyNotes(history, appleHistory));
   for (const s of perStore)
     if (s.analyticsSharing?.rate)
       notes.push(
@@ -316,6 +410,7 @@ export async function appPerformance(ctx: OpsContext, p: AppPerformanceParams) {
     ...(rows.length || groupBy.length ? { rows } : {}),
     ...(referrers ? { referrers } : {}),
     ...(pages ? { pages } : {}),
+    ...(anomalies.length ? { anomalies } : {}),
     ...(charts.length ? { charts } : {}),
     notes,
   };
@@ -1138,6 +1233,76 @@ export async function appChanges(ctx: OpsContext, p: AppChangesParams) {
   };
 }
 
+/** App Store report kinds whose history the one-time snapshot fills, with what arrived so far. */
+const HISTORY_REPORTS: Array<[string, string]> = [
+  ['engagement', 'impressions and page views'],
+  ['downloads', 'downloads'],
+  ['installs', 'installs and deletions'],
+  ['purchases', 'purchases'],
+  ['sessions', 'sessions'],
+  ['subscription_state', 'subscription states'],
+  ['subscription_event', 'subscription events'],
+];
+
+/**
+ * Where each App Store report's history stands: the first day the ongoing report wrote, and what the
+ * one-time snapshot delivered (daily instances read, waiting, or only monthly ones).
+ */
+export async function appStoreHistory(ctx: OpsContext, app: AppConfig) {
+  const st = parseJson<AscRequestState>(await ctx.store.getMeta(syncKeys.ascRequests(app.id)));
+  if (!app.appleId || !st?.ongoing) return [];
+  return Promise.all(
+    HISTORY_REPORTS.map(async ([key, what]) => {
+      const [from, read, pending] = await Promise.all([
+        ctx.store.getMeta(syncKeys.ascFrom(app.id, key)),
+        ctx.store.getMeta(syncKeys.ascSnapshot(app.id, key)),
+        ctx.store.getMeta(syncKeys.ascPending(app.id, 'snapshot', key)),
+      ]);
+      const p = parseJson<AscPending>(pending);
+      const snapshotRead = parseJson<string[]>(read)?.length ?? 0;
+      const status = !st.snapshot
+        ? 'no_snapshot'
+        : snapshotRead > 0
+          ? p?.instances.length
+            ? 'reading'
+            : 'filled'
+          : p?.instances.length
+            ? 'reading'
+            : p?.monthly
+              ? 'monthly_only'
+              : 'waiting';
+      return {
+        report: key,
+        counts: what,
+        ongoingFrom: from,
+        snapshot: status as 'no_snapshot' | 'reading' | 'filled' | 'monthly_only' | 'waiting',
+        ...(p?.monthly ? { monthlyInstances: p.monthly } : {}),
+      };
+    }),
+  );
+}
+
+/** One sentence per report whose history is not filled, for notes. */
+function historyNotes(history: Awaited<ReturnType<typeof appStoreHistory>>, requestedOn: string | undefined): string[] {
+  const waiting = history.filter((h) => h.snapshot === 'waiting').map((h) => h.counts);
+  const monthly = history.filter((h) => h.snapshot === 'monthly_only').map((h) => h.counts);
+  const out: string[] = [];
+  const since = (keys: string[]) =>
+    history
+      .filter((h) => keys.includes(h.counts) && h.ongoingFrom)
+      .map((h) => `${h.counts} from ${h.ongoingFrom}`)
+      .join(', ');
+  if (waiting.length)
+    out.push(
+      `App Store history: the one-time snapshot${requestedOn ? ` (requested ${requestedOn})` : ''} has not delivered daily history for ${waiting.join(', ')} yet, so they start where the daily reports start (${since(waiting) || 'no day yet'}). Apple can take days to deliver a snapshot; the sync checks every day and fills only the days before those, so nothing is counted twice.`,
+    );
+  if (monthly.length)
+    out.push(
+      `App Store history: Apple delivered the snapshot of ${monthly.join(', ')} only as monthly totals, which Searchkeep does not split into days; those numbers start where the daily reports start (${since(monthly) || 'no day yet'}).`,
+    );
+  return out;
+}
+
 /** Configured apps, which stores are connected, App Store report status and stored data. */
 export async function listApps(ctx: OpsContext) {
   const coverage = await ctx.store.appCoverage();
@@ -1161,6 +1326,7 @@ export async function listApps(ctx: OpsContext) {
                 snapshot: Boolean(st?.snapshot),
                 ...(st?.snapshotRequestedOn ? { snapshotRequestedOn: st.snapshotRequestedOn } : {}),
                 ...(st?.problem ? { problem: st.problem } : {}),
+                history: await appStoreHistory(ctx, app),
               },
             }
           : {}),

@@ -242,6 +242,11 @@ export type AscRequestKind = 'ongoing' | 'snapshot';
 export interface AscPending {
   listedOn: IsoDate;
   instances: Array<{ id: string; processingDate: IsoDate }>;
+  /**
+   * Snapshot only: monthly instances Apple made for a report that has no daily ones (checked once).
+   * Searchkeep keeps days, so monthly-only history is reported, not stored.
+   */
+  monthly?: number;
 }
 
 export interface AscReportIds {
