@@ -37,6 +37,7 @@ Everything in this repository is in English: code, comments, docs, issues, PRs a
 | `packages/sources/app-store-connect/` | `@searchkeep/source-app-store-connect` | App Store Connect adapter (analytics reports, reviews)         |
 | `packages/sources/google-play/`       | `@searchkeep/source-google-play`       | Google Play adapter (Console bulk reports, Reporting API)      |
 | `packages/sources/app-store-public/`  | `@searchkeep/source-app-store-public`  | Opt-in plugin: Apple's public App Store feeds                  |
+| `packages/sources/apple-ads/`         | `@searchkeep/source-apple-ads`         | Optional: Apple Ads Platform API (search terms, read-only)     |
 | `docs/`                               |                                        | Charter, ADRs, roadmap, deploy runbook, maintainer guide       |
 | `.github/`                            |                                        | CI, issue and PR templates, labels, CODEOWNERS                 |
 

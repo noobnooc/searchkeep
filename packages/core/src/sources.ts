@@ -328,6 +328,49 @@ export interface AppStoreLookup {
 export type AppStoreChart = 'top-free' | 'top-paid' | 'top-grossing';
 
 /** Apple's official public App Store feeds (opt-in plugin, APP_STORE_PUBLIC_DATA). */
+/** An Apple Ads search term of the user's own campaign, per day (Apple Ads Platform API). */
+export interface AppleAdsSearchTermRow {
+  date: IsoDate;
+  campaignId: string;
+  /** The user's query; Apple leaves out terms with few impressions. */
+  term: string;
+  /** The keyword that matched it, or empty (Search Match). */
+  keyword: string;
+  impressions: number;
+  taps: number;
+  installs: number;
+  newDownloads: number;
+  /** Spend in cents of `currency` (the ad account's reporting currency). */
+  spendCents: number;
+  currency: string;
+}
+
+/** The app's impression share for a search term in a storefront, per day, with Apple's popularity score. */
+export interface AppleAdsImpressionShareRow {
+  date: IsoDate;
+  territory: string;
+  term: string;
+  /** 0-1; Apple gives a 10% bucket (above 90%: 0.91-1.0). */
+  lowShare: number | null;
+  highShare: number | null;
+  /** 1 = the app had the highest share for this term and storefront. */
+  rank: number | null;
+  /** 1-5, 5 = most searched. */
+  popularity: number | null;
+}
+
+/** Apple Ads Platform API, read-only. */
+export interface AppleAdsClient {
+  /** The ad accounts the credentials can see, with the user's roles on each. */
+  accounts(): Promise<Array<{ id: string; name: string; roles: string[] }>>;
+  /** App Store campaigns of an ad account that promote this app. */
+  campaigns(accountId: string, appleId: string): Promise<Array<{ id: string; name: string }>>;
+  /** Search terms of one campaign per day (at most 90 days per call). */
+  searchTerms(accountId: string, campaignId: string, range: DateRange): Promise<AppleAdsSearchTermRow[]>;
+  /** The app's impression share per day, storefront and search term (at most 30 days per call). */
+  impressionShare(accountId: string, appleId: string, range: DateRange): Promise<AppleAdsImpressionShareRow[]>;
+}
+
 export interface AppStorePublicClient {
   lookup(appleId: string, country: string): Promise<AppStoreLookup | null>;
   /** Apple IDs of a top chart in rank order (at most 100), optionally for one genre. */
@@ -347,4 +390,6 @@ export interface SourceClients {
   play?: PlayClient;
   /** Apple's public App Store feeds, only when APP_STORE_PUBLIC_DATA is true. */
   appStore?: AppStorePublicClient;
+  /** Apple Ads Platform API, only when its credentials are set. */
+  appleAds?: AppleAdsClient;
 }

@@ -378,6 +378,24 @@ export const TOOLS: Tool[] = [
     example: 'How often do people tap our notifications in the notification summary?',
   },
   {
+    name: 'app_ads',
+    summary: 'Apple Ads search terms of your own campaigns, with impression share and search popularity.',
+    description:
+      'Search terms people typed when your Apple Ads showed (impressions, taps, installs, spend, tap-through and install rates, cost per install), with your app’s impression share, rank and Apple’s 1-5 search popularity per term and storefront, from the Apple Ads Platform API with a read-only API user. Without the APPLE_ADS_* secrets it answers “not configured” with the steps. Organic keyword rankings are not available from any official API.',
+    readOnly: true,
+    params: [
+      app,
+      start,
+      { name: 'end', type: 'YYYY-MM-DD', description: 'Defaults to yesterday.' },
+      days(28),
+      { name: 'termContains', type: 'string', description: 'Only terms containing this text.' },
+      { name: 'territory', type: 'string', description: 'Impression share of this storefront only, e.g. `US`.' },
+      { name: 'sortBy', type: '"impressions" | "installs" | "spend" | "popularity"', description: 'Defaults to `impressions`.' },
+      limit(50),
+    ],
+    example: 'Which paid search terms bring installs cheapest, and where is our impression share low?',
+  },
+  {
     name: 'reply_review',
     summary: 'Replies to an App Store or Google Play review, after a preview. Off by default.',
     description:
@@ -732,6 +750,12 @@ const APP_SECRETS: Secret[] = [
   },
   { name: 'ASC_ISSUER_ID', required: 'for apps', description: 'The Issuer ID shown above the App Store Connect API keys.' },
   { name: 'ASC_PRIVATE_KEY', required: 'for apps', description: 'Contents of the key’s `AuthKey_<KEY ID>.p8` file.' },
+  {
+    name: 'APPLE_ADS_CLIENT_ID',
+    required: 'optional',
+    description:
+      'With APPLE_ADS_TEAM_ID, APPLE_ADS_KEY_ID and APPLE_ADS_PRIVATE_KEY: credentials of an Apple Ads API user with the API Account Read Only role, for app_ads. APPLE_ADS_ACCOUNT_ID limits it to one ad account.',
+  },
   {
     name: 'PLAY_REVIEWS_API',
     required: 'optional',

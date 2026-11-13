@@ -57,6 +57,15 @@ export interface SearchkeepConfig {
   };
   /** Opt-in plugin: Apple's public App Store feeds (own app's rating and chart position only). */
   appStorePublic: boolean;
+  /** Apple Ads Platform API credentials (optional): an API user with the API Account Read Only role. */
+  appleAds: {
+    clientId: string | null;
+    teamId: string | null;
+    keyId: string | null;
+    privateKey: string | null;
+    /** Only this ad account (APPLE_ADS_ACCOUNT_ID); default every account the credentials see. */
+    accountId: string | null;
+  };
   brandRegex: string | null;
   enableWrites: boolean;
   sync: {
@@ -323,6 +332,13 @@ export function loadConfig(env: RawEnv): SearchkeepConfig {
       reviewsApi: str(env, 'PLAY_REVIEWS_API')?.toLowerCase() === 'true',
     },
     appStorePublic: str(env, 'APP_STORE_PUBLIC_DATA')?.toLowerCase() === 'true',
+    appleAds: {
+      clientId: str(env, 'APPLE_ADS_CLIENT_ID'),
+      teamId: str(env, 'APPLE_ADS_TEAM_ID'),
+      keyId: str(env, 'APPLE_ADS_KEY_ID'),
+      privateKey: normalizePem(str(env, 'APPLE_ADS_PRIVATE_KEY')),
+      accountId: str(env, 'APPLE_ADS_ACCOUNT_ID'),
+    },
     brandRegex: brandRegex && compileBrandRegex(brandRegex) ? brandRegex : null,
     enableWrites: str(env, 'ENABLE_WRITES')?.toLowerCase() === 'true',
     sync: {

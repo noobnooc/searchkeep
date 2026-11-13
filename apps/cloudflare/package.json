@@ -19,6 +19,7 @@
     "@searchkeep/mcp": "workspace:*",
     "@searchkeep/source-app-store-connect": "workspace:*",
     "@searchkeep/source-app-store-public": "workspace:*",
+    "@searchkeep/source-apple-ads": "workspace:*",
     "@searchkeep/source-bing": "workspace:*",
     "@searchkeep/source-cloudflare": "workspace:*",
     "@searchkeep/source-google-play": "workspace:*",

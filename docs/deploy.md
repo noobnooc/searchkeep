@@ -117,6 +117,11 @@ are never shown, which is expected.
 | `PLAY_REVIEWS_API`        | optional | 14a         | `true` to read Google Play reviews of the last week every 4 hours (needs "Reply to reviews")                           |
 | `ASC_REPLY_KEY_ID`        | optional | 14a         | Key ID of a second App Store Connect key with the **Customer Support** role, only for `reply_review`                   |
 | `ASC_REPLY_PRIVATE_KEY`   | optional | 14a         | That key's `.p8` file contents                                                                                         |
+| `APPLE_ADS_CLIENT_ID`     | optional | 14a         | Apple Ads API user's `clientId` (Account Settings → API in ads.apple.com)                                              |
+| `APPLE_ADS_TEAM_ID`       | optional | 14a         | Its `teamId`                                                                                                           |
+| `APPLE_ADS_KEY_ID`        | optional | 14a         | Its `keyId`                                                                                                            |
+| `APPLE_ADS_PRIVATE_KEY`   | optional | 14a         | The `private-key.pem` whose public key was uploaded                                                                    |
+| `APPLE_ADS_ACCOUNT_ID`    | optional | 14a         | Read only this ad account; default every account the API user sees                                                     |
 | `APP_STORE_PUBLIC_DATA`   | optional | 14a         | `true` to turn on the opt-in plugin that reads Apple's public App Store feeds (your app's rating and chart position)   |
 
 `CLOUDFLARE_ACCOUNT_ID` and `CLOUDFLARE_API_TOKEN` are required even if you use no Cloudflare data:
@@ -799,6 +804,18 @@ one of your sites (referrals from it are marked as your own).
    framework reports**, list report names from Apple's Analytics Reports catalog (for example
    `Notification Summary Engagement, App Added to Focus`), or set `frameworkReports` in `APPS`.
    They come with the report requests already started; read them with `app_framework_report`.
+
+   Apple Ads (optional, `app_ads`): **[Human]** in ads.apple.com → **Account Settings** → **User
+   Management**, invite an API user with the **API Account Read Only** role. Signed in as that user,
+   create a key pair (`openssl ecparam -genkey -name prime256v1 -noout -out private-key.pem`, then
+   `openssl ec -in private-key.pem -pubout -out public-key.pem`), paste the public key under
+   **Account Settings** → **API** and save. Set `APPLE_ADS_CLIENT_ID`, `APPLE_ADS_TEAM_ID` and
+   `APPLE_ADS_KEY_ID` from the credentials shown there, and `APPLE_ADS_PRIVATE_KEY` to the contents of
+   `private-key.pem`. Once a day the sync reads the search terms of the campaigns that promote each
+   app (90 days the first time) and the app's impression share and search popularity per term and
+   storefront (30 days the first time), through the Apple Ads Platform API. **Verify:**
+   `setup_status` → `config.apple_ads` and `probe.apple_ads` are `ok` (a warning if the role could
+   change campaigns).
 
 3. **Start App Store reports, once per app.** **[Human]** Apple generates analytics reports only
    after a request made with an **Admin** key, and Searchkeep never stores one. Generate a second,

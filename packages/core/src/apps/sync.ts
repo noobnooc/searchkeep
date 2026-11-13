@@ -27,6 +27,7 @@ import {
   type PlayListing,
   type ReviewCursor,
   type AscSalesState,
+  type AppleAdsState,
 } from '../sync/state.js';
 import type { Budget, Unit } from '../sync/unit.js';
 import {
@@ -93,6 +94,7 @@ export function planAppUnits(args: AppPlanArgs): { daily: Unit[][]; history: Uni
     if (ctx.clients.appStore && app.appleId) planPublic(args, app, list);
     if (ctx.clients.asc?.listingSnapshot && app.appleId) planListing(args, app, 'apple', list);
     if (ctx.clients.play?.listingSnapshot && app.playPackage && ctx.config.play.metadata) planListing(args, app, 'play', list);
+    if (ctx.clients.appleAds && app.appleId) planAppleAds(args, app, list);
   }
   const salesOwner = ctx.config.apps.find((a) => a.appleId);
   if (ctx.clients.asc?.salesReport && ctx.config.asc.vendorNumber && salesOwner) {
@@ -148,6 +150,80 @@ function planListing(args: AppPlanArgs, app: AppConfig, storeId: 'apple' | 'play
       return changes;
     },
     skip: () => ctx.store.setMeta(key, JSON.stringify({ day: today })),
+  });
+}
+
+// ------------------------------------------------------------------ Apple Ads
+
+/** Search terms of the first sync (Apple allows at most 90 days per daily report). */
+export const APPLE_ADS_TERMS_DAYS = 90;
+/** Impression share of the first sync (at most 30 days per daily query). */
+export const APPLE_ADS_SHARE_DAYS = 30;
+/** Apple Ads attributes installs up to a few days late: the last days are read again. */
+const APPLE_ADS_REREAD_DAYS = 3;
+
+/**
+ * Once a day: the app's App Store campaigns in each ad account the credentials see (or only
+ * APPLE_ADS_ACCOUNT_ID), their search terms per day, and the app's impression share per search
+ * term and storefront with Apple's popularity. Read-only; refused credentials are noted.
+ */
+function planAppleAds(args: AppPlanArgs, app: AppConfig, list: Unit[]): void {
+  const { ctx, today, get, budget } = args;
+  const ads = ctx.clients.appleAds!;
+  const key = syncKeys.appleAds(app.id);
+  const st = parseJson<AppleAdsState>(get(key)) ?? {};
+  if (st.checkedOn === today) return;
+  const yesterday = addDays(today, -1);
+  list.push({
+    task: 'ads.daily',
+    siteId: appTaskId(app.id),
+    source: 'appleads',
+    backfill: false,
+    calls: 3,
+    key: `ads.daily:${app.id}:${today}`,
+    run: async () => {
+      let n = 0;
+      const spend = () => {
+        if (n++ >= 3) budget.spend('appleads');
+      };
+      let written = 0;
+      try {
+        spend();
+        const accounts = (await ads.accounts()).filter((a) => !ctx.config.appleAds.accountId || a.id === ctx.config.appleAds.accountId);
+        const from = (through: IsoDate | undefined, days: number) => {
+          const first = addDays(yesterday, -(days - 1));
+          return through && addDays(through, -APPLE_ADS_REREAD_DAYS) > first ? addDays(through, -APPLE_ADS_REREAD_DAYS) : first;
+        };
+        const terms = { start: from(st.termsThrough, APPLE_ADS_TERMS_DAYS), end: yesterday };
+        const share = { start: from(st.shareThrough, APPLE_ADS_SHARE_DAYS), end: yesterday };
+        const days = (r: { start: IsoDate; end: IsoDate }) => {
+          const out: IsoDate[] = [];
+          for (let d = r.start; d <= r.end; d = addDays(d, 1)) out.push(d);
+          return out;
+        };
+        const shareRows: Awaited<ReturnType<typeof ads.impressionShare>> = [];
+        for (const account of accounts) {
+          spend();
+          for (const c of await ads.campaigns(account.id, app.appleId!)) {
+            spend();
+            written += await ctx.store.writeAppAdsTerms(app.id, c.id, days(terms), await ads.searchTerms(account.id, c.id, terms));
+          }
+          spend();
+          shareRows.push(...(await ads.impressionShare(account.id, app.appleId!, share)));
+        }
+        written += await ctx.store.writeAppAdsShare(app.id, days(share), shareRows);
+      } catch (err) {
+        if (!(err instanceof SourceError) || (err.status !== 401 && err.status !== 403)) throw err;
+        await ctx.store.setMeta(key, JSON.stringify({ ...st, checkedOn: today, problem: safeMessage(err) } satisfies AppleAdsState));
+        return null;
+      }
+      await ctx.store.setMeta(
+        key,
+        JSON.stringify({ checkedOn: today, termsThrough: yesterday, shareThrough: yesterday } satisfies AppleAdsState),
+      );
+      return written;
+    },
+    skip: () => ctx.store.setMeta(key, JSON.stringify({ ...st, checkedOn: today })),
   });
 }
 

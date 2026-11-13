@@ -13,6 +13,7 @@ import {
   appRevenue,
   appChanges,
   appFrameworkReport,
+  appAds,
   replyReview,
   listApps,
   startAppStoreReports,
@@ -39,7 +40,7 @@ import { addDays, daysBetween } from '../dates.js';
 import type { DelimitedRow } from '../delimited.js';
 import type { AppListingValue } from '../types.js';
 import { SourceError } from '../http.js';
-import type { AscClient, AscReportRequest, PlayClient, AppStorePublicClient, SourceClients } from '../sources.js';
+import type { AppleAdsClient, AscClient, AscReportRequest, PlayClient, AppStorePublicClient, SourceClients } from '../sources.js';
 import type { Store } from '../store.js';
 import { syncProgress } from '../sync/progress.js';
 import { runSync } from '../sync/run-sync.js';
@@ -2160,6 +2161,120 @@ export function appContract(name: string, makeStore: () => Promise<Store>): void
         // Dashboard-managed apps keep the choice.
         await store.saveAppConfig({ id: 'other', name: 'Other', appleId: '7654321', frameworkReports: ['App Added to Focus'] });
         expect((await store.listAppConfigs()).find((a) => a.id === 'other')!.frameworkReports).toEqual(['App Added to Focus']);
+      });
+
+      it('reads Apple Ads search terms and impression share, and says so plainly when Apple Ads is not set up', async () => {
+        const plain = config({ APP_STORE_PUBLIC_DATA: 'false' });
+        const off = await appAds({ store, config: plain, clients: {}, now: () => NOW }, { app: APP.id });
+        expect(off).toMatchObject({ configured: false });
+        expect(off.notes[0]).toContain('API Account Read Only');
+        const terms = await appSearchTerms({ store, config: plain, clients: {}, now: () => NOW }, { app: APP.id });
+        expect(terms.notes.some((n) => n.includes('Apple Ads is not configured'))).toBe(true);
+
+        const cfg = config({
+          APP_STORE_PUBLIC_DATA: 'false',
+          APPLE_ADS_CLIENT_ID: 'SEARCHADS.c',
+          APPLE_ADS_TEAM_ID: 'SEARCHADS.t',
+          APPLE_ADS_KEY_ID: 'k',
+          APPLE_ADS_PRIVATE_KEY: 'pk',
+        });
+        const calls: string[] = [];
+        let roles = ['API Account Read Only'];
+        const ads: AppleAdsClient = {
+          async accounts() {
+            calls.push('accounts');
+            return [{ id: '123', name: 'Acme Ads', roles }];
+          },
+          async campaigns(account, appleId) {
+            calls.push(`campaigns:${account}:${appleId}`);
+            return [{ id: '555', name: 'US Search' }];
+          },
+          async searchTerms(_a, campaignId, range) {
+            calls.push(`terms:${campaignId}:${range.start}..${range.end}`);
+            const row = (date: string, term: string, impressions: number, taps: number, installs: number, spendCents: number) => ({
+              date,
+              campaignId,
+              term,
+              keyword: term === 'alarm app' ? 'alarm' : '',
+              impressions,
+              taps,
+              installs,
+              newDownloads: installs,
+              spendCents,
+              currency: 'USD',
+            });
+            return [
+              row('2026-10-18', 'alarm app', 200, 20, 5, 2500),
+              row('2026-10-19', 'alarm app', 100, 10, 5, 1500),
+              row('2026-10-19', 'bell', 50, 1, 0, 100),
+            ];
+          },
+          async impressionShare(_a, _id, range) {
+            calls.push(`share:${range.start}..${range.end}`);
+            return [
+              { date: '2026-10-18', territory: 'US', term: 'alarm app', lowShare: 0.1, highShare: 0.2, rank: 4, popularity: 4 },
+              { date: '2026-10-19', territory: 'US', term: 'alarm app', lowShare: 0.3, highShare: 0.4, rank: 2, popularity: 4 },
+              { date: '2026-10-19', territory: 'US', term: 'wake up', lowShare: 0.1, highShare: 0.2, rank: 7, popularity: 5 },
+            ];
+          },
+        };
+        await runSync({ store, config: cfg, clients: { appleAds: ads }, trigger: 'manual', now: NOW, pacing: {} });
+        // First sync: 90 days of search terms, 30 days of impression share, ending yesterday.
+        expect(calls).toContain('terms:555:2026-07-22..2026-10-19');
+        expect(calls).toContain('share:2026-09-20..2026-10-19');
+        const ctx = { store, config: cfg, clients: { appleAds: ads }, now: () => NOW };
+        const res = await appAds(ctx, { app: APP.id, start: '2026-10-13', end: '2026-10-19' });
+        if (!res.configured) throw new Error('expected configured');
+        expect(res.currencies).toEqual([{ currency: 'USD', impressions: 350, taps: 31, installs: 10, spend: 41, costPerInstall: 4.1 }]);
+        expect(res.terms[0]).toMatchObject({
+          term: 'alarm app',
+          keywords: ['alarm'],
+          impressions: 300,
+          taps: 30,
+          installs: 10,
+          spend: 40,
+          tapThroughRate: 0.1,
+          installRate: 0.3333,
+          costPerInstall: 4,
+          // The newest impression share of the term in the range.
+          share: [{ territory: 'US', date: '2026-10-19', impressionShare: { low: 0.3, high: 0.4 }, rank: 2, popularity: 4 }],
+        });
+        expect(res.shareOnly).toEqual([expect.objectContaining({ term: 'wake up', popularity: 5 })]);
+        const byPopularity = await appAds(ctx, { app: APP.id, start: '2026-10-13', end: '2026-10-19', sortBy: 'popularity' });
+        expect(byPopularity.configured && byPopularity.terms[0]!.term).toBe('alarm app');
+        // Next day: only the last days again (late attribution).
+        calls.length = 0;
+        await runSync({
+          store,
+          config: cfg,
+          clients: { appleAds: ads },
+          trigger: 'manual',
+          now: new Date('2026-10-21T04:00:00Z'),
+          pacing: {},
+        });
+        expect(calls).toContain('terms:555:2026-10-16..2026-10-20');
+        // Re-reading a day does not double it.
+        const again = await appAds(ctx, { app: APP.id, start: '2026-10-13', end: '2026-10-19' });
+        if (!again.configured) throw new Error('expected configured');
+        expect(again.currencies[0]!.impressions).toBe(350);
+        // setup_status: read-only role ok; a role that can change campaigns is a warning.
+        const readiness = evaluateReadiness({
+          configured: true,
+          identityOk: true,
+          inspection: { appFound: true, managedOAuthEnabled: true, broadPolicyReasons: [] },
+        });
+        const probe = async () =>
+          (await setupStatus({ store, config: cfg, clients: { appleAds: ads }, now: () => NOW }, { readiness })).checks.find(
+            (c) => c.id === 'probe.apple_ads',
+          );
+        expect(await probe()).toMatchObject({ status: 'ok' });
+        roles = ['API Account Manager'];
+        expect(await probe()).toMatchObject({ status: 'warn', detail: expect.stringContaining('API Account Read Only') });
+        expect(
+          (await setupStatus({ store, config: plain, clients: {}, now: () => NOW }, { readiness })).checks.find(
+            (c) => c.id === 'config.apple_ads',
+          ),
+        ).toMatchObject({ status: 'skipped' });
       });
 
       it('looks for report kinds added since the last listing right away', async () => {

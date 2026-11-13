@@ -61,6 +61,10 @@ import {
   type WebAnalyticsInput,
   type WebVitalsInput,
   type AppSubscriptionInput,
+  type AppAdsShareRow,
+  type AppAdsTermRow,
+  type AppleAdsImpressionShareRow,
+  type AppleAdsSearchTermRow,
   type AppFrameworkInput,
   type AppFrameworkRow,
   type AppOptInInput,
@@ -2458,6 +2462,133 @@ export class D1Store implements Store {
       }
     };
     return rows.map((r) => ({ date: r.date, dims: parse(r.dims, {}), metrics: parse(r.metrics, {}) }));
+  }
+
+  async writeAppAdsTerms(appId: string, campaignId: string, dates: IsoDate[], rows: AppleAdsSearchTermRow[]): Promise<number> {
+    const agg = new Map<string, { d: string; t: string; k: string; i: number; p: number; n: number; nd: number; s: number; c: string }>();
+    for (const r of rows) {
+      const key = `${r.date}|${r.term}|${r.keyword}`;
+      const e = agg.get(key) ?? { d: r.date, t: r.term, k: r.keyword, i: 0, p: 0, n: 0, nd: 0, s: 0, c: r.currency };
+      e.i += r.impressions;
+      e.p += r.taps;
+      e.n += r.installs;
+      e.nd += r.newDownloads;
+      e.s += r.spendCents;
+      agg.set(key, e);
+    }
+    const days = [...new Set([...dates, ...[...agg.values()].map((x) => x.d)])];
+    if (days.length === 0) return 0;
+    await this.batch([
+      ...chunks(days).map((group) =>
+        this.db
+          .prepare('DELETE FROM app_ads_terms_daily WHERE app_id = ?1 AND campaign_id = ?2 AND date IN (SELECT value FROM json_each(?3))')
+          .bind(appId, campaignId, JSON.stringify(group)),
+      ),
+      ...chunks([...agg.values()]).map((group) =>
+        this.db
+          .prepare(
+            `INSERT INTO app_ads_terms_daily (app_id, date, campaign_id, term, keyword, impressions, taps, installs, new_downloads, spend_cents, currency)
+             SELECT ?1, j.value->>'d', ?2, j.value->>'t', j.value->>'k', j.value->>'i', j.value->>'p', j.value->>'n', j.value->>'nd', j.value->>'s', j.value->>'c'
+             FROM json_each(?3) j WHERE true`,
+          )
+          .bind(appId, campaignId, JSON.stringify(group)),
+      ),
+    ]);
+    return agg.size;
+  }
+
+  async writeAppAdsShare(appId: string, dates: IsoDate[], rows: AppleAdsImpressionShareRow[]): Promise<number> {
+    const agg = new Map<string, AppleAdsImpressionShareRow>();
+    for (const r of rows) agg.set(`${r.date}|${r.territory}|${r.term}`, r);
+    const days = [...new Set([...dates, ...[...agg.values()].map((x) => x.date)])];
+    if (days.length === 0) return 0;
+    const list = [...agg.values()].map((r) => ({
+      d: r.date,
+      c: r.territory,
+      t: r.term,
+      l: r.lowShare,
+      h: r.highShare,
+      r: r.rank,
+      p: r.popularity,
+    }));
+    await this.batch([
+      ...chunks(days).map((group) =>
+        this.db
+          .prepare('DELETE FROM app_ads_share_daily WHERE app_id = ?1 AND date IN (SELECT value FROM json_each(?2))')
+          .bind(appId, JSON.stringify(group)),
+      ),
+      ...chunks(list).map((group) =>
+        this.db
+          .prepare(
+            `INSERT INTO app_ads_share_daily (app_id, date, territory, term, low_share, high_share, rank, popularity)
+             SELECT ?1, j.value->>'d', j.value->>'c', j.value->>'t', j.value->>'l', j.value->>'h', j.value->>'r', j.value->>'p' FROM json_each(?2) j WHERE true`,
+          )
+          .bind(appId, JSON.stringify(group)),
+      ),
+    ]);
+    return list.length;
+  }
+
+  async queryAppAdsTerms(q: { appId: string; range: DateRange; contains?: string; limit?: number }): Promise<AppAdsTermRow[]> {
+    const binds: Bind[] = [q.appId, q.range.start, q.range.end];
+    const where = ['app_id = ?1', 'date >= ?2', 'date <= ?3'];
+    if (q.contains) {
+      binds.push(q.contains.toLowerCase());
+      where.push(`instr(lower(term), ?${binds.length}) > 0`);
+    }
+    const rows = await this.all<Record<string, string | number | null>>(
+      `SELECT term, currency, SUM(impressions) AS impressions, SUM(taps) AS taps, SUM(installs) AS installs, SUM(new_downloads) AS newDownloads,
+              SUM(spend_cents) AS spendCents, json_group_array(DISTINCT keyword) AS keywords
+       FROM app_ads_terms_daily WHERE ${where.join(' AND ')}
+       GROUP BY term, currency ORDER BY impressions DESC, term LIMIT ${Math.max(1, Math.min(5000, Math.floor(q.limit ?? 100)))}`,
+      ...binds,
+    );
+    return rows.map((r) => ({
+      term: String(r.term),
+      currency: String(r.currency ?? ''),
+      impressions: Number(r.impressions) || 0,
+      taps: Number(r.taps) || 0,
+      installs: Number(r.installs) || 0,
+      newDownloads: Number(r.newDownloads) || 0,
+      spendCents: Number(r.spendCents) || 0,
+      keywords: (JSON.parse(String(r.keywords ?? '[]')) as string[]).filter(Boolean),
+    }));
+  }
+
+  async queryAppAdsShare(q: {
+    appId: string;
+    range: DateRange;
+    territory?: string;
+    contains?: string;
+    limit?: number;
+  }): Promise<AppAdsShareRow[]> {
+    const binds: Bind[] = [q.appId, q.range.start, q.range.end];
+    const where = ['app_id = ?1', 'date >= ?2', 'date <= ?3'];
+    if (q.territory) {
+      binds.push(q.territory.toUpperCase());
+      where.push(`territory = ?${binds.length}`);
+    }
+    if (q.contains) {
+      binds.push(q.contains.toLowerCase());
+      where.push(`instr(lower(term), ?${binds.length}) > 0`);
+    }
+    // The newest day of each term and storefront.
+    const rows = await this.all<Record<string, string | number | null>>(
+      `SELECT term, territory, date, low_share AS lowShare, high_share AS highShare, rank, popularity FROM app_ads_share_daily s
+       WHERE ${where.join(' AND ')} AND date = (SELECT MAX(date) FROM app_ads_share_daily x WHERE x.app_id = s.app_id AND x.term = s.term AND x.territory = s.territory AND x.date <= ?3)
+       ORDER BY popularity DESC, highShare DESC, term LIMIT ${Math.max(1, Math.min(5000, Math.floor(q.limit ?? 200)))}`,
+      ...binds,
+    );
+    const n = (v: unknown) => (v === null || v === undefined ? null : Number(v));
+    return rows.map((r) => ({
+      term: String(r.term),
+      territory: String(r.territory),
+      date: String(r.date),
+      lowShare: n(r.lowShare),
+      highShare: n(r.highShare),
+      rank: n(r.rank),
+      popularity: n(r.popularity),
+    }));
   }
 
   async snapshotAppListing(appId: string, store: AppStore, date: IsoDate, scopes: string[], values: AppListingValue[]): Promise<number> {

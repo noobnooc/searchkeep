@@ -19,6 +19,7 @@ import {
   appRevenue,
   appChanges,
   appFrameworkReport,
+  appAds,
   listApps,
   startAppStoreReports,
   validateApp,
@@ -72,6 +73,7 @@ import { createAscClient } from '@searchkeep/source-app-store-connect';
 import { createAppStorePublicClient } from '@searchkeep/source-app-store-public';
 import { createBingClient } from '@searchkeep/source-bing';
 import { createPlayClient } from '@searchkeep/source-google-play';
+import { createAppleAdsClient } from '@searchkeep/source-apple-ads';
 import { createCloudflareClient } from '@searchkeep/source-cloudflare';
 import { createGscClient, createSitemapReader } from '@searchkeep/source-gsc';
 import { D1Store, ensureMigrated } from '@searchkeep/store-d1';
@@ -136,6 +138,9 @@ export function buildClients(config: SearchkeepConfig, browser: BrowserFetch | n
       publisher: config.play.metadata || config.play.reviewsApi,
       reviews: config.play.reviewsApi,
     });
+  const ads = config.appleAds;
+  if (ads.clientId && ads.teamId && ads.keyId && ads.privateKey)
+    clients.appleAds = createAppleAdsClient({ clientId: ads.clientId, teamId: ads.teamId, keyId: ads.keyId, privateKey: ads.privateKey });
   // Review responses only with writes on, through their own key (never the Sales and Reports key).
   if (config.enableWrites && config.asc.replyKeyId && config.asc.issuerId && config.asc.replyPrivateKey)
     clients.ascReplies = createAscClient({
@@ -767,6 +772,22 @@ app.get(
     const { x, common } = appParams(c);
     const { store: _store, ...rest } = common;
     return appFrameworkReport(opsContext(c), x.strip({ ...rest, report: x.get('report') ?? '', groupBy: x.list<string>('groupBy') }));
+  }),
+);
+app.get(
+  '/api/app-ads',
+  handle((c) => {
+    const { x, common } = appParams(c);
+    const { store: _store, ...rest } = common;
+    return appAds(
+      opsContext(c),
+      x.strip({
+        ...rest,
+        termContains: x.get('termContains'),
+        territory: x.get('territory'),
+        sortBy: x.get('sortBy') as 'impressions' | 'installs' | 'spend' | 'popularity' | undefined,
+      }),
+    );
   }),
 );
 app.get(

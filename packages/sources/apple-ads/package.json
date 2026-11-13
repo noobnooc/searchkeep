@@ -1,0 +1,21 @@
+{
+  "name": "@searchkeep/source-apple-ads",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Apple Ads Platform API adapter: search term reports, impression share and search popularity of the user's own campaigns (read-only role).",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@searchkeep/core": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.3",
+    "vitest": "^5.1.0"
+  }
+}

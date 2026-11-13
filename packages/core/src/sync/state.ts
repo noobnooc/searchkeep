@@ -47,6 +47,7 @@ export const SOURCE_NAMES: Record<SourceId, string> = {
   asc: 'App Store Connect',
   play: 'Google Play',
   appstore: 'App Store public feeds',
+  appleads: 'Apple Ads',
 };
 
 /** Sync results and backoff entries of an app use this in place of a site id. */
@@ -108,6 +109,8 @@ export const syncKeys = {
   playReviewsApi: (app: string) => `app:play:reviews-api:${app}`,
   /** A review reply waiting for confirmation (`PendingReply`), by token. */
   pendingReply: (token: string) => `reply:pending:${token}`,
+  /** Apple Ads sync state of an app (`AppleAdsState`). */
+  appleAds: (app: string) => `app:ads:${app}`,
   /** The Play Console report files of an app, listed once a day (`PlayListing`). */
   playListing: (app: string) => `app:play:list:${app}`,
   /** The financial files of an app (earnings of the account, its subscriptions), listed once a day (`PlayListing`). */
@@ -131,6 +134,15 @@ export interface AscSalesState {
   from?: IsoDate;
   /** The newest day was not out yet: not asked again before this time (ISO timestamp). */
   waitUntil?: string;
+}
+
+export interface AppleAdsState {
+  checkedOn?: IsoDate;
+  /** Newest day of search terms and of impression share read. */
+  termsThrough?: IsoDate;
+  shareThrough?: IsoDate;
+  /** Why the last read failed (credentials refused). */
+  problem?: string;
 }
 
 export interface AppStorePublicPart {

@@ -1,6 +1,9 @@
 import { findSite, SearchkeepError, segmentsEnabled } from '../config.js';
 import { safeMessage } from '../errors.js';
 import { SourceError } from '../http.js';
+
+/** Apple Ads roles that may change campaigns (the probe asks for a read-only one). */
+const APPLE_ADS_WRITE_ROLES = ['Admin', 'API Account Manager', 'Limited Access: API Read & Write'];
 import type { ReadinessReport } from '../auth/readiness.js';
 import type { SourceClients } from '../sources.js';
 import { pageToUrl } from '../url.js';
@@ -253,6 +256,21 @@ export async function setupStatus(ctx: OpsContext, p: { readiness: ReadinessRepo
         ? 'On: titles, descriptions, tracks and release notes are read daily through an edit that is deleted, never committed.'
         : 'Off: app_changes has no Google Play changes. Set PLAY_METADATA=true to read store listings and tracks daily (needs the Android Publisher API; see probe.play_metadata once on).',
     });
+  if (anyApple) {
+    const a = config.appleAds;
+    const set = [a.clientId, a.teamId, a.keyId, a.privateKey].filter(Boolean).length;
+    add({
+      id: 'config.apple_ads',
+      label: 'Apple Ads (APPLE_ADS_CLIENT_ID, APPLE_ADS_TEAM_ID, APPLE_ADS_KEY_ID, APPLE_ADS_PRIVATE_KEY; optional)',
+      status: set === 4 ? 'ok' : set === 0 ? 'skipped' : 'error',
+      detail:
+        set === 4
+          ? 'Set: search terms, impression share and search popularity of your own campaigns.'
+          : set === 0
+            ? 'Off: app_ads answers "not configured". Set the four secrets of an API user with the API Account Read Only role to turn it on.'
+            : 'Set all four APPLE_ADS_* secrets (client id, team id, key id, private key).',
+    });
+  }
   if (config.appStorePublic)
     add({
       id: 'config.app_store_public',
@@ -385,6 +403,33 @@ export async function setupStatus(ctx: OpsContext, p: { readiness: ReadinessRepo
             return [
               'warn',
               `The service account may not read ${app.name}'s store listing through the Android Publisher API. In Google Cloud, enable the "Google Play Android Developer API" for the service account's project; in the Play Console → Users and permissions → ${config.play.clientEmail ?? 'the service account'} → App permissions, grant "View app information (read-only)" for the app. Searchkeep opens an edit, reads it and deletes it, never committing it; opening an edit closes any other edit the same service account has open, so use a service account your release tooling does not use (PLAY_CLIENT_EMAIL).`,
+            ];
+          throw err;
+        }
+      });
+    }
+    if (ctx.clients.appleAds && anyApple) {
+      const ads = ctx.clients.appleAds;
+      await probe('probe.apple_ads', 'Apple Ads credentials work and are read-only', async () => {
+        try {
+          const accounts = await ads.accounts();
+          if (accounts.length === 0)
+            return [
+              'warn',
+              'The Apple Ads credentials see no ad account: invite the API user to the account in ads.apple.com → Account Settings → User Management.',
+            ];
+          const writable = accounts.filter((x) => x.roles.some((role) => APPLE_ADS_WRITE_ROLES.includes(role)));
+          if (writable.length)
+            return [
+              'warn',
+              `The Apple Ads API user can change campaigns in ${writable.map((x) => x.name || x.id).join(', ')} (${[...new Set(writable.flatMap((x) => x.roles))].join(', ')}). Searchkeep only reads: in ads.apple.com → Account Settings → User Management, give it the API Account Read Only role.`,
+            ];
+          return 'ok';
+        } catch (err) {
+          if (err instanceof SourceError && (err.status === 400 || err.status === 401 || err.status === 403))
+            return [
+              'warn',
+              `Apple Ads refused the credentials (${safeMessage(err)}). Check APPLE_ADS_CLIENT_ID, APPLE_ADS_TEAM_ID and APPLE_ADS_KEY_ID against ads.apple.com → Account Settings → API, and that APPLE_ADS_PRIVATE_KEY is the private key of the uploaded public key.`,
             ];
           throw err;
         }

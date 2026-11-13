@@ -27,6 +27,11 @@ export interface Env {
   ASC_VENDOR_NUMBER?: string;
   PLAY_METADATA?: string;
   PLAY_REVIEWS_API?: string;
+  APPLE_ADS_CLIENT_ID?: string;
+  APPLE_ADS_TEAM_ID?: string;
+  APPLE_ADS_KEY_ID?: string;
+  APPLE_ADS_PRIVATE_KEY?: string;
+  APPLE_ADS_ACCOUNT_ID?: string;
   ASC_REPLY_KEY_ID?: string;
   ASC_REPLY_PRIVATE_KEY?: string;
   /** Google Play: Cloud Storage bucket of the Play Console reports; the service account defaults to GSC's. */

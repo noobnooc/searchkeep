@@ -26,6 +26,23 @@ Because users sync `main` at any time, the `Unreleased` section is always accura
 
 ### Added
 
+- Apple Ads search terms (optional). With the credentials of an Apple Ads API user
+  (`APPLE_ADS_CLIENT_ID`, `APPLE_ADS_TEAM_ID`, `APPLE_ADS_KEY_ID`, `APPLE_ADS_PRIVATE_KEY`; optional
+  `APPLE_ADS_ACCOUNT_ID`), the sync reads once a day, through the Apple Ads Platform API, the search
+  terms of the campaigns that promote each app (impressions, taps, installs, spend; 90 days the first
+  time) and the app's impression share, rank and search popularity per term and storefront (30 days
+  the first time). The older Campaign Management API, which Apple sunsets on January 26, 2027, is not
+  used. New package `@searchkeep/source-apple-ads` (no dependency: ES256 client secrets are signed
+  with WebCrypto) and new read-only MCP tool and API `app_ads`; without credentials it answers
+  `configured: false` with the setup steps, and `app_search_terms` says the same for App Store
+  terms. `setup_status` gains `config.apple_ads` and `probe.apple_ads`, which warns when the API
+  user's role could change campaigns.
+
+  #### Upgrade notes
+  - Optional: to use `app_ads`, invite an API user with the **API Account Read Only** role in
+    ads.apple.com, upload its public key under Account Settings → API, and set the four
+    `APPLE_ADS_*` secrets (see docs/deploy.md step 14a). Skipping it changes nothing else.
+
 - App Store Framework Usage reports per app. An app can name up to 10 Framework Usage reports of
   App Store Connect Analytics (`frameworkReports` in `APPS` or **Settings** → **Apps**), for example
   Notification Summary Engagement or App Added to Focus. The sync reads them from the existing

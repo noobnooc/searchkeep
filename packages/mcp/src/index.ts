@@ -16,6 +16,7 @@ import {
   appRevenue,
   appChanges,
   appFrameworkReport,
+  appAds,
   replyReview,
   appStability,
   appSubscriptions,
@@ -137,6 +138,7 @@ export const TOOL_NAMES = [
   'app_revenue',
   'app_changes',
   'app_framework_report',
+  'app_ads',
   'reply_review',
 ] as const;
 
@@ -630,6 +632,24 @@ export function createSearchkeepMcpServer(deps: McpDeps): McpServer {
       annotations: READ_ONLY,
     },
     async (args) => run(() => appFrameworkReport(ctx, clean(args))),
+  );
+
+  server.registerTool(
+    'app_ads',
+    {
+      title: 'Apple Ads search terms',
+      description:
+        "Search terms of the user's own Apple Ads campaigns (impressions, taps, installs, spend, tap-through and install rates, cost per install) with the app's impression share, rank and Apple's search popularity (1-5) per term and storefront: keyword-level App Store data that Apple's analytics reports lack. Answers configured: false with the setup steps when the Apple Ads credentials are not set. Organic keyword rankings are not available from any official API.",
+      inputSchema: {
+        ...appCommon,
+        end: date.optional().describe('End date (YYYY-MM-DD). Defaults to yesterday.'),
+        termContains: z.string().optional().describe('Only terms containing this text.'),
+        territory: z.string().optional().describe('Impression share of this storefront only (e.g. US).'),
+        sortBy: z.enum(['impressions', 'installs', 'spend', 'popularity']).optional().describe('Default impressions.'),
+      },
+      annotations: { ...READ_ONLY, openWorldHint: false },
+    },
+    async (args) => run(() => appAds(ctx, clean(args))),
   );
 
   if (ctx.config.enableWrites) {

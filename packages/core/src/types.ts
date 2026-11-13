@@ -10,7 +10,7 @@ export type IsoDate = string;
 
 export type SearchSource = 'gsc' | 'bing';
 /** App sources: App Store Connect, Google Play, and Apple's public App Store feeds (opt-in). */
-export type AppSourceId = 'asc' | 'play' | 'appstore';
+export type AppSourceId = 'asc' | 'play' | 'appstore' | 'appleads';
 export type SourceId = SearchSource | 'cloudflare' | AppSourceId;
 
 /**
@@ -1071,6 +1071,30 @@ export interface AppFrameworkRow {
   date: IsoDate;
   dims: Record<string, string>;
   metrics: Record<string, number>;
+}
+
+/** Apple Ads search terms summed over a range (the user's own campaigns). */
+export interface AppAdsTermRow {
+  term: string;
+  impressions: number;
+  taps: number;
+  installs: number;
+  newDownloads: number;
+  spendCents: number;
+  currency: string;
+  /** Keywords that matched the term. */
+  keywords: string[];
+}
+
+/** The latest impression share of a term (per storefront) in a range. */
+export interface AppAdsShareRow {
+  term: string;
+  territory: string;
+  date: IsoDate;
+  lowShare: number | null;
+  highShare: number | null;
+  rank: number | null;
+  popularity: number | null;
 }
 
 export interface AppDataCoverage {

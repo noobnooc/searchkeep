@@ -599,6 +599,44 @@ export const appFrameworkDaily = sqliteTable(
   (t) => [primaryKey({ columns: [t.appId, t.report, t.date, t.dims] }), index('app_framework_daily_date').on(t.appId, t.report, t.date)],
 );
 
+/** Apple Ads search terms of the user's own campaigns, per day, campaign, term and matching keyword. */
+export const appAdsTermsDaily = sqliteTable(
+  'app_ads_terms_daily',
+  {
+    appId: text('app_id').notNull(),
+    date: text('date').notNull(),
+    campaignId: text('campaign_id').notNull(),
+    term: text('term').notNull(),
+    keyword: text('keyword').notNull().default(''),
+    impressions: integer('impressions').notNull().default(0),
+    taps: integer('taps').notNull().default(0),
+    installs: integer('installs').notNull().default(0),
+    newDownloads: integer('new_downloads').notNull().default(0),
+    spendCents: integer('spend_cents').notNull().default(0),
+    currency: text('currency').notNull().default(''),
+  },
+  (t) => [
+    primaryKey({ columns: [t.appId, t.date, t.campaignId, t.term, t.keyword] }),
+    index('app_ads_terms_daily_date').on(t.appId, t.date),
+  ],
+);
+
+/** The app's Apple Ads impression share per day, storefront and search term, with Apple's search popularity (1-5). */
+export const appAdsShareDaily = sqliteTable(
+  'app_ads_share_daily',
+  {
+    appId: text('app_id').notNull(),
+    date: text('date').notNull(),
+    territory: text('territory').notNull(),
+    term: text('term').notNull(),
+    lowShare: real('low_share'),
+    highShare: real('high_share'),
+    rank: integer('rank'),
+    popularity: integer('popularity'),
+  },
+  (t) => [primaryKey({ columns: [t.appId, t.date, t.territory, t.term] }), index('app_ads_share_daily_date').on(t.appId, t.date)],
+);
+
 /** The latest snapshot of an app's store fields (versions, listings, app info, tracks), one row per field. */
 export const appListingValues = sqliteTable(
   'app_listing_values',

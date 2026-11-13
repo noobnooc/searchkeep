@@ -1,3 +1,4 @@
+import type { AppleAdsImpressionShareRow, AppleAdsSearchTermRow } from './sources.js';
 import type {
   AppBreakdownDimension,
   AppBreakdownQuery,
@@ -26,6 +27,8 @@ import type {
   AppStoreRow,
   AppStoreWrite,
   AppSubscriptionInput,
+  AppAdsShareRow,
+  AppAdsTermRow,
   AppFrameworkInput,
   AppFrameworkRow,
   AppOptInInput,
@@ -219,6 +222,20 @@ export interface Store {
   writeAppSubscriptionMetrics(appId: string, w: AppSubscriptionMetricWrite): Promise<number>;
   /** Replaces the App Store purchases per product (Analytics Reports) on the days in `dates`. */
   writeAppProducts(appId: string, dates: IsoDate[], rows: AppProductInput[]): Promise<number>;
+  /** Replaces one Apple Ads campaign's search terms on the days in `dates`. */
+  writeAppAdsTerms(appId: string, campaignId: string, dates: IsoDate[], rows: AppleAdsSearchTermRow[]): Promise<number>;
+  /** Replaces the app's Apple Ads impression share on the days in `dates`. */
+  writeAppAdsShare(appId: string, dates: IsoDate[], rows: AppleAdsImpressionShareRow[]): Promise<number>;
+  /** Apple Ads search terms summed over the range, per term and currency. */
+  queryAppAdsTerms(q: { appId: string; range: DateRange; contains?: string; limit?: number }): Promise<AppAdsTermRow[]>;
+  /** The latest impression share per term and storefront in the range. */
+  queryAppAdsShare(q: {
+    appId: string;
+    range: DateRange;
+    territory?: string;
+    contains?: string;
+    limit?: number;
+  }): Promise<AppAdsShareRow[]>;
   /** Replaces a Framework Usage report's rows (report: its slug) on the days in `dates`. */
   writeAppFramework(appId: string, report: string, dates: IsoDate[], rows: AppFrameworkInput[]): Promise<number>;
   /** A Framework Usage report's rows in the range, oldest first. */

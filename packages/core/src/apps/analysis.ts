@@ -7,7 +7,7 @@ import { addDays, assertRange, isIsoDate, previousPeriod, toIsoDate } from '../d
 import { safeMessage } from '../errors.js';
 import { SourceError } from '../http.js';
 import type { AscClient, AscReportRequest } from '../sources.js';
-import { parseJson, syncKeys, type AscPending, type AscRequestState } from '../sync/state.js';
+import { parseJson, syncKeys, type AppleAdsState, type AscPending, type AscRequestState } from '../sync/state.js';
 import {
   ALL_KEY,
   APP_BREAKDOWN_DIMENSIONS,
@@ -509,6 +509,12 @@ export async function appSearchTerms(ctx: OpsContext, p: AppSearchTermsParams) {
     'Terms with few visitors are grouped by Google under "Other" and are not listed separately.',
   ];
   if (!r.app.playPackage) notes.unshift(`${r.app.name} has no Google Play package, so there are no search terms.`);
+  if (r.app.appleId)
+    notes.push(
+      appleAdsConfigured(ctx)
+        ? "App Store search terms are not in Apple's analytics reports; for the terms of your Apple Ads campaigns, with impression share and search popularity, see app_ads."
+        : `App Store search terms are not in Apple's analytics reports. ${APPLE_ADS_NOT_CONFIGURED}`,
+    );
   if (cur.length === 0 && r.app.playPackage)
     notes.push('No search terms in this range yet. The Play Console publishes them 3-7 days late.');
   return {
@@ -1513,6 +1519,113 @@ export async function appFrameworkReport(ctx: OpsContext, p: AppFrameworkParams)
     metrics,
     groupBy,
     rows: out.slice(0, groupBy.includes('date') ? 1000 : r.limit),
+    notes,
+  };
+}
+
+export interface AppAdsParams extends Omit<AppParams, 'store'> {
+  termContains?: string;
+  /** Impression share of this storefront only (e.g. US). */
+  territory?: string;
+  sortBy?: 'impressions' | 'installs' | 'spend' | 'popularity';
+}
+
+/** How to set Apple Ads up, for every answer when it is not. */
+export const APPLE_ADS_NOT_CONFIGURED =
+  "Apple Ads is not configured. In ads.apple.com → Account Settings → User Management, invite an API user with the API Account Read Only role; as that user, upload a P-256 public key under Account Settings → API, then set APPLE_ADS_CLIENT_ID, APPLE_ADS_TEAM_ID, APPLE_ADS_KEY_ID and APPLE_ADS_PRIVATE_KEY (the private-key.pem). Optional: APPLE_ADS_ACCOUNT_ID for one ad account. Only your own campaigns' search terms, impression share and search popularity are read.";
+
+export function appleAdsConfigured(ctx: OpsContext): boolean {
+  const a = ctx.config.appleAds;
+  return Boolean(a.clientId && a.teamId && a.keyId && a.privateKey);
+}
+
+/**
+ * Apple Ads search terms of the user's own campaigns (impressions, taps, installs, spend), with the
+ * app's impression share and Apple's search popularity per term and storefront: keyword-level data
+ * the App Store's own reports do not have.
+ */
+export async function appAds(ctx: OpsContext, p: AppAdsParams) {
+  const today = toIsoDate(ctx.now ? ctx.now() : new Date());
+  const r = await resolveApp(
+    ctx,
+    { ...p, store: 'apple', ...(p.end === undefined ? { end: addDays(today, -1) } : {}) },
+    { days: 28, limit: 50 },
+  );
+  if (!appleAdsConfigured(ctx)) return { app: r.app.id, range: r.range, configured: false as const, notes: [APPLE_ADS_NOT_CONFIGURED] };
+  const contains = p.termContains?.trim();
+  const [terms, shares] = await Promise.all([
+    ctx.store.queryAppAdsTerms({ appId: r.app.id, range: r.range, ...(contains ? { contains } : {}), limit: 5000 }),
+    ctx.store.queryAppAdsShare({
+      appId: r.app.id,
+      range: r.range,
+      ...(p.territory ? { territory: p.territory } : {}),
+      ...(contains ? { contains } : {}),
+      limit: 5000,
+    }),
+  ]);
+  const byTerm = new Map<string, typeof shares>();
+  for (const s of shares) byTerm.set(s.term.toLowerCase(), [...(byTerm.get(s.term.toLowerCase()) ?? []), s]);
+  const shareOut = (s: (typeof shares)[number]) => ({
+    territory: s.territory,
+    date: s.date,
+    impressionShare: s.lowShare === null ? null : { low: s.lowShare, high: s.highShare },
+    rank: s.rank,
+    popularity: s.popularity,
+  });
+  const rows = terms.map((t) => ({
+    term: t.term,
+    keywords: t.keywords,
+    impressions: t.impressions,
+    taps: t.taps,
+    installs: t.installs,
+    newDownloads: t.newDownloads,
+    spend: round(t.spendCents / 100, 2),
+    currency: t.currency,
+    tapThroughRate: t.impressions > 0 ? round(t.taps / t.impressions, 4) : null,
+    installRate: t.taps > 0 ? round(t.installs / t.taps, 4) : null,
+    costPerInstall: t.installs > 0 ? round(t.spendCents / 100 / t.installs, 2) : null,
+    share: (byTerm.get(t.term.toLowerCase()) ?? []).map(shareOut),
+  }));
+  const pop = (x: (typeof rows)[number]) => Math.max(0, ...x.share.map((s) => s.popularity ?? 0));
+  const sortBy = p.sortBy ?? 'impressions';
+  rows.sort((a, b) =>
+    sortBy === 'installs'
+      ? b.installs - a.installs
+      : sortBy === 'spend'
+        ? b.spend - a.spend
+        : sortBy === 'popularity'
+          ? pop(b) - pop(a)
+          : b.impressions - a.impressions,
+  );
+  const currencies = [...new Set(terms.map((t) => t.currency))].sort().map((currency) => {
+    const of = terms.filter((t) => t.currency === currency);
+    const sum = (k: 'impressions' | 'taps' | 'installs' | 'spendCents') => of.reduce((s, t) => s + t[k], 0);
+    return {
+      currency,
+      impressions: sum('impressions'),
+      taps: sum('taps'),
+      installs: sum('installs'),
+      spend: round(sum('spendCents') / 100, 2),
+      costPerInstall: sum('installs') ? round(sum('spendCents') / 100 / sum('installs'), 2) : null,
+    };
+  });
+  // Terms with an impression share but no search term row (shown, not tapped enough to be reported).
+  const seen = new Set(terms.map((t) => t.term.toLowerCase()));
+  const shareOnly = shares.filter((s) => !seen.has(s.term.toLowerCase())).map((s) => ({ term: s.term, ...shareOut(s) }));
+  const st = parseJson<AppleAdsState>(await ctx.store.getMeta(syncKeys.appleAds(r.app.id)));
+  const notes = [
+    "Apple Ads data covers only your own paid campaigns: search terms people typed when your ad showed (Apple withholds terms with few impressions), with impressions, taps, installs and spend in the ad account's currency. impressionShare is Apple's 10% bucket (low-high) of the searches in which your ad appeared, rank is your app's position by share (1 = highest), popularity is Apple's 1-5 search volume score. Organic App Store keyword rankings are offered by no official API: use an ASO tool for them.",
+  ];
+  if (st?.problem) notes.push(`The last Apple Ads read was refused (${st.problem}); see setup_status (probe.apple_ads).`);
+  else if (!st?.checkedOn)
+    notes.push('Apple Ads has not been read yet; the first sync reads 90 days of search terms and 30 days of impression share.');
+  return {
+    app: r.app.id,
+    range: r.range,
+    configured: true as const,
+    currencies,
+    terms: rows.slice(0, r.limit),
+    shareOnly: shareOnly.slice(0, r.limit),
     notes,
   };
 }
