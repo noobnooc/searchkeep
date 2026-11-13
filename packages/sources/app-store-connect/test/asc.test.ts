@@ -179,4 +179,47 @@ describe('app store connect', () => {
     expect(urls[0]).toContain('/v1/builds?filter%5Bapp%5D=123&sort=-uploadedDate&limit=5&fields%5Bbuilds%5D=iconAssetToken');
     expect(await asc.latestBuildIcon('999')).toBeNull();
   });
+
+  it('downloads a day of Summary Sales (gzip), answers null when Apple has no report, and reports a refused key', async () => {
+    clearAscTokenCache();
+    const { pem } = await p8();
+    // Summary Sales Report columns (Apple's sample report header), tab separated.
+    const tsv = [
+      'Provider\tProvider Country\tSKU\tDeveloper\tTitle\tVersion\tProduct Type Identifier\tUnits\tDeveloper Proceeds\tBegin Date\tEnd Date\tCustomer Currency\tCountry Code\tCurrency of Proceeds\tApple Identifier\tCustomer Price\tPromo Code\tParent Identifier\tSubscription\tPeriod\tCategory\tCMB\tDevice\tSupported Platforms\tProceeds Reason\tPreserved Pricing\tClient\tOrder Type',
+      'APPLE\tUS\techobell.pro.monthly\tAcme\techobell.pro.monthly\t\tIAY\t3\t3.49\t11/08/2026\t11/08/2026\tUSD\tUS\tUSD\t6450000001\t4.99\t\tECHOBELL\tNew\t1 Month\tUtilities\t\tiPhone\tiOS\t\t\t\t',
+    ].join('\n');
+    const body = await gzip(tsv);
+    const seen: string[] = [];
+    const fetchMock = (async (url: string) => {
+      seen.push(url);
+      if (url.includes('=2026-11-08')) return new Response(body, { headers: { 'content-type': 'application/a-gzip' } });
+      if (url.includes('=2026-11-09'))
+        return Response.json(
+          { errors: [{ status: '404', code: 'NOT_FOUND', detail: 'There were no sales for the date specified.' }] },
+          { status: 404 },
+        );
+      return Response.json(
+        { errors: [{ status: '403', code: 'FORBIDDEN_ERROR', detail: 'This request is forbidden for security reasons' }] },
+        { status: 403 },
+      );
+    }) as typeof fetch;
+    const asc = createAscClient({ keyId: 'K', issuerId: 'I', privateKey: pem, fetch: fetchMock });
+    const rows: Array<Record<string, string>> = [];
+    expect(await asc.salesReport!('85000000', '2026-11-08', (r) => rows.push(r))).toBe(1);
+    expect(rows[0]).toMatchObject({ sku: 'echobell.pro.monthly', units: '3', subscription: 'New', 'parent identifier': 'ECHOBELL' });
+    const url = new URL(seen[0]!);
+    const param = (k: string) => url.searchParams.get(k);
+    expect(['frequency', 'reportDate', 'reportSubType', 'reportType', 'vendorNumber'].map((k) => param(`filter[${k}]`))).toEqual([
+      'DAILY',
+      '2026-11-08',
+      'SUMMARY',
+      'SALES',
+      '85000000',
+    ]);
+    expect(await asc.salesReport!('85000000', '2026-11-09', () => undefined)).toBeNull();
+    const err = await asc.salesReport!('85000000', '2026-11-10', () => undefined).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(SourceError);
+    expect((err as SourceError).status).toBe(403);
+    expect((err as SourceError).message).toContain('FORBIDDEN_ERROR');
+  });
 });

@@ -106,7 +106,14 @@ const TASKS: Record<SyncDataset, string[]> = {
   ai_crawlers: ['cloudflare.ai_crawlers'],
   search_crawlers: ['cloudflare.search_crawlers'],
   web_analytics: ['cloudflare.web_analytics'],
-  app_store: ['asc.requests', 'asc.reports', 'asc.reviews', ...ASC_REPORTS.flatMap((r) => [`asc.${r.key}`, `asc.${r.key}_history`])],
+  app_store: [
+    'asc.requests',
+    'asc.reports',
+    'asc.reviews',
+    'asc.sales',
+    'asc.sales_history',
+    ...ASC_REPORTS.flatMap((r) => [`asc.${r.key}`, `asc.${r.key}_history`]),
+  ],
   google_play: [
     'play.list',
     'play.finance_list',

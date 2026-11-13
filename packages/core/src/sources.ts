@@ -219,7 +219,7 @@ export interface AscImageAsset {
 
 export interface AscClient {
   /** Apps the key can see (for suggestions in the dashboard). */
-  listApps(): Promise<Array<{ id: string; name: string; bundleId: string }>>;
+  listApps(): Promise<Array<{ id: string; name: string; bundleId: string; sku?: string }>>;
   /** The app icon of the newest uploaded build that has one, or null when no build has an icon. */
   latestBuildIcon(appleId: string): Promise<AscImageAsset | null>;
   listReportRequests(appleId: string): Promise<AscReportRequest[]>;
@@ -235,6 +235,11 @@ export interface AscClient {
   readSegment(segment: AscSegment, onRow: (row: DelimitedRow) => void): Promise<number>;
   /** Newest reviews first. */
   listReviews(appleId: string, opts: { limit: number; cursor?: string | null }): Promise<{ reviews: AscReview[]; next: string | null }>;
+  /**
+   * Sales and Trends Summary Sales of one day for the whole vendor account, row by row (gzip, tab
+   * separated). Returns null when Apple has no report for that day (no sales, or not out yet).
+   */
+  salesReport?(vendorNumber: string, date: IsoDate, onRow: (row: DelimitedRow) => void): Promise<number | null>;
 }
 
 /** A Cloud Storage object of the Play Console reports bucket. */

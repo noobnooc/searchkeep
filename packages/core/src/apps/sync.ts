@@ -26,6 +26,7 @@ import {
   type AscRequestState,
   type PlayListing,
   type ReviewCursor,
+  type AscSalesState,
 } from '../sync/state.js';
 import type { Budget, Unit } from '../sync/unit.js';
 import {
@@ -38,7 +39,9 @@ import {
   playReadMark,
   playFinancialPrefixes,
   playPrefixes,
+  salesSummaryCollector,
   type AscReportSpec,
+  type SalesApp,
 } from './reports.js';
 import { appStorefronts } from './storefronts.js';
 
@@ -52,6 +55,8 @@ export interface AppSyncContext {
 export interface AppPlanArgs {
   ctx: AppSyncContext;
   today: IsoDate;
+  /** The run's clock (milliseconds). */
+  nowMs?: number;
   /** Meta read at the start of the run. */
   get: (key: string) => string | null;
   budget: Budget;
@@ -85,7 +90,131 @@ export function planAppUnits(args: AppPlanArgs): { daily: Unit[][]; history: Uni
     if (ctx.clients.play && app.playPackage && ctx.config.play.bucket) planPlay(args, app, place);
     if (ctx.clients.appStore && app.appleId) planPublic(args, app, list);
   }
+  const salesOwner = ctx.config.apps.find((a) => a.appleId);
+  if (ctx.clients.asc?.salesReport && ctx.config.asc.vendorNumber && salesOwner) {
+    const i = ctx.config.apps.indexOf(salesOwner);
+    planSales(args, ctx.clients.asc, ctx.config.asc.vendorNumber, (u) => (u.backfill ? history.push(u) : daily[i]!.push(u)));
+  }
   return { daily, history };
+}
+
+// ------------------------------------------------------------------ App Store Sales and Trends
+
+const maxDay = (a: IsoDate, b: IsoDate) => (a > b ? a : b);
+
+/** Apple keeps daily Sales and Trends reports for a year. */
+export const ASC_SALES_HISTORY_DAYS = 365;
+/** Days read per unit before the next one takes over (each is one call). */
+const ASC_SALES_DAYS_PER_UNIT = 30;
+/** A day's report is out the next morning (Pacific time); a missing newer day is asked again after this. */
+const ASC_SALES_RETRY_MS = 3 * 3_600_000;
+
+/**
+ * Summary Sales of the vendor account, one call per day, split between the apps by Apple ID and
+ * SKU (ADR 0011). The latest days first, then history back a year, newest first.
+ */
+function planSales(args: AppPlanArgs, asc: AscClient, vendorNumber: string, place: Place): void {
+  const { ctx, today, get, budget } = args;
+  const { store } = ctx;
+  const nowMs = args.nowMs ?? Date.now();
+  const appleApps = ctx.config.apps.filter((a) => a.appleId);
+  const siteId = appTaskId(appleApps[0]!.id);
+  const state = parseJson<AscSalesState>(get(syncKeys.ascSales)) ?? {};
+  const yesterday = addDays(today, -1);
+  const floor = addDays(today, -ASC_SALES_HISTORY_DAYS);
+
+  /** Apps with their SKUs (refreshed daily; in-app purchase rows name the app by its SKU). */
+  const salesApps = async (): Promise<SalesApp[]> => {
+    let saved = parseJson<{ day: IsoDate; skus: Record<string, string> }>(await store.getMeta(syncKeys.ascSkus));
+    if (!saved || saved.day !== today) {
+      budget.spend('asc');
+      const skus: Record<string, string> = {};
+      for (const a of await asc.listApps()) if (a.sku) skus[a.id] = a.sku;
+      saved = { day: today, skus };
+      await store.setMeta(syncKeys.ascSkus, JSON.stringify(saved));
+    }
+    return appleApps.map((a) => ({ appId: a.id, appleId: a.appleId!, sku: saved!.skus[a.appleId!] ?? null }));
+  };
+
+  const readDay = async (apps: SalesApp[], day: IsoDate): Promise<{ written: number; found: boolean }> => {
+    const collector = salesSummaryCollector(apps);
+    const rows = await asc.salesReport!(vendorNumber, day, (row) => collector.add(row));
+    // No report: no sales that day (every app's day is cleared), unless it is just not out yet.
+    return { written: await collector.write(store, [day]), found: rows !== null };
+  };
+
+  const save = async (patch: Partial<AscSalesState>) => {
+    const cur = parseJson<AscSalesState>(await store.getMeta(syncKeys.ascSales)) ?? {};
+    const next = { ...cur, ...patch };
+    // The first day read is where history starts from.
+    if (patch.through && !cur.from) next.from = patch.through;
+    for (const k of Object.keys(next) as Array<keyof AscSalesState>) if (next[k] === undefined) delete next[k];
+    await store.setMeta(syncKeys.ascSales, JSON.stringify(next));
+  };
+
+  // Latest days: after `through` up to yesterday (at most a month; history fills the rest).
+  const waiting = state.waitUntil && Date.parse(state.waitUntil) > nowMs;
+  if ((!state.through || state.through < yesterday) && !waiting) {
+    place({
+      task: 'asc.sales',
+      siteId,
+      source: 'asc',
+      backfill: false,
+      calls: 1,
+      key: `asc.sales:${today}:${state.through ?? 'none'}`,
+      run: async () => {
+        const apps = await salesApps();
+        let written = 0;
+        const oldest = addDays(yesterday, -ASC_SALES_DAYS_PER_UNIT + 1);
+        // First run: from three days back, so at least one day that is surely out starts the history.
+        const start = state.through ? maxDay(addDays(state.through, 1), oldest) : addDays(today, -3);
+        let n = 0;
+        for (let day = start; day <= yesterday; day = addDays(day, 1)) {
+          if (n++ > 0) budget.spend('asc');
+          const res = await readDay(apps, day);
+          written += res.written;
+          // The two newest days may simply not be out yet: try again later.
+          if (!res.found && day >= addDays(today, -2)) {
+            await save({ waitUntil: new Date(nowMs + ASC_SALES_RETRY_MS).toISOString() });
+            break;
+          }
+          await save({ through: day, waitUntil: undefined });
+        }
+        return written;
+      },
+      skip: () => save({ waitUntil: new Date(nowMs + ASC_SALES_RETRY_MS).toISOString() }),
+    });
+  }
+
+  // History: before `from`, back a year, newest first.
+  const from = state.from;
+  if (from && from > floor) {
+    place({
+      task: 'asc.sales_history',
+      siteId,
+      source: 'asc',
+      backfill: true,
+      date: addDays(from, -1),
+      calls: 1,
+      key: `asc.sales_history:${from}`,
+      run: async () => {
+        const apps = await salesApps();
+        let written = 0;
+        let n = 0;
+        for (let day = addDays(from, -1); day >= floor && n < ASC_SALES_DAYS_PER_UNIT; day = addDays(day, -1)) {
+          if (n++ > 0) {
+            if (budget.expired()) break;
+            budget.spend('asc');
+          }
+          written += (await readDay(apps, day)).written;
+          await save({ from: day });
+        }
+        return written;
+      },
+      // A day that keeps failing is passed over.
+      skip: () => save({ from: addDays(from, -1) }),
+    });
+  }
 }
 
 // ------------------------------------------------------------------ App Store

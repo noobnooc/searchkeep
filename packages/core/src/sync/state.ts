@@ -98,6 +98,10 @@ export const syncKeys = {
   ascSnapshot: (app: string, report: string) => `app:asc:snap:${app}:${report}`,
   /** Customer reviews: newest review synced and how far the history went (`ReviewCursor`). */
   ascReviews: (app: string) => `app:asc:reviews:${app}`,
+  /** Sales and Trends of the vendor account (`AscSalesState`). */
+  ascSales: 'app:asc:sales',
+  /** App SKUs by Apple ID, refreshed daily (`{ day, skus }`), to split Sales and Trends rows between apps. */
+  ascSkus: 'app:asc:skus',
   /** The Play Console report files of an app, listed once a day (`PlayListing`). */
   playListing: (app: string) => `app:play:list:${app}`,
   /** The financial files of an app (earnings of the account, its subscriptions), listed once a day (`PlayListing`). */
@@ -113,6 +117,15 @@ export const syncKeys = {
   backoff: 'sync:backoff',
   lastRun: 'sync:last_run',
 } as const;
+
+export interface AscSalesState {
+  /** Newest day read (or found to have no sales). */
+  through?: IsoDate;
+  /** Oldest day read: history continues before it. */
+  from?: IsoDate;
+  /** The newest day was not out yet: not asked again before this time (ISO timestamp). */
+  waitUntil?: string;
+}
 
 export interface AppStorePublicPart {
   day: IsoDate;

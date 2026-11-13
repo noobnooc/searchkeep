@@ -26,6 +26,12 @@ import type {
   AppStoreRow,
   AppStoreWrite,
   AppSubscriptionInput,
+  AppProductInput,
+  AppProductQuery,
+  AppProductRow,
+  AppSalesInput,
+  AppSalesQuery,
+  AppSalesRow,
   AppSubscriptionMetricQuery,
   AppSubscriptionMetricRow,
   AppSubscriptionMetricWrite,
@@ -202,6 +208,10 @@ export interface Store {
   writeAppSubscriptions(appId: string, product: string, dates: IsoDate[], rows: AppSubscriptionInput[]): Promise<number>;
   /** Replaces App Store subscription states or events (one kind) on the days in `w.dates`. */
   writeAppSubscriptionMetrics(appId: string, w: AppSubscriptionMetricWrite): Promise<number>;
+  /** Replaces the App Store purchases per product (Analytics Reports) on the days in `dates`. */
+  writeAppProducts(appId: string, dates: IsoDate[], rows: AppProductInput[]): Promise<number>;
+  /** Replaces the Sales and Trends rows of the days in `dates`. */
+  writeAppSales(appId: string, dates: IsoDate[], rows: AppSalesInput[]): Promise<number>;
 
   /**
    * Store funnel metrics grouped by the dimensions. Rows are chosen so nothing is counted twice:
@@ -223,6 +233,10 @@ export interface Store {
   queryAppSubscriptions(q: AppSubscriptionQuery): Promise<AppSubscriptionRow[]>;
   /** App Store subscription states (levels, see the row type) or events (summed). */
   queryAppSubscriptionMetrics(q: AppSubscriptionMetricQuery): Promise<AppSubscriptionMetricRow[]>;
+  /** Purchases per product summed over the range. */
+  queryAppProducts(q: AppProductQuery): Promise<AppProductRow[]>;
+  /** Sales and Trends rows summed over the range. */
+  queryAppSales(q: AppSalesQuery): Promise<AppSalesRow[]>;
   /** Per app, store and dataset: first and last date. */
   appCoverage(appId?: string): Promise<AppDataCoverage[]>;
   /** Latest day with store funnel data for an app (and store). */

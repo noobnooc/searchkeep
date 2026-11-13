@@ -20,6 +20,8 @@ import {
   type AppStoreMetric,
   type AppSubscriptionInput,
   type AppSubscriptionMetricInput,
+  type AppProductInput,
+  type AppSalesInput,
   type AppSubscriptionMetricKind,
   type AppVitalsInput,
   type IsoDate,
@@ -226,18 +228,70 @@ export function installsCollector(): ReportCollector {
 
 /** App Store Purchases (Standard): paid app and in-app purchases, net of refunds, in USD (Apple's estimate). */
 export function purchasesCollector(): ReportCollector {
-  return new FunnelCollector(
-    'apple',
-    'cross',
-    ['purchases', 'proceedsCents', 'salesCents', 'payingUsers'],
-    (row, col) => ({
-      purchases: num(col(row, 'purchases')),
-      proceedsCents: Math.round(num(col(row, 'proceeds in usd', 'proceeds')) * 100),
-      salesCents: Math.round(num(col(row, 'sales in usd', 'sales')) * 100),
-      payingUsers: num(col(row, 'paying users')),
-    }),
-    appleKeys,
+  return both(
+    new FunnelCollector(
+      'apple',
+      'cross',
+      ['purchases', 'proceedsCents', 'salesCents', 'payingUsers'],
+      (row, col) => ({
+        purchases: num(col(row, 'purchases')),
+        proceedsCents: Math.round(num(col(row, 'proceeds in usd', 'proceeds')) * 100),
+        salesCents: Math.round(num(col(row, 'sales in usd', 'sales')) * 100),
+        payingUsers: num(col(row, 'paying users')),
+      }),
+      appleKeys,
+    ),
+    productsCollector(),
   );
+}
+
+/**
+ * App Store Purchases per product (Content Name), purchase type and territory, with refunds (rows
+ * with negative purchases) kept apart so a refund day shows which product it was.
+ */
+export function productsCollector(): ReportCollector {
+  const rows = new Map<string, AppProductInput>();
+  const days = new Set<IsoDate>();
+  const col = columns();
+  return {
+    add(row) {
+      const date = cellDate(col(row, 'date'));
+      if (!date) return;
+      days.add(date);
+      const purchases = num(col(row, 'purchases'));
+      const proceeds = Math.round(num(col(row, 'proceeds in usd', 'proceeds')) * 100);
+      const sales = Math.round(num(col(row, 'sales in usd', 'sales')) * 100);
+      if (!purchases && !proceeds && !sales) return;
+      const product = col(row, 'content name').trim().slice(0, 200) || '-';
+      const purchaseType = slug(col(row, 'purchase type'));
+      const territory = normalizeTerritory(col(row, 'territory'));
+      const key = `${date}|${product}|${purchaseType}|${territory}`;
+      const e = rows.get(key) ?? {
+        date,
+        product,
+        purchaseType,
+        territory,
+        purchases: 0,
+        refunds: 0,
+        proceedsCents: 0,
+        refundProceedsCents: 0,
+        salesCents: 0,
+      };
+      const refund = purchases < 0 || (purchases === 0 && proceeds < 0);
+      if (refund) {
+        e.refunds += Math.abs(purchases);
+        e.refundProceedsCents += Math.abs(proceeds);
+      } else e.purchases += purchases;
+      e.proceedsCents += proceeds;
+      e.salesCents += sales;
+      rows.set(key, e);
+    },
+    async write(store, appId, before) {
+      const dates = coveredDays(days, before);
+      if (dates.length === 0) return { written: 0, oldest: null };
+      return { written: await store.writeAppProducts(appId, dates, keep(rows.values(), before)), oldest: dates[0]! };
+    },
+  };
 }
 
 /** Values kept per day and dimension; the rest are summed into `Other` (ADR 0010). */
@@ -547,6 +601,100 @@ export function subscriptionMetricsCollector(kind: AppSubscriptionMetricKind): R
       if (dates.length === 0) return { written: 0, oldest: null };
       const written = await store.writeAppSubscriptionMetrics(appId, { kind, dates, rows: keep(rows.values(), before) });
       return { written, oldest: dates[0]! };
+    },
+  };
+}
+
+/** Apple's product type identifiers (Sales and Trends) → a product type; updates and redownloads are skipped. */
+export function salesProductType(id: string): string | null {
+  const v = id.trim().toUpperCase();
+  if (!v) return null;
+  if (/^(3|3F|7|7F|7T|F7|IA3)$/.test(v)) return null;
+  if (/^(1|1F|1T|F1|1E|1EP|1EU|1-B|F1-B)$/.test(v)) return 'app';
+  if (/^IAY(-M)?$/.test(v)) return 'subscription';
+  if (/^(IA1|IA1-M|FI1|IA9|IA9-M)$/.test(v)) return 'in_app';
+  return v.toLowerCase().slice(0, 20);
+}
+
+/** The apps a Sales and Trends report is split between: an app's own rows by Apple ID, its in-app purchases by the app's SKU. */
+export interface SalesApp {
+  appId: string;
+  appleId: string;
+  sku: string | null;
+}
+
+/**
+ * Summary Sales (daily) of the whole vendor account, split per app while the rows stream in and
+ * aggregated per product and price point. Updates, redownloads and restored purchases are skipped.
+ */
+export function salesSummaryCollector(apps: SalesApp[]) {
+  const rows = new Map<string, Map<string, AppSalesInput>>();
+  const days = new Set<IsoDate>();
+  const col = columns();
+  const cents = (v: string) => Math.round(num(v) * 100);
+  return {
+    add(row: DelimitedRow): void {
+      const date = cellDate(col(row, 'begin date', 'date'));
+      if (!date) return;
+      days.add(date);
+      const productType = salesProductType(col(row, 'product type identifier'));
+      if (!productType) return;
+      const appleId = col(row, 'apple identifier').trim();
+      const parent = col(row, 'parent identifier').trim();
+      const app = apps.find((a) => a.appleId === appleId || (parent !== '' && a.sku !== null && a.sku === parent));
+      if (!app) return;
+      const units = num(col(row, 'units'));
+      if (!units) return;
+      const perUnitProceeds = cents(col(row, 'developer proceeds'));
+      const price = Math.abs(cents(col(row, 'customer price')));
+      const subscription = lower(col(row, 'subscription'));
+      const input: AppSalesInput = {
+        date,
+        sku: col(row, 'sku').trim().slice(0, 200) || appleId,
+        title: col(row, 'title').trim().slice(0, 200),
+        productType,
+        subscription: subscription === 'new' || subscription === 'renewal' ? subscription : '',
+        period: col(row, 'period').trim().slice(0, 30),
+        territory: normalizeTerritory(col(row, 'country code')),
+        proceedsCurrency: col(row, 'currency of proceeds').trim().toUpperCase().slice(0, 3) || '-',
+        customerCurrency: col(row, 'customer currency').trim().toUpperCase().slice(0, 3) || '-',
+        customerPriceCents: price,
+        units: units > 0 ? units : 0,
+        refundUnits: units < 0 ? -units : 0,
+        proceedsCents: Math.round(units * Math.abs(perUnitProceeds)),
+        refundProceedsCents: units < 0 ? Math.round(-units * Math.abs(perUnitProceeds)) : 0,
+        salesCents: Math.round(units * price),
+      };
+      const key = [
+        date,
+        input.sku,
+        productType,
+        input.subscription,
+        input.period,
+        input.territory,
+        input.proceedsCurrency,
+        input.customerCurrency,
+        price,
+      ].join('|');
+      const perApp = rows.get(app.appId) ?? new Map<string, AppSalesInput>();
+      rows.set(app.appId, perApp);
+      const e = perApp.get(key);
+      if (!e) perApp.set(key, input);
+      else {
+        e.units += input.units;
+        e.refundUnits += input.refundUnits;
+        e.proceedsCents += input.proceedsCents;
+        e.refundProceedsCents += input.refundProceedsCents;
+        e.salesCents += input.salesCents;
+      }
+    },
+    /** Writes every app's rows; each app's covered days are replaced, also with no rows (no sales that day). */
+    async write(store: Store, extraDays: IsoDate[] = []): Promise<number> {
+      const dates = [...new Set([...days, ...extraDays])].sort();
+      if (dates.length === 0) return 0;
+      let written = 0;
+      for (const app of apps) written += await store.writeAppSales(app.appId, dates, [...(rows.get(app.appId)?.values() ?? [])]);
+      return written;
     },
   };
 }

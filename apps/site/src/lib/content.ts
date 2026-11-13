@@ -491,6 +491,24 @@ export const TOOLS: Tool[] = [
     example: 'Which countries gained the most subscribers this month?',
   },
   {
+    name: 'app_revenue',
+    summary: 'App Store revenue per product, with refunds, against the previous period.',
+    description:
+      'Apple’s USD estimate per product (in-app purchase or paid app) from the App Store Purchases report, with refunds kept apart; with the optional ASC_VENDOR_NUMBER secret also the exact units, proceeds and refunds per SKU in each proceeds currency from Sales and Trends (never added across currencies), and subscription proceeds split into first payments and renewals. Lists refunded products per day.',
+    readOnly: true,
+    params: [
+      app,
+      start,
+      end,
+      days(28),
+      { name: 'groupBy', type: '("date" | "product" | "territory" | "type")[]', description: 'Defaults to `product`.' },
+      { name: 'product', type: 'string', description: 'Only this product: its name in App Store Connect, or its SKU.' },
+      { name: 'territory', type: 'string', description: 'Only this storefront, e.g. `US`.' },
+      limit(50),
+    ],
+    example: 'Which product was refunded on the day revenue went negative?',
+  },
+  {
     name: 'app_breakdown',
     summary: 'An app’s numbers per app version, device or OS version.',
     description:
@@ -651,6 +669,12 @@ const APP_SECRETS: Secret[] = [
   },
   { name: 'ASC_ISSUER_ID', required: 'for apps', description: 'The Issuer ID shown above the App Store Connect API keys.' },
   { name: 'ASC_PRIVATE_KEY', required: 'for apps', description: 'Contents of the key’s `AuthKey_<KEY ID>.p8` file.' },
+  {
+    name: 'ASC_VENDOR_NUMBER',
+    required: 'optional',
+    description:
+      'Vendor number from App Store Connect → Payments and Financial Reports. Turns on exact App Store revenue per product from the daily Sales and Trends report (read with the same Sales and Reports key).',
+  },
   {
     name: 'PLAY_REPORTS_BUCKET',
     required: 'for apps',

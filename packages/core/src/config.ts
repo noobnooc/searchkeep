@@ -38,6 +38,8 @@ export interface SearchkeepConfig {
     keyId: string | null;
     issuerId: string | null;
     privateKey: string | null;
+    /** Vendor number for Sales and Trends (ASC_VENDOR_NUMBER); optional, enables revenue per product in local currencies. */
+    vendorNumber: string | null;
   };
   /** Google Play: the Search Console service account unless PLAY_CLIENT_EMAIL/PLAY_PRIVATE_KEY are set. */
   play: {
@@ -258,6 +260,17 @@ export function normalizeBucket(raw: string | null, errors: string[]): string | 
   return name;
 }
 
+/** The App Store Connect vendor number (digits, shown in Payments and Financial Reports). */
+export function vendorNumber(raw: string | null, errors: string[]): string | null {
+  if (!raw) return null;
+  const v = raw.trim();
+  if (!/^\d{5,12}$/.test(v)) {
+    errors.push('ASC_VENDOR_NUMBER must be the vendor number shown in App Store Connect → Payments and Financial Reports (digits only).');
+    return null;
+  }
+  return v;
+}
+
 export function loadConfig(env: RawEnv): SearchkeepConfig {
   const errors: string[] = [];
   const sites = parseSites(str(env, 'SITES'), errors);
@@ -291,6 +304,7 @@ export function loadConfig(env: RawEnv): SearchkeepConfig {
       keyId: str(env, 'ASC_KEY_ID'),
       issuerId: str(env, 'ASC_ISSUER_ID'),
       privateKey: normalizePem(str(env, 'ASC_PRIVATE_KEY')),
+      vendorNumber: vendorNumber(str(env, 'ASC_VENDOR_NUMBER'), errors),
     },
     play: {
       clientEmail: str(env, 'PLAY_CLIENT_EMAIL') ?? str(env, 'GSC_CLIENT_EMAIL'),

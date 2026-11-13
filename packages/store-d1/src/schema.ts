@@ -484,6 +484,68 @@ export const appSubscriptionMetricsDaily = sqliteTable(
   ],
 );
 
+/** App Store purchases per day, product (Content Name), purchase type and territory; USD cents (Apple's estimate). */
+export const appProductsDaily = sqliteTable(
+  'app_products_daily',
+  {
+    appId: text('app_id').notNull(),
+    store: text('store').notNull(),
+    date: text('date').notNull(),
+    product: text('product').notNull(),
+    purchaseType: text('purchase_type').notNull().default(''),
+    territory: text('territory').notNull(),
+    purchases: integer('purchases').notNull().default(0),
+    refunds: integer('refunds').notNull().default(0),
+    proceedsCents: integer('proceeds_cents').notNull().default(0),
+    refundProceedsCents: integer('refund_proceeds_cents').notNull().default(0),
+    salesCents: integer('sales_cents').notNull().default(0),
+  },
+  (t) => [
+    primaryKey({ columns: [t.appId, t.store, t.date, t.product, t.purchaseType, t.territory] }),
+    index('app_products_daily_date').on(t.appId, t.date),
+  ],
+);
+
+/** App Store Sales and Trends (Summary Sales, daily) per product and price point, in the report's currencies. */
+export const appSalesDaily = sqliteTable(
+  'app_sales_daily',
+  {
+    appId: text('app_id').notNull(),
+    date: text('date').notNull(),
+    sku: text('sku').notNull(),
+    title: text('title').notNull().default(''),
+    productType: text('product_type').notNull(),
+    subscription: text('subscription').notNull().default(''),
+    period: text('period').notNull().default(''),
+    territory: text('territory').notNull(),
+    proceedsCurrency: text('proceeds_currency').notNull(),
+    customerCurrency: text('customer_currency').notNull(),
+    customerPriceCents: integer('customer_price_cents').notNull().default(0),
+    units: integer('units').notNull().default(0),
+    refundUnits: integer('refund_units').notNull().default(0),
+    proceedsCents: integer('proceeds_cents').notNull().default(0),
+    refundProceedsCents: integer('refund_proceeds_cents').notNull().default(0),
+    salesCents: integer('sales_cents').notNull().default(0),
+  },
+  (t) => [
+    primaryKey({
+      columns: [
+        t.appId,
+        t.date,
+        t.sku,
+        t.productType,
+        t.subscription,
+        t.period,
+        t.territory,
+        t.proceedsCurrency,
+        t.customerCurrency,
+        t.customerPriceCents,
+      ],
+    }),
+    index('app_sales_daily_date').on(t.appId, t.date),
+  ],
+);
+
 /**
  * Google Play earnings per file (ADR 0010): each earnings file's sums per day and buyer country, so a
  * file read again (or an adjustment file) changes only its own part of a day's revenue.

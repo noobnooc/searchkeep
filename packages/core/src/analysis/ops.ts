@@ -5,7 +5,7 @@ import type { ReadinessReport } from '../auth/readiness.js';
 import type { SourceClients } from '../sources.js';
 import { pageToUrl } from '../url.js';
 import type { AppConfig, SearchSource, SiteConfig } from '../types.js';
-import { previousPeriod, rangeLength } from '../dates.js';
+import { addDays, previousPeriod, rangeLength, toIsoDate } from '../dates.js';
 import { clampLimit, metrics, resolve, type AnalysisContext, type CommonParams } from './common.js';
 import { aiCrawlers } from './geo.js';
 import { syncProgress, type SyncProgressReport } from '../sync/progress.js';
@@ -220,6 +220,18 @@ export async function setupStatus(ctx: OpsContext, p: { readiness: ReadinessRepo
     status: !anyApple ? 'skipped' : ascSet === 3 ? 'ok' : 'error',
     ...(!anyApple ? { detail: 'No app has an App Store Apple ID.' } : ascSet === 3 ? {} : { detail: 'Set all three secrets.' }),
   });
+  if (anyApple)
+    add({
+      id: 'config.asc_vendor',
+      label: 'App Store Sales and Trends (ASC_VENDOR_NUMBER, optional)',
+      status: config.asc.vendorNumber ? 'ok' : 'warn',
+      ...(config.asc.vendorNumber
+        ? {}
+        : {
+            detail:
+              "Optional: without it, revenue per product is Apple's USD estimate only. For exact revenue per product in local currencies, prices, refunds and new versus renewal subscription proceeds, copy the vendor number from App Store Connect → Payments and Financial Reports (shown next to your legal entity name) and set it as the ASC_VENDOR_NUMBER secret. The existing Sales and Reports key can read Sales and Trends.",
+          }),
+    });
   add({
     id: 'config.play',
     label: 'Google Play reports (PLAY_REPORTS_BUCKET and a service account)',
@@ -264,6 +276,24 @@ export async function setupStatus(ctx: OpsContext, p: { readiness: ReadinessRepo
         if (missing.length)
           return ['error', `Not visible to the App Store Connect key: ${missing.map((a) => `${a.name} (${a.appleId})`).join(', ')}.`];
         return 'ok';
+      });
+    }
+    if (asc?.salesReport && anyApple && config.asc.vendorNumber) {
+      await probe('probe.asc_sales', 'App Store Connect key can read Sales and Trends', async () => {
+        const day = addDays(toIsoDate(ctx.now ? ctx.now() : new Date()), -3);
+        try {
+          await asc.salesReport!(config.asc.vendorNumber!, day, () => undefined);
+          return 'ok';
+        } catch (err) {
+          if (err instanceof SourceError && (err.status === 403 || err.status === 401))
+            return [
+              'warn',
+              'The App Store Connect key may not read Sales and Trends. In App Store Connect → Users and Access → Integrations → App Store Connect API, use a key with the Sales and Reports (or Finance) role for ASC_KEY_ID, ASC_ISSUER_ID and ASC_PRIVATE_KEY, and check ASC_VENDOR_NUMBER matches Payments and Financial Reports.',
+            ];
+          if (err instanceof SourceError && err.status === 400)
+            return ['warn', `Apple refused the Sales and Trends request (${safeMessage(err)}). Check ASC_VENDOR_NUMBER.`];
+          throw err;
+        }
       });
     }
     if (play && anyPlay && config.play.bucket) {

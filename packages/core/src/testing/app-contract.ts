@@ -10,6 +10,7 @@ import {
   appSearchTerms,
   appStability,
   appSubscriptions,
+  appRevenue,
   listApps,
   startAppStoreReports,
 } from '../apps/analysis.js';
@@ -56,7 +57,7 @@ function config(extra: Record<string, string> = {}): SearchkeepConfig {
 }
 
 /** App Store Connect with an ongoing request (three daily instances) and a snapshot. */
-function fakeAsc(opts: { listForbidden?: boolean; requests?: AscReportRequest[] } = {}) {
+function fakeAsc(opts: { listForbidden?: boolean; requests?: AscReportRequest[]; salesForbidden?: boolean } = {}) {
   const calls: string[] = [];
   const requests: AscReportRequest[] = opts.requests ?? [
     { id: 'ongoing', accessType: 'ONGOING', stoppedDueToInactivity: false },
@@ -218,7 +219,53 @@ function fakeAsc(opts: { listForbidden?: boolean; requests?: AscReportRequest[] 
   }
   const client: AscClient = {
     async listApps() {
-      return [{ id: APP.appleId, name: 'Acme', bundleId: 'com.acme.app' }];
+      calls.push('listApps');
+      return [{ id: APP.appleId, name: 'Acme', bundleId: 'com.acme.app', sku: 'ACME' }];
+    },
+    async salesReport(vendor, date, onRow) {
+      calls.push(`sales:${date}`);
+      if (opts.salesForbidden) throw new SourceError('asc', 403, 'sales report: HTTP 403: FORBIDDEN_ERROR');
+      if (date !== '2026-10-18') return null;
+      // Summary Sales rows (columns as Apple names them), for this app and another app of the account.
+      const sale = (
+        sku: string,
+        type: string,
+        units: number,
+        proceeds: string,
+        cur: string,
+        country: string,
+        appleId: string,
+        price: string,
+        parent: string,
+        sub: string,
+      ) => ({
+        provider: 'APPLE',
+        sku,
+        title: sku === 'ACME' ? 'Acme' : sku,
+        'product type identifier': type,
+        units: String(units),
+        'developer proceeds': proceeds,
+        'begin date': '10/18/2026',
+        'end date': '10/18/2026',
+        'customer currency': cur,
+        'country code': country,
+        'currency of proceeds': cur,
+        'apple identifier': appleId,
+        'customer price': price,
+        'parent identifier': parent,
+        subscription: sub,
+        period: sub ? '1 Month' : '',
+      });
+      const rows = [
+        sale('acme.pro', 'IAY', 3, '4.99', 'USD', 'US', '900001', '6.99', 'ACME', 'New'),
+        sale('acme.pro', 'IAY', 5, '4.99', 'USD', 'US', '900001', '6.99', 'ACME', 'Renewal'),
+        sale('acme.pro', 'IAY', -1, '4.99', 'USD', 'US', '900001', '-6.99', 'ACME', 'New'),
+        sale('acme.pro', 'IAY', 2, '5.05', 'EUR', 'DE', '900001', '7.99', 'ACME', 'Renewal'),
+        sale('ACME', '7', 30, '0', 'USD', 'US', APP.appleId, '0', '', ''),
+        sale('other.tip', 'IA1', 4, '0.70', 'USD', 'US', '900002', '0.99', 'OTHER', ''),
+      ];
+      for (const r of rows) onRow(r);
+      return rows.length;
     },
     async latestBuildIcon() {
       return null;
@@ -1267,6 +1314,111 @@ export function appContract(name: string, makeStore: () => Promise<Store>): void
         });
         const again = await appSubscriptions(ctx, { app: APP.id, store: 'apple', start: '2026-10-12', end: '2026-10-18' });
         expect(again.appStore!.current).toMatchObject({ activeSubscriptions: 12, freeTrials: 0, billingRetry: 0, trialStarts: 4 });
+      });
+
+      it('reads Sales and Trends per day for the vendor account, history back a year, and splits revenue per product and currency', async () => {
+        const cfg = config({ APP_STORE_PUBLIC_DATA: 'false', ASC_VENDOR_NUMBER: '85000000' });
+        const asc = fakeAsc();
+        const run = await runSync({ store, config: cfg, clients: { asc: asc.client }, trigger: 'manual', now: NOW, pacing: {} });
+        expect(run.status).toBe('ok');
+        // Three days back to yesterday; yesterday is not out yet, so it is asked again later, not now.
+        expect(asc.calls.filter((c) => c.startsWith('sales:'))).toEqual(['sales:2026-10-17', 'sales:2026-10-18', 'sales:2026-10-19']);
+        const state = JSON.parse((await store.getMeta(syncKeys.ascSales))!);
+        expect(state).toMatchObject({ through: '2026-10-18', from: '2026-10-17' });
+        expect(Date.parse(state.waitUntil)).toBeGreaterThan(NOW.getTime());
+
+        // The next run: no daily call while waiting; history goes back from the oldest day read.
+        const next = fakeAsc();
+        await runSync({
+          store,
+          config: cfg,
+          clients: { asc: next.client },
+          trigger: 'manual',
+          now: new Date('2026-10-20T05:00:00Z'),
+          pacing: {},
+        });
+        const sales = next.calls.filter((c) => c.startsWith('sales:'));
+        expect(sales[0]).toBe('sales:2026-10-16');
+        expect(sales).not.toContain('sales:2026-10-19');
+        expect(JSON.parse((await store.getMeta(syncKeys.ascSales))!).from < '2026-10-16').toBe(true);
+
+        const ctx = { store, config: cfg, clients: {}, now: () => NOW };
+        const rev = await appRevenue(ctx, { app: APP.id, start: '2026-10-12', end: '2026-10-18' });
+        expect(rev.sales!.configured).toBe(true);
+        // Never added across currencies; refunds kept apart; the other app's tip is not this app's.
+        expect(rev.sales!.currencies).toEqual([
+          {
+            currency: 'EUR',
+            current: { units: 2, refundUnits: 0, proceeds: 10.1, refundedProceeds: 0 },
+            previous: { units: 0, refundUnits: 0, proceeds: 0, refundedProceeds: 0 },
+            newSubscriptionProceeds: 0,
+            renewalProceeds: 10.1,
+          },
+          {
+            currency: 'USD',
+            current: { units: 8, refundUnits: 1, proceeds: 34.93, refundedProceeds: 4.99 },
+            previous: { units: 0, refundUnits: 0, proceeds: 0, refundedProceeds: 0 },
+            newSubscriptionProceeds: 9.98,
+            renewalProceeds: 24.95,
+          },
+        ]);
+        expect(rev.sales!.rows.find((x) => x.sku === 'acme.pro' && x.currency === 'USD')).toMatchObject({ units: 8, refundUnits: 1 });
+        // Analytics: App Store Purchases per product, the refund kept apart.
+        expect(rev.analytics.rows).toEqual([
+          { product: 'Pro', purchases: 4, refunds: 1, proceeds: 18.97, refundedProceeds: 6.99, sales: 26.97 },
+        ]);
+        expect(rev.refunds).toEqual([
+          expect.objectContaining({
+            source: 'analytics',
+            date: '2026-10-18',
+            product: 'Pro',
+            refunds: 1,
+            refundedProceeds: 6.99,
+            currency: 'USD',
+          }),
+          expect.objectContaining({
+            source: 'sales',
+            date: '2026-10-18',
+            sku: 'acme.pro',
+            refunds: 1,
+            refundedProceeds: 4.99,
+            currency: 'USD',
+          }),
+        ]);
+        const byDay = await appRevenue(ctx, { app: APP.id, start: '2026-10-12', end: '2026-10-18', groupBy: ['date', 'product'] });
+        expect(byDay.analytics.rows[0]).toMatchObject({ date: '2026-10-18', product: 'Pro' });
+        // app_subscriptions splits subscription proceeds into first payments and renewals.
+        const subs = await appSubscriptions(ctx, { app: APP.id, store: 'apple', start: '2026-10-12', end: '2026-10-18' });
+        expect(subs.appStore!.proceeds).toEqual([
+          { currency: 'EUR', newSubscriptions: 0, renewals: 10.1, newUnits: 0, renewalUnits: 2 },
+          { currency: 'USD', newSubscriptions: 9.98, renewals: 24.95, newUnits: 3, renewalUnits: 5 },
+        ]);
+      });
+
+      it('warns in setup_status when Sales and Trends is not set up or the key may not read it', async () => {
+        const readiness = evaluateReadiness({
+          configured: true,
+          identityOk: true,
+          inspection: { appFound: true, managedOAuthEnabled: true, broadPolicyReasons: [] },
+        });
+        const status = async (cfg: SearchkeepConfig, asc: AscClient) =>
+          (await setupStatus({ store, config: cfg, clients: { asc }, now: () => NOW }, { readiness })).checks;
+        const without = await status(config({ APP_STORE_PUBLIC_DATA: 'false' }), fakeAsc().client);
+        expect(without.find((c) => c.id === 'config.asc_vendor')).toMatchObject({
+          status: 'warn',
+          detail: expect.stringContaining('ASC_VENDOR_NUMBER'),
+        });
+        expect(without.find((c) => c.id === 'probe.asc_sales')).toBeUndefined();
+        const cfg = config({ APP_STORE_PUBLIC_DATA: 'false', ASC_VENDOR_NUMBER: '85000000' });
+        const ok = await status(cfg, fakeAsc().client);
+        expect(ok.find((c) => c.id === 'config.asc_vendor')!.status).toBe('ok');
+        expect(ok.find((c) => c.id === 'probe.asc_sales')!.status).toBe('ok');
+        const denied = await status(cfg, fakeAsc({ salesForbidden: true }).client);
+        expect(denied.find((c) => c.id === 'probe.asc_sales')).toMatchObject({
+          status: 'warn',
+          detail: expect.stringContaining('Sales and Reports'),
+        });
+        expect(config({ ASC_VENDOR_NUMBER: 'abc' }).errors.join(' ')).toContain('ASC_VENDOR_NUMBER');
       });
 
       it('looks for report kinds added since the last listing right away', async () => {

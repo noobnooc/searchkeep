@@ -57,6 +57,13 @@
       "when": 1794575008114,
       "tag": "0007_app_subscription_metrics",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1794575737772,
+      "tag": "0008_app_products_sales",
+      "breakpoints": true
     }
   ]
 }

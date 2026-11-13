@@ -61,6 +61,12 @@ import {
   type WebAnalyticsInput,
   type WebVitalsInput,
   type AppSubscriptionInput,
+  type AppProductInput,
+  type AppProductQuery,
+  type AppProductRow,
+  type AppSalesInput,
+  type AppSalesQuery,
+  type AppSalesRow,
   type AppSubscriptionMetricQuery,
   type AppSubscriptionMetricRow,
   type AppSubscriptionMetricWrite,
@@ -2040,6 +2046,204 @@ export class D1Store implements Store {
     });
   }
 
+  async writeAppProducts(appId: string, dates: IsoDate[], rows: AppProductInput[]): Promise<number> {
+    const agg = new Map<string, { d: string; p: string; t: string; c: string; n: number; r: number; pc: number; rc: number; sc: number }>();
+    for (const x of rows) {
+      const key = `${x.date}|${x.product}|${x.purchaseType}|${x.territory}`;
+      const e = agg.get(key) ?? { d: x.date, p: x.product, t: x.purchaseType, c: x.territory, n: 0, r: 0, pc: 0, rc: 0, sc: 0 };
+      e.n += Math.round(x.purchases);
+      e.r += Math.round(x.refunds);
+      e.pc += Math.round(x.proceedsCents);
+      e.rc += Math.round(x.refundProceedsCents);
+      e.sc += Math.round(x.salesCents);
+      agg.set(key, e);
+    }
+    const days = [...new Set([...dates, ...[...agg.values()].map((x) => x.d)])];
+    if (days.length === 0) return 0;
+    const list = [...agg.values()].filter((x) => x.n || x.r || x.pc || x.rc || x.sc);
+    await this.batch([
+      ...chunks(days).map((group) =>
+        this.db
+          .prepare(`DELETE FROM app_products_daily WHERE app_id = ?1 AND store = 'apple' AND date IN (SELECT value FROM json_each(?2))`)
+          .bind(appId, JSON.stringify(group)),
+      ),
+      ...chunks(list).map((group) =>
+        this.db
+          .prepare(
+            `INSERT INTO app_products_daily (app_id, store, date, product, purchase_type, territory, purchases, refunds, proceeds_cents, refund_proceeds_cents, sales_cents)
+             SELECT ?1, 'apple', j.value->>'d', j.value->>'p', j.value->>'t', j.value->>'c', j.value->>'n', j.value->>'r', j.value->>'pc', j.value->>'rc', j.value->>'sc'
+             FROM json_each(?2) j WHERE true`,
+          )
+          .bind(appId, JSON.stringify(group)),
+      ),
+    ]);
+    return list.length;
+  }
+
+  async queryAppProducts(q: AppProductQuery): Promise<AppProductRow[]> {
+    const dims = allow([...new Set(q.dimensions)], ['date', 'product', 'purchaseType', 'territory'] as const, 'dimension');
+    const column = { date: 'date', product: 'product', purchaseType: 'purchase_type', territory: 'territory' } as const;
+    const binds: Bind[] = [q.appId, q.range.start, q.range.end];
+    const where = ['app_id = ?1', `store = 'apple'`, 'date >= ?2', 'date <= ?3'];
+    if (q.product) {
+      binds.push(q.product);
+      where.push(`product = ?${binds.length}`);
+    }
+    if (q.territory) {
+      binds.push(q.territory);
+      where.push(`territory = ?${binds.length}`);
+    }
+    const rows = await this.all<Record<string, string | number | null>>(
+      `SELECT ${dims.map((d) => `${column[d]} AS ${d}, `).join('')}SUM(purchases) AS purchases, SUM(refunds) AS refunds,
+              SUM(proceeds_cents) AS proceedsCents, SUM(refund_proceeds_cents) AS refundProceedsCents, SUM(sales_cents) AS salesCents
+       FROM app_products_daily WHERE ${where.join(' AND ')}
+       ${dims.length ? `GROUP BY ${dims.map((d) => column[d]).join(', ')}` : ''}
+       HAVING COUNT(*) > 0
+       ORDER BY ${dims.includes('date') ? 'date ASC, ' : ''}proceedsCents DESC${dims.length ? `, ${dims.map((d) => column[d]).join(', ')}` : ''}
+       LIMIT ${Math.max(1, Math.min(10000, Math.floor(q.limit ?? 1000)))}`,
+      ...binds,
+    );
+    return rows.map((r) => {
+      const out: AppProductRow = {
+        purchases: Number(r.purchases) || 0,
+        refunds: Number(r.refunds) || 0,
+        proceedsCents: Number(r.proceedsCents) || 0,
+        refundProceedsCents: Number(r.refundProceedsCents) || 0,
+        salesCents: Number(r.salesCents) || 0,
+      };
+      for (const d of dims) if (r[d] != null) out[d] = String(r[d]);
+      return out;
+    });
+  }
+
+  async writeAppSales(appId: string, dates: IsoDate[], rows: AppSalesInput[]): Promise<number> {
+    const agg = new Map<string, AppSalesInput>();
+    for (const x of rows) {
+      const key = [
+        x.date,
+        x.sku,
+        x.productType,
+        x.subscription,
+        x.period,
+        x.territory,
+        x.proceedsCurrency,
+        x.customerCurrency,
+        x.customerPriceCents,
+      ].join('|');
+      const e = agg.get(key);
+      if (!e) agg.set(key, { ...x });
+      else {
+        e.units += x.units;
+        e.refundUnits += x.refundUnits;
+        e.proceedsCents += x.proceedsCents;
+        e.refundProceedsCents += x.refundProceedsCents;
+        e.salesCents += x.salesCents;
+      }
+    }
+    const days = [...new Set([...dates, ...[...agg.values()].map((x) => x.date)])];
+    if (days.length === 0) return 0;
+    const list = [...agg.values()].map((x) => ({
+      d: x.date,
+      k: x.sku,
+      ti: x.title,
+      ty: x.productType,
+      s: x.subscription,
+      pe: x.period,
+      t: x.territory,
+      pcur: x.proceedsCurrency,
+      ccur: x.customerCurrency,
+      cp: Math.round(x.customerPriceCents),
+      u: Math.round(x.units),
+      ru: Math.round(x.refundUnits),
+      pc: Math.round(x.proceedsCents),
+      rc: Math.round(x.refundProceedsCents),
+      sc: Math.round(x.salesCents),
+    }));
+    await this.batch([
+      ...chunks(days).map((group) =>
+        this.db
+          .prepare('DELETE FROM app_sales_daily WHERE app_id = ?1 AND date IN (SELECT value FROM json_each(?2))')
+          .bind(appId, JSON.stringify(group)),
+      ),
+      ...chunks(list).map((group) =>
+        this.db
+          .prepare(
+            `INSERT INTO app_sales_daily (app_id, date, sku, title, product_type, subscription, period, territory, proceeds_currency, customer_currency,
+               customer_price_cents, units, refund_units, proceeds_cents, refund_proceeds_cents, sales_cents)
+             SELECT ?1, j.value->>'d', j.value->>'k', j.value->>'ti', j.value->>'ty', j.value->>'s', j.value->>'pe', j.value->>'t', j.value->>'pcur',
+               j.value->>'ccur', j.value->>'cp', j.value->>'u', j.value->>'ru', j.value->>'pc', j.value->>'rc', j.value->>'sc'
+             FROM json_each(?2) j WHERE true`,
+          )
+          .bind(appId, JSON.stringify(group)),
+      ),
+    ]);
+    return list.length;
+  }
+
+  async queryAppSales(q: AppSalesQuery): Promise<AppSalesRow[]> {
+    const all = [
+      'date',
+      'sku',
+      'title',
+      'productType',
+      'subscription',
+      'territory',
+      'proceedsCurrency',
+      'customerCurrency',
+      'customerPriceCents',
+    ] as const;
+    const dims = allow([...new Set(q.dimensions)], all, 'dimension');
+    const column: Record<(typeof all)[number], string> = {
+      date: 'date',
+      sku: 'sku',
+      title: 'title',
+      productType: 'product_type',
+      subscription: 'subscription',
+      territory: 'territory',
+      proceedsCurrency: 'proceeds_currency',
+      customerCurrency: 'customer_currency',
+      customerPriceCents: 'customer_price_cents',
+    };
+    const binds: Bind[] = [q.appId, q.range.start, q.range.end];
+    const where = ['app_id = ?1', 'date >= ?2', 'date <= ?3'];
+    if (q.sku) {
+      binds.push(q.sku);
+      where.push(`(sku = ?${binds.length} OR title = ?${binds.length})`);
+    }
+    if (q.territory) {
+      binds.push(q.territory);
+      where.push(`territory = ?${binds.length}`);
+    }
+    // A title is the same for every row of a SKU: grouped by SKU, the title comes along.
+    const select = dims.map((d) => (d === 'title' && dims.includes('sku') ? 'MAX(title) AS title' : `${column[d]} AS ${d}`));
+    const group = dims.filter((d) => !(d === 'title' && dims.includes('sku'))).map((d) => column[d]);
+    const rows = await this.all<Record<string, string | number | null>>(
+      `SELECT ${select.map((c) => `${c}, `).join('')}SUM(units) AS units, SUM(refund_units) AS refundUnits, SUM(proceeds_cents) AS proceedsCents,
+              SUM(refund_proceeds_cents) AS refundProceedsCents, SUM(sales_cents) AS salesCents
+       FROM app_sales_daily WHERE ${where.join(' AND ')}
+       ${group.length ? `GROUP BY ${group.join(', ')}` : ''}
+       HAVING COUNT(*) > 0
+       ORDER BY ${dims.includes('date') ? 'date ASC, ' : ''}proceedsCents DESC${group.length ? `, ${group.join(', ')}` : ''}
+       LIMIT ${Math.max(1, Math.min(10000, Math.floor(q.limit ?? 1000)))}`,
+      ...binds,
+    );
+    return rows.map((r) => {
+      const out: AppSalesRow = {
+        units: Number(r.units) || 0,
+        refundUnits: Number(r.refundUnits) || 0,
+        proceedsCents: Number(r.proceedsCents) || 0,
+        refundProceedsCents: Number(r.refundProceedsCents) || 0,
+        salesCents: Number(r.salesCents) || 0,
+      };
+      for (const d of dims) {
+        if (r[d] == null) continue;
+        if (d === 'customerPriceCents') out.customerPriceCents = Number(r[d]) || 0;
+        else out[d] = String(r[d]);
+      }
+      return out;
+    });
+  }
+
   async queryAppChartRanks(appId: string, range: DateRange): Promise<AppChartRankInput[]> {
     const rows = await this.all<AppChartRankInput>(
       `SELECT date, territory, chart, genre, rank FROM app_chart_ranks WHERE app_id = ?1 AND date >= ?2 AND date <= ?3
@@ -2060,7 +2264,7 @@ export class D1Store implements Store {
           )
         ).map((r) => r.id);
     const out: AppDataCoverage[] = [];
-    const datasets: Array<[string, string, boolean]> = [
+    const datasets: Array<[string, string, boolean | AppStore]> = [
       ['store', 'app_store_daily', true],
       ['search_terms', 'app_search_terms', false],
       ['referrers', 'app_referrers', true],
@@ -2069,15 +2273,17 @@ export class D1Store implements Store {
       ['vitals', 'app_vitals', true],
       ['subscriptions', 'app_subscriptions_daily', false],
       ['subscription_metrics', 'app_subscription_metrics_daily', true],
+      ['products', 'app_products_daily', true],
+      ['sales', 'app_sales_daily', 'apple'],
     ];
     for (const id of ids) {
       const results = await this.db.batch(
         datasets.map(([, table, hasStore]) =>
           this.db
             .prepare(
-              hasStore
+              hasStore === true
                 ? `SELECT store, MIN(date) AS first, MAX(date) AS last FROM ${table} WHERE app_id = ?1 GROUP BY store`
-                : `SELECT 'play' AS store, MIN(date) AS first, MAX(date) AS last FROM ${table} WHERE app_id = ?1 HAVING COUNT(*) > 0`,
+                : `SELECT '${hasStore === 'apple' ? 'apple' : 'play'}' AS store, MIN(date) AS first, MAX(date) AS last FROM ${table} WHERE app_id = ?1 HAVING COUNT(*) > 0`,
             )
             .bind(id),
         ),

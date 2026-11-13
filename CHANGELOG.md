@@ -26,6 +26,23 @@ Because users sync `main` at any time, the `Unreleased` section is always accura
 
 ### Added
 
+- App Store revenue per product. The App Store Purchases report's Content Name is now kept per
+  product, purchase type and storefront (Apple's USD estimate, refunds kept apart), and with the
+  optional `ASC_VENDOR_NUMBER` secret the sync reads the daily Sales and Trends Summary Sales report
+  of the account with the existing Sales and Reports key (one call a day, history back a year): units,
+  proceeds and refunds per SKU, country, price and currency, and whether a subscription payment was
+  new or a renewal. Free downloads, updates and redownloads are left out; amounts in different
+  currencies are never added up. New MCP tool and API `app_revenue` (`/api/app-revenue`) with a
+  `refunds` list per day and product; `app_subscriptions` returns `appStore.proceeds` split into
+  first payments and renewals. `setup_status` gains `config.asc_vendor` and `probe.asc_sales`.
+
+  #### Upgrade notes
+  - Optional, any time after syncing: for exact revenue per product, copy the vendor number from App
+    Store Connect → **Payments and Financial Reports** (next to your legal entity name) and run
+    `npx wrangler secret put ASC_VENDOR_NUMBER` (or add it under the Worker's **Settings** →
+    **Variables and Secrets**). Skipping it keeps the USD estimate per product;
+    `setup_status` shows `config.asc_vendor` as `warn` until it is set.
+
 - App Store subscriptions. The sync reads Apple's App Store Subscription State and Subscription
   Event reports (Standard), which the App Store report requests already produce: active
   subscriptions, free trials, paid offers, billing retry, grace period and suspended

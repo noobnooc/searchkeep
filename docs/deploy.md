@@ -109,6 +109,7 @@ are never shown, which is expected.
 | `ASC_KEY_ID`              | for apps | 14a         | Key ID of an App Store Connect API key with the **Sales and Reports** role (never an Admin key)                        |
 | `ASC_ISSUER_ID`           | for apps | 14a         | Issuer ID shown above the App Store Connect API keys                                                                   |
 | `ASC_PRIVATE_KEY`         | for apps | 14a         | Contents of that key's `AuthKey_<KEY ID>.p8` file                                                                      |
+| `ASC_VENDOR_NUMBER`       | optional | 14a         | Vendor number from Payments and Financial Reports: exact App Store revenue per product (Sales and Trends)              |
 | `PLAY_REPORTS_BUCKET`     | for apps | 14a         | Cloud Storage bucket of your Play Console reports, `pubsite_prod_rev_…` (the full `gs://` URI is accepted)             |
 | `PLAY_CLIENT_EMAIL`       | optional | 14a         | Service account for Google Play, when it is not the Search Console one (`GSC_CLIENT_EMAIL`)                            |
 | `PLAY_PRIVATE_KEY`        | optional | 14a         | Its private key, when `PLAY_CLIENT_EMAIL` is set                                                                       |
@@ -757,6 +758,15 @@ one of your sites (referrals from it are marked as your own).
    ```sh
    npx wrangler secret put ASC_PRIVATE_KEY < AuthKey_ABC123DEF4.p8
    ```
+
+   Optional, for exact revenue per product: **[Human]** App Store Connect → **Payments and Financial
+   Reports**; the vendor number is shown next to your legal entity name (top left). Set it as
+   `ASC_VENDOR_NUMBER` (`npx wrangler secret put ASC_VENDOR_NUMBER`). The same Sales and Reports key
+   reads the daily Summary Sales report of the whole account (one call a day, history back a year,
+   which is how long Apple keeps daily reports); each app keeps only its own rows, aggregated per
+   product, country, currency and price. Without it, revenue per product is Apple's USD estimate
+   from the App Store Purchases report. **Verify:** `setup_status` shows `config.asc_vendor` and
+   `probe.asc_sales` as `ok`.
 
 3. **Start App Store reports, once per app.** **[Human]** Apple generates analytics reports only
    after a request made with an **Admin** key, and Searchkeep never stores one. Generate a second,

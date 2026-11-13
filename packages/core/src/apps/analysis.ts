@@ -726,7 +726,25 @@ async function appleSubscriptions(ctx: OpsContext, r: ResolvedApp, p: AppSubscri
   const as = <K extends string>(k: K, xs: Array<AppleSummary & { value: string }>) =>
     xs.map(({ value, ...x }) => ({ [k]: value, ...x }) as AppleSummary & Record<K, string>);
   const hasData = evCur.length > 0 || stCur.length > 0;
+  // Proceeds of first payments and renewals per currency, from Sales and Trends (when configured).
+  const split = await ctx.store.queryAppSales({
+    appId: r.app.id,
+    range: r.range,
+    dimensions: ['subscription', 'proceedsCurrency'],
+    ...(p.territory ? { territory: p.territory.trim().toUpperCase() } : {}),
+  });
+  const proceeds = [...new Set(split.filter((x) => x.subscription).map((x) => x.proceedsCurrency!))].sort().map((currency) => {
+    const of = (kind: string) => split.find((x) => x.subscription === kind && x.proceedsCurrency === currency);
+    return {
+      currency,
+      newSubscriptions: round((of('new')?.proceedsCents ?? 0) / 100, 2),
+      renewals: round((of('renewal')?.proceedsCents ?? 0) / 100, 2),
+      newUnits: of('new')?.units ?? 0,
+      renewalUnits: of('renewal')?.units ?? 0,
+    };
+  });
   const result = {
+    proceeds: ctx.config.asc.vendorNumber || proceeds.length ? proceeds : null,
     current: appleSummary(evCur, stCur),
     previous: appleSummary(evPrev, stPrev),
     products: as('product', rank(groupSummaries('product', evProd, stProd))),
@@ -787,8 +805,14 @@ export async function appSubscriptions(ctx: OpsContext, p: AppSubscriptionsParam
       );
   }
   if (p.product) notes.push('Product filters by the Google Play product id and by the App Store subscription name.');
+  if (appStore)
+    notes.push(
+      appStore.result.proceeds
+        ? 'App Store proceeds (appStore.proceeds) split auto-renewable subscription payments into first payments and renewals per proceeds currency, from Sales and Trends; the product filter does not apply to them (see app_revenue per product).'
+        : 'App Store proceeds split into first payments and renewals need Sales and Trends: set the ASC_VENDOR_NUMBER secret (see app_revenue).',
+    );
   notes.push(
-    'Subscription revenue split into new and renewal is not in these reports. Install retention and subscriber cohorts are offered by neither store: use your own app analytics or a subscription platform for those.',
+    'Install retention and subscriber cohorts are offered by neither store: use your own app analytics or a subscription platform for those.',
   );
   return {
     app: r.app.id,
@@ -798,6 +822,152 @@ export async function appSubscriptions(ctx: OpsContext, p: AppSubscriptionsParam
     ...(appStore ? { appStore: appStore.result } : {}),
     notes,
   };
+}
+
+export interface AppRevenueParams extends Omit<AppParams, 'store'> {
+  /** Group rows by these (default product). */
+  groupBy?: Array<'date' | 'product' | 'territory' | 'type'>;
+  /** Only this product: the App Store product name (Content Name) or Sales and Trends SKU or title. */
+  product?: string;
+  territory?: string;
+}
+
+const REVENUE_GROUPS = ['date', 'product', 'territory', 'type'] as const;
+const money = (cents: number) => round(cents / 100, 2);
+
+/**
+ * App Store revenue per product. Always: Apple's estimate in USD per product (App Store Purchases),
+ * with refunds kept apart. With Sales and Trends (ASC_VENDOR_NUMBER): the exact units, proceeds and
+ * refunds per product in each proceeds currency, the customer price and whether a subscription
+ * payment was new or a renewal. Amounts in different currencies are never added up.
+ */
+export async function appRevenue(ctx: OpsContext, p: AppRevenueParams) {
+  const r = await resolveApp(ctx, { ...p, store: 'apple' }, { days: 28, limit: 50 });
+  const groupBy = p.groupBy ?? ['product'];
+  for (const g of groupBy)
+    if (!(REVENUE_GROUPS as readonly string[]).includes(g))
+      throw new SearchkeepError('bad_request', `groupBy must be any of ${REVENUE_GROUPS.join(', ')}.`);
+  const prev = previousPeriod(r.range);
+  const territory = p.territory?.trim().toUpperCase();
+  const product = p.product?.trim();
+
+  // Analytics Reports (USD estimate).
+  const aq = { appId: r.app.id, ...(product ? { product } : {}), ...(territory ? { territory } : {}) };
+  const aDims = groupBy.map((g) => (g === 'type' ? 'purchaseType' : g)) as Array<'date' | 'product' | 'territory' | 'purchaseType'>;
+  const [aCur, aPrev, aRows, aRefunds] = await Promise.all([
+    ctx.store.queryAppProducts({ ...aq, range: r.range, dimensions: [] }),
+    ctx.store.queryAppProducts({ ...aq, range: prev, dimensions: [] }),
+    ctx.store.queryAppProducts({ ...aq, range: r.range, dimensions: aDims, limit: groupBy.includes('date') ? 5000 : r.limit }),
+    ctx.store.queryAppProducts({ ...aq, range: r.range, dimensions: ['date', 'product', 'territory'], limit: 5000 }),
+  ]);
+  const aOut = (x: (typeof aCur)[number] | undefined) => ({
+    purchases: x?.purchases ?? 0,
+    refunds: x?.refunds ?? 0,
+    proceeds: money(x?.proceedsCents ?? 0),
+    refundedProceeds: money(x?.refundProceedsCents ?? 0),
+    sales: money(x?.salesCents ?? 0),
+  });
+  const analytics = {
+    currency: 'USD',
+    current: aOut(aCur[0]),
+    previous: aOut(aPrev[0]),
+    rows: aRows.map((x) => ({
+      ...(x.date ? { date: x.date } : {}),
+      ...(x.product !== undefined ? { product: x.product } : {}),
+      ...(x.purchaseType !== undefined ? { type: x.purchaseType } : {}),
+      ...(x.territory !== undefined ? { territory: x.territory } : {}),
+      ...aOut(x),
+    })),
+  };
+
+  // Sales and Trends (exact, per currency).
+  const sq = { appId: r.app.id, ...(product ? { sku: product } : {}), ...(territory ? { territory } : {}) };
+  const sDims = [
+    ...groupBy.flatMap((g) => (g === 'product' ? (['sku', 'title'] as const) : g === 'type' ? (['productType'] as const) : ([g] as const))),
+    'proceedsCurrency' as const,
+  ];
+  const [sCur, sPrev, sRows, sSubs, sRefunds] = await Promise.all([
+    ctx.store.queryAppSales({ ...sq, range: r.range, dimensions: ['proceedsCurrency'] }),
+    ctx.store.queryAppSales({ ...sq, range: prev, dimensions: ['proceedsCurrency'] }),
+    ctx.store.queryAppSales({ ...sq, range: r.range, dimensions: sDims, limit: groupBy.includes('date') ? 5000 : r.limit }),
+    ctx.store.queryAppSales({ ...sq, range: r.range, dimensions: ['subscription', 'proceedsCurrency'] }),
+    ctx.store.queryAppSales({ ...sq, range: r.range, dimensions: ['date', 'sku', 'title', 'territory', 'proceedsCurrency'], limit: 5000 }),
+  ]);
+  const sOut = (x: (typeof sCur)[number] | undefined) => ({
+    units: x?.units ?? 0,
+    refundUnits: x?.refundUnits ?? 0,
+    proceeds: money(x?.proceedsCents ?? 0),
+    refundedProceeds: money(x?.refundProceedsCents ?? 0),
+  });
+  const configured = Boolean(ctx.config.asc.vendorNumber);
+  const currencies = [...new Set([...sCur, ...sPrev].map((x) => x.proceedsCurrency!))].sort();
+  const sales =
+    configured || sCur.length || sRows.length
+      ? {
+          configured,
+          currencies: currencies.map((currency) => {
+            const sub = (kind: string) => sSubs.find((x) => x.subscription === kind && x.proceedsCurrency === currency)?.proceedsCents ?? 0;
+            return {
+              currency,
+              current: sOut(sCur.find((x) => x.proceedsCurrency === currency)),
+              previous: sOut(sPrev.find((x) => x.proceedsCurrency === currency)),
+              newSubscriptionProceeds: money(sub('new')),
+              renewalProceeds: money(sub('renewal')),
+            };
+          }),
+          rows: sRows.map((x) => ({
+            ...(x.date ? { date: x.date } : {}),
+            ...(x.sku !== undefined ? { sku: x.sku, title: x.title ?? '' } : {}),
+            ...(x.productType !== undefined ? { type: x.productType } : {}),
+            ...(x.territory !== undefined ? { territory: x.territory } : {}),
+            currency: x.proceedsCurrency!,
+            ...sOut(x),
+          })),
+        }
+      : null;
+
+  // Refunds per day and product, newest first: answers "which product was refunded that day".
+  const refunds = [
+    ...aRefunds
+      .filter((x) => x.refunds > 0 || x.refundProceedsCents > 0)
+      .map((x) => ({
+        source: 'analytics' as const,
+        date: x.date!,
+        product: x.product!,
+        territory: x.territory!,
+        refunds: x.refunds,
+        refundedProceeds: money(x.refundProceedsCents),
+        currency: 'USD',
+      })),
+    ...sRefunds
+      .filter((x) => x.refundUnits > 0)
+      .map((x) => ({
+        source: 'sales' as const,
+        date: x.date!,
+        product: x.title || x.sku!,
+        sku: x.sku!,
+        territory: x.territory!,
+        refunds: x.refundUnits,
+        refundedProceeds: money(x.refundProceedsCents),
+        currency: x.proceedsCurrency!,
+      })),
+  ]
+    .sort((a, b) => b.date.localeCompare(a.date) || b.refundedProceeds - a.refundedProceeds)
+    .slice(0, 100);
+
+  const notes = [
+    "analytics: Apple's App Store Purchases report per product (Content Name: the in-app purchase's reference name, or the app for paid apps), in USD estimated by Apple, attributed to the day of purchase or refund; refunds are kept apart (refunds, refundedProceeds) and proceeds are net of them.",
+  ];
+  if (sales)
+    notes.push(
+      'sales: Sales and Trends Summary Sales, exact units and proceeds per product (SKU) in each proceeds currency, never added across currencies; refunds are negative units on the day Apple processed them; newSubscriptionProceeds and renewalProceeds split auto-renewable subscription proceeds into first payments and renewals. Free downloads, updates and redownloads are left out.',
+    );
+  else
+    notes.push(
+      'sales: not configured. Set the ASC_VENDOR_NUMBER secret (App Store Connect → Payments and Financial Reports, the number next to your legal entity name) for exact revenue per product in local currencies, prices, and new versus renewal subscription proceeds; the existing Sales and Reports key can read it.',
+    );
+  if (!aCur.length && !sCur.length) notes.push('No App Store revenue in this range.');
+  return { app: r.app.id, range: r.range, previousRange: prev, groupBy, analytics, sales, refunds, notes };
 }
 
 /** Configured apps, which stores are connected, App Store report status and stored data. */

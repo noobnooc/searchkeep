@@ -1095,7 +1095,7 @@ async function planUnits(ctx: SyncContext, today: IsoDate, nowMs: number, budget
   // Apps (ADR 0009): their latest data takes turns with the sites'; their history joins the sites'.
   // Steps an app unit discovers while running (App Store report files) are added at the end.
   const out: Unit[] = [];
-  const apps = planAppUnits({ ctx, today, get, budget, enqueue: (u) => out.push(u) });
+  const apps = planAppUnits({ ctx, today, nowMs, get, budget, enqueue: (u) => out.push(u) });
   history.push(...apps.history);
   // Stable sort: on the same day, sites keep their order and each site keeps GSC before Cloudflare.
   history.sort((a, b) => (a.date! < b.date! ? 1 : a.date! > b.date! ? -1 : 0));

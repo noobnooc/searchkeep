@@ -16,6 +16,7 @@ import {
   type AppBreakdownDimension,
   appStability,
   appSubscriptions,
+  appRevenue,
   listApps,
   startAppStoreReports,
   validateApp,
@@ -741,6 +742,15 @@ app.get(
   handle((c) => {
     const { x, common } = appParams(c);
     return appStability(opsContext(c), x.strip({ ...common, groupBy: x.get('groupBy') as 'date' | 'version' | undefined }));
+  }),
+);
+app.get(
+  '/api/app-revenue',
+  handle((c) => {
+    const { x, common } = appParams(c);
+    const { store: _store, ...rest } = common;
+    const groupBy = x.list<'date' | 'product' | 'territory' | 'type'>('groupBy');
+    return appRevenue(opsContext(c), x.strip({ ...rest, groupBy, product: x.get('product'), territory: x.get('territory') }));
   }),
 );
 app.get(

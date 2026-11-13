@@ -153,8 +153,13 @@ export function createAscClient(opts: AscClientOptions): AscClient {
 
   return {
     async listApps() {
-      const apps = await all<{ name?: string; bundleId?: string }>('/v1/apps?limit=200&fields[apps]=name,bundleId', 5);
-      return apps.map((a) => ({ id: a.id, name: a.attributes?.name ?? a.id, bundleId: a.attributes?.bundleId ?? '' }));
+      const apps = await all<{ name?: string; bundleId?: string; sku?: string }>('/v1/apps?limit=200&fields[apps]=name,bundleId,sku', 5);
+      return apps.map((a) => ({
+        id: a.id,
+        name: a.attributes?.name ?? a.id,
+        bundleId: a.attributes?.bundleId ?? '',
+        ...(a.attributes?.sku ? { sku: a.attributes.sku } : {}),
+      }));
     },
 
     async latestBuildIcon(appleId) {
@@ -242,6 +247,34 @@ export function createAscClient(opts: AscClientOptions): AscClient {
         throw new SourceError('asc', res.status, `report segment download failed (HTTP ${res.status})`, {
           rateLimited: res.status === 429,
         });
+      }
+      return readDelimited(res.body, onRow);
+    },
+
+    async salesReport(vendorNumber, date, onRow: (row: DelimitedRow) => void) {
+      const qs = new URLSearchParams({
+        'filter[frequency]': 'DAILY',
+        'filter[reportDate]': date,
+        'filter[reportSubType]': 'SUMMARY',
+        'filter[reportType]': 'SALES',
+        'filter[vendorNumber]': vendorNumber,
+      });
+      let res: Response;
+      try {
+        res = await f(`${ASC_API}/v1/salesReports?${qs.toString()}`, {
+          headers: { authorization: `Bearer ${await token()}`, accept: 'application/a-gzip, application/json' },
+        });
+      } catch (err) {
+        throw new SourceError('asc', 0, `sales report download failed (${err instanceof Error ? err.name : 'network error'})`);
+      }
+      // No sales that day, or the day's report is not out yet.
+      if (res.status === 404) {
+        await res.body?.cancel().catch(() => undefined);
+        return null;
+      }
+      if (!res.ok || !res.body) {
+        const text = await res.text().catch(() => '');
+        throw new SourceError('asc', res.status, `sales report: ${describe(res.status, text)}`, { rateLimited: res.status === 429 });
       }
       return readDelimited(res.body, onRow);
     },

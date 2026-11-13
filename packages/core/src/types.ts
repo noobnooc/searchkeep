@@ -869,6 +869,108 @@ export interface AppSubscriptionMetricRow {
   count: number;
 }
 
+/** App Store purchases per product (Analytics Reports, App Store Purchases Standard); amounts in USD cents (Apple's estimate). */
+export interface AppProductInput {
+  date: IsoDate;
+  /** Content Name: the app's name for paid apps, the in-app purchase's reference name otherwise. */
+  product: string;
+  /** Purchase Type as a slug, e.g. `in_app_purchases`, `paid_app`. */
+  purchaseType: string;
+  territory: string;
+  /** Purchases (refunds left out). */
+  purchases: number;
+  /** Refunded purchases, as a positive count. */
+  refunds: number;
+  /** Proceeds of the purchases, net of the refunds' proceeds. */
+  proceedsCents: number;
+  /** Proceeds taken back by refunds, as a positive amount. */
+  refundProceedsCents: number;
+  salesCents: number;
+}
+
+export type AppProductDimension = 'date' | 'product' | 'purchaseType' | 'territory';
+
+export interface AppProductQuery {
+  appId: string;
+  range: DateRange;
+  dimensions: AppProductDimension[];
+  product?: string;
+  territory?: string;
+  limit?: number;
+}
+
+export interface AppProductRow {
+  date?: IsoDate;
+  product?: string;
+  purchaseType?: string;
+  territory?: string;
+  purchases: number;
+  refunds: number;
+  proceedsCents: number;
+  refundProceedsCents: number;
+  salesCents: number;
+}
+
+/**
+ * App Store Sales and Trends (Summary Sales, daily) per product and price point. Proceeds are in
+ * the proceeds currency, sales in the customer's currency; neither is ever added across currencies.
+ */
+export interface AppSalesInput {
+  date: IsoDate;
+  sku: string;
+  /** App name, or the in-app purchase's product id. */
+  title: string;
+  /** `app`, `in_app`, `subscription`, or Apple's product type identifier when unknown. */
+  productType: string;
+  /** Auto-renewable subscriptions: `new` or `renewal`; empty otherwise. */
+  subscription: string;
+  /** Subscription period (`1 Month`, ...), or empty. */
+  period: string;
+  territory: string;
+  proceedsCurrency: string;
+  customerCurrency: string;
+  /** Customer price per unit in cents of the customer currency (absolute). */
+  customerPriceCents: number;
+  units: number;
+  /** Refunded units, as a positive count. */
+  refundUnits: number;
+  /** Proceeds net of refunds, in cents of the proceeds currency. */
+  proceedsCents: number;
+  /** Proceeds taken back by refunds, positive, in cents of the proceeds currency. */
+  refundProceedsCents: number;
+  /** Customer price × units, net of refunds, in cents of the customer currency. */
+  salesCents: number;
+}
+
+export type AppSalesDimension =
+  'date' | 'sku' | 'title' | 'productType' | 'subscription' | 'territory' | 'proceedsCurrency' | 'customerCurrency' | 'customerPriceCents';
+
+export interface AppSalesQuery {
+  appId: string;
+  range: DateRange;
+  dimensions: AppSalesDimension[];
+  sku?: string;
+  territory?: string;
+  limit?: number;
+}
+
+export interface AppSalesRow {
+  date?: IsoDate;
+  sku?: string;
+  title?: string;
+  productType?: string;
+  subscription?: string;
+  territory?: string;
+  proceedsCurrency?: string;
+  customerCurrency?: string;
+  customerPriceCents?: number;
+  units: number;
+  refundUnits: number;
+  proceedsCents: number;
+  refundProceedsCents: number;
+  salesCents: number;
+}
+
 export interface AppDataCoverage {
   appId: string;
   store: AppStore;

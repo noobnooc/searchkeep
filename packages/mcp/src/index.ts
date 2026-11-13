@@ -13,6 +13,7 @@ import {
   appReviews,
   appSearchTerms,
   appBreakdown,
+  appRevenue,
   appStability,
   appSubscriptions,
   listApps,
@@ -130,6 +131,7 @@ export const TOOL_NAMES = [
   'app_stability',
   'app_subscriptions',
   'app_breakdown',
+  'app_revenue',
 ] as const;
 
 /** Parameters shared by the app tools (ADR 0009). */
@@ -548,6 +550,26 @@ export function createSearchkeepMcpServer(deps: McpDeps): McpServer {
       annotations: READ_ONLY,
     },
     async (args) => run(() => appBreakdown(ctx, clean(args))),
+  );
+
+  server.registerTool(
+    'app_revenue',
+    {
+      title: 'App revenue per product',
+      description:
+        "App Store revenue per product, against the previous period. analytics: Apple's USD estimate per product (in-app purchase or paid app) with refunds kept apart, always available. sales: with the ASC_VENDOR_NUMBER secret, exact units, proceeds and refunds per SKU in each proceeds currency (never added across currencies), and subscription proceeds split into first payments and renewals. refunds lists refunded products per day, newest first, to explain a negative revenue day.",
+      inputSchema: {
+        ...appCommon,
+        groupBy: z
+          .array(z.enum(['date', 'product', 'territory', 'type']))
+          .optional()
+          .describe('Group rows by these (default product). type = purchase type or product type (app, in_app, subscription).'),
+        product: z.string().optional().describe('Only this product: its name in App Store Connect, or its SKU.'),
+        territory: z.string().optional().describe('Only this storefront (e.g. US).'),
+      },
+      annotations: READ_ONLY,
+    },
+    async (args) => run(() => appRevenue(ctx, clean(args))),
   );
 
   return server;

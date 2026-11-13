@@ -12,6 +12,10 @@ import {
   cellDate,
   playInstallsCollector,
   subscriptionMetricsCollector,
+  salesSummaryCollector,
+  productsCollector,
+  type AppSalesInput,
+  type AppProductInput,
   type AppSubscriptionMetricWrite,
   type AppStoreWrite,
   type Store,
@@ -371,6 +375,140 @@ describe('App Store subscription reports', () => {
         territory: 'US',
         source: '*',
         count: 9,
+      },
+    ]);
+  });
+});
+
+describe('App Store revenue per product', () => {
+  const SALES_HEADER =
+    'Provider\tProvider Country\tSKU\tDeveloper\tTitle\tVersion\tProduct Type Identifier\tUnits\tDeveloper Proceeds\tBegin Date\tEnd Date\tCustomer Currency\tCountry Code\tCurrency of Proceeds\tApple Identifier\tCustomer Price\tPromo Code\tParent Identifier\tSubscription\tPeriod\tCategory\tCMB\tDevice\tSupported Platforms\tProceeds Reason\tPreserved Pricing\tClient\tOrder Type';
+  const sale = (
+    sku: string,
+    type: string,
+    units: string,
+    proceeds: string,
+    cur: string,
+    country: string,
+    appleId: string,
+    price: string,
+    parent: string,
+    sub: string,
+    period: string,
+  ) =>
+    [
+      'APPLE',
+      'US',
+      sku,
+      'Acme',
+      sku,
+      '',
+      type,
+      units,
+      proceeds,
+      '11/08/2026',
+      '11/08/2026',
+      cur,
+      country,
+      cur,
+      appleId,
+      price,
+      '',
+      parent,
+      sub,
+      period,
+      'Utilities',
+      '',
+      'iPhone',
+      'iOS',
+      '',
+      '',
+      '',
+      '',
+    ].join('\t');
+
+  it('splits Summary Sales between apps by Apple ID and SKU, keeps refunds apart and skips updates', async () => {
+    const tsv = [
+      SALES_HEADER,
+      sale('echobell.pro.monthly', 'IAY', '3', '3.49', 'USD', 'US', '6450000001', '4.99', 'ECHOBELL', 'New', '1 Month'),
+      sale('echobell.pro.monthly', 'IAY', '2', '3.49', 'USD', 'US', '6450000001', '4.99', 'ECHOBELL', 'Renewal', '1 Month'),
+      sale('echobell.pro.monthly', 'IAY', '-1', '3.49', 'USD', 'US', '6450000001', '-4.99', 'ECHOBELL', 'New', '1 Month'),
+      sale('echobell.pro.monthly', 'IAY', '1', '4.15', 'EUR', 'DE', '6450000001', '5.99', 'ECHOBELL', 'New', '1 Month'),
+      sale('ECHOBELL', '7', '40', '0', 'USD', 'US', '6400000000', '0', '', '', ''),
+      sale('ECHOBELL', '1F', '12', '0', 'USD', 'US', '6400000000', '0', '', '', ''),
+      sale('OTHER.tip', 'IA1', '1', '0.70', 'USD', 'US', '6460000009', '0.99', 'OTHERAPP', '', ''),
+    ].join('\n');
+    const writes: Array<{ appId: string; dates: string[]; rows: AppSalesInput[] }> = [];
+    const store = {
+      writeAppSales: async (appId: string, dates: string[], rows: AppSalesInput[]) => (writes.push({ appId, dates, rows }), rows.length),
+    } as unknown as Store;
+    const c = salesSummaryCollector([
+      { appId: 'echobell', appleId: '6400000000', sku: 'ECHOBELL' },
+      { appId: 'other', appleId: '6400000001', sku: null },
+    ]);
+    await readDelimited(stream(new TextEncoder().encode(tsv)), (r) => c.add(r));
+    expect(await c.write(store, ['2026-11-08'])).toBe(4);
+    const echobell = writes.find((w) => w.appId === 'echobell')!;
+    expect(echobell.dates).toEqual(['2026-11-08']);
+    const pick = (sub: string, cur: string) =>
+      echobell.rows.find((r) => r.subscription === sub && r.proceedsCurrency === cur && r.productType === 'subscription');
+    // New: 3 bought, 1 refunded (same price point).
+    expect(pick('new', 'USD')).toMatchObject({
+      units: 3,
+      refundUnits: 1,
+      proceedsCents: 698,
+      refundProceedsCents: 349,
+      salesCents: 998,
+      customerPriceCents: 499,
+      territory: 'US',
+      period: '1 Month',
+    });
+    expect(pick('renewal', 'USD')).toMatchObject({ units: 2, proceedsCents: 698 });
+    expect(pick('new', 'EUR')).toMatchObject({ units: 1, proceedsCents: 415, territory: 'DE', customerCurrency: 'EUR' });
+    // Downloads of the app itself are kept (free: no proceeds), updates are not.
+    expect(echobell.rows.filter((r) => r.productType === 'app')).toEqual([
+      expect.objectContaining({ sku: 'ECHOBELL', units: 12, proceedsCents: 0 }),
+    ]);
+    // Rows of an app that is not configured go nowhere; a configured app with no rows still has its day replaced.
+    expect(writes.find((w) => w.appId === 'other')).toEqual({ appId: 'other', dates: ['2026-11-08'], rows: [] });
+  });
+
+  it('keeps App Store purchases per product with refunds apart', async () => {
+    const tsv = [
+      'Date\tApp Name\tApp Apple Identifier\tPurchase Type\tContent Name\tPayment Method\tSource Type\tPage Type\tTerritory\tPurchases\tProceeds in USD\tSales in USD\tPaying Users',
+      '2026-11-08\tEchobell\t6400000000\tIn-app purchases\tPro Monthly\tApple Pay\tApp Store search\tProduct page\tUS\t3\t10.47\t14.97\t3',
+      '2026-11-08\tEchobell\t6400000000\tIn-app purchases\tPro Monthly\tApple Pay\tWeb referrer\tProduct page\tUS\t-1\t-3.49\t-4.99\t0',
+      '2026-11-08\tEchobell\t6400000000\tIn-app purchases\tPro Annual\tApple Pay\tApp Store search\tProduct page\tDE\t1\t25.00\t35.99\t1',
+    ].join('\n');
+    const writes: Array<{ dates: string[]; rows: AppProductInput[] }> = [];
+    const store = {
+      writeAppProducts: async (_id: string, dates: string[], rows: AppProductInput[]) => (writes.push({ dates, rows }), rows.length),
+    } as unknown as Store;
+    const c = productsCollector();
+    await readDelimited(stream(new TextEncoder().encode(tsv)), (r) => c.add(r));
+    await c.write(store, 'echobell');
+    expect(writes[0]!.rows).toEqual([
+      {
+        date: '2026-11-08',
+        product: 'Pro Monthly',
+        purchaseType: 'in_app_purchases',
+        territory: 'US',
+        purchases: 3,
+        refunds: 1,
+        proceedsCents: 698,
+        refundProceedsCents: 349,
+        salesCents: 998,
+      },
+      {
+        date: '2026-11-08',
+        product: 'Pro Annual',
+        purchaseType: 'in_app_purchases',
+        territory: 'DE',
+        purchases: 1,
+        refunds: 0,
+        proceedsCents: 2500,
+        refundProceedsCents: 0,
+        salesCents: 3599,
       },
     ]);
   });
