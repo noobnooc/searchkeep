@@ -546,6 +546,27 @@ export const appSalesDaily = sqliteTable(
   ],
 );
 
+/** App Store funnel per page type (level `type`, Standard reports) or page type and title (level `title`, Detailed reports). */
+export const appStorePagesDaily = sqliteTable(
+  'app_store_pages_daily',
+  {
+    appId: text('app_id').notNull(),
+    date: text('date').notNull(),
+    level: text('level').notNull(),
+    pageType: text('page_type').notNull(),
+    pageTitle: text('page_title').notNull().default(''),
+    impressions: integer('impressions').notNull().default(0),
+    impressionsUnique: integer('impressions_unique').notNull().default(0),
+    pageViews: integer('page_views').notNull().default(0),
+    pageViewsUnique: integer('page_views_unique').notNull().default(0),
+    downloads: integer('downloads').notNull().default(0),
+  },
+  (t) => [
+    primaryKey({ columns: [t.appId, t.date, t.level, t.pageType, t.pageTitle] }),
+    index('app_store_pages_daily_date').on(t.appId, t.level, t.date),
+  ],
+);
+
 /** The latest snapshot of an app's store fields (versions, listings, app info, tracks), one row per field. */
 export const appListingValues = sqliteTable(
   'app_listing_values',

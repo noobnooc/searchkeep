@@ -19,7 +19,9 @@ import {
   ASC_REPORTS,
   BREAKDOWN_VALUES_PER_DAY,
   downloadReferrersCollector,
+  downloadsCollector,
   engagementCollector,
+  engagementReferrersCollector,
   playEarningsCollector,
   playCrashesBreakdownCollector,
   playInstallsBreakdownCollector,
@@ -1579,6 +1581,105 @@ export function appContract(name: string, makeStore: () => Promise<Store>): void
           detail: expect.stringContaining('App Information'),
         });
         expect(checks.find((c) => c.id === 'config.play_metadata')).toMatchObject({ status: 'skipped' });
+      });
+
+      it('keeps the App Store funnel per page type and per custom product page', async () => {
+        const cfg = config({ APP_STORE_PUBLIC_DATA: 'false' });
+        const ctx = { store, config: cfg, clients: {}, now: () => NOW };
+        const add = async (collector: ReturnType<typeof engagementCollector>, rows: DelimitedRow[]) => {
+          for (const r of rows) collector.add(r);
+          await collector.write(store, APP.id);
+        };
+        const ev = (event: string, pageType: string, title: string | null, counts: number, unique: number): DelimitedRow => ({
+          date: '2026-10-18',
+          event,
+          'page type': pageType,
+          ...(title !== null ? { 'page title': title } : {}),
+          'source type': 'App Store search',
+          territory: 'US',
+          counts: String(counts),
+          'unique counts': String(unique),
+        });
+        const dl = (pageType: string, title: string | null, counts: number): DelimitedRow => ({
+          date: '2026-10-18',
+          'download type': 'First-time download',
+          'page type': pageType,
+          ...(title !== null ? { 'page title': title } : {}),
+          'source type': 'App Store search',
+          territory: 'US',
+          counts: String(counts),
+        });
+        // Standard: per page type.
+        await add(engagementCollector(), [
+          ev('Impression', 'No page', null, 500, 400),
+          ev('Page view', 'Product page', null, 80, 60),
+          ev('Page view', 'Product page', null, 20, 15),
+          ev('Page view', 'In-app event', null, 12, 10),
+        ]);
+        await add(downloadsCollector(), [dl('Product page', null, 30), dl('No page', null, 25), dl('In-app event', null, 2)]);
+        // Detailed: per page title.
+        await add(engagementReferrersCollector(), [
+          ev('Page view', 'Product page', 'Default Product Page', 70, 55),
+          ev('Page view', 'Product page', 'Alarm lovers', 30, 20),
+        ]);
+        await add(downloadReferrersCollector(), [dl('Product page', 'Default Product Page', 18), dl('Product page', 'Alarm lovers', 12)]);
+        const byType = await appPerformance(ctx, {
+          app: APP.id,
+          store: 'apple',
+          start: '2026-10-12',
+          end: '2026-10-18',
+          groupBy: ['page_type'],
+        });
+        expect(byType.pages).toEqual([
+          {
+            pageType: 'product_page',
+            impressions: 0,
+            impressionsUnique: 0,
+            pageViews: 100,
+            pageViewsUnique: 75,
+            downloads: 30,
+            pageConversion: 0.4,
+          },
+          {
+            pageType: 'in_app_event',
+            impressions: 0,
+            impressionsUnique: 0,
+            pageViews: 12,
+            pageViewsUnique: 10,
+            downloads: 2,
+            pageConversion: 0.2,
+          },
+          {
+            pageType: 'no_page',
+            impressions: 500,
+            impressionsUnique: 400,
+            pageViews: 0,
+            pageViewsUnique: 0,
+            downloads: 25,
+            pageConversion: null,
+          },
+        ]);
+        const byTitle = await appPerformance(ctx, {
+          app: APP.id,
+          store: 'apple',
+          start: '2026-10-12',
+          end: '2026-10-18',
+          groupBy: ['page_title'],
+        });
+        expect(byTitle.pages!.map((x) => [x.pageTitle, x.pageViewsUnique, x.downloads, x.pageConversion])).toEqual([
+          ['Default Product Page', 55, 18, 0.3273],
+          ['Alarm lovers', 20, 12, 0.6],
+        ]);
+        // A newer instance replaces the day: a custom page it no longer lists drops to zero.
+        await add(engagementReferrersCollector(), [ev('Page view', 'Product page', 'Default Product Page', 90, 70)]);
+        const again = await appPerformance(ctx, {
+          app: APP.id,
+          store: 'apple',
+          start: '2026-10-12',
+          end: '2026-10-18',
+          groupBy: ['page_title'],
+        });
+        expect(again.pages!.find((x) => x.pageTitle === 'Alarm lovers')).toMatchObject({ pageViewsUnique: 0, downloads: 12 });
       });
 
       it('looks for report kinds added since the last listing right away', async () => {

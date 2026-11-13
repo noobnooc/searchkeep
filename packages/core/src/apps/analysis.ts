@@ -141,7 +141,7 @@ const STORE_NOTES: Record<AppStore, string> = {
 
 export interface AppPerformanceParams extends AppParams {
   /** Group rows by these (default none: per-store totals only). `referrer` lists referring websites, apps and UTM sources. */
-  groupBy?: Array<AppDimension | 'referrer'>;
+  groupBy?: Array<AppDimension | 'referrer' | 'page_type' | 'page_title'>;
   territory?: string;
   /** An app source type: search, browse, app_referrer, web_referrer, referral, ... */
   source?: string;
@@ -206,8 +206,18 @@ export async function appPerformance(ctx: OpsContext, p: AppPerformanceParams) {
       };
     }),
   );
-  const groupBy = (p.groupBy ?? []).filter((g) => g !== 'referrer') as AppDimension[];
-  const valid: Array<AppDimension | 'referrer'> = ['date', 'week', 'month', 'store', 'territory', 'source', 'referrer'];
+  const groupBy = (p.groupBy ?? []).filter((g) => g !== 'referrer' && g !== 'page_type' && g !== 'page_title') as AppDimension[];
+  const valid: Array<AppDimension | 'referrer' | 'page_type' | 'page_title'> = [
+    'date',
+    'week',
+    'month',
+    'store',
+    'territory',
+    'source',
+    'referrer',
+    'page_type',
+    'page_title',
+  ];
   for (const g of p.groupBy ?? [])
     if (!valid.includes(g)) throw new SearchkeepError('bad_request', `groupBy must be any of ${valid.join(', ')}.`);
   const rows = groupBy.length
@@ -243,6 +253,21 @@ export async function appPerformance(ctx: OpsContext, p: AppPerformanceParams) {
       return { ...x, ownSite: x.kind !== 'app' && own.some((d) => host === d || host.endsWith(`.${d}`)) };
     });
   }
+  // App Store funnel per product page (type, or type and title for custom product pages and in-app events).
+  const pageLevel = p.groupBy?.includes('page_title') ? 'title' : p.groupBy?.includes('page_type') ? 'type' : null;
+  const pages =
+    pageLevel && r.store !== 'play' && r.app.appleId
+      ? (await ctx.store.queryAppPages({ appId: r.app.id, range: r.range, level: pageLevel, limit: r.limit })).map((x) => ({
+          pageType: x.pageType,
+          ...(pageLevel === 'title' ? { pageTitle: x.pageTitle } : {}),
+          impressions: x.impressions,
+          impressionsUnique: x.impressionsUnique,
+          pageViews: x.pageViews,
+          pageViewsUnique: x.pageViewsUnique,
+          downloads: x.downloads,
+          pageConversion: x.pageViewsUnique > 0 ? round(x.downloads / x.pageViewsUnique, 4) : null,
+        }))
+      : undefined;
   const charts = r.store !== 'play' && r.app.appleId ? await latestCharts(ctx, r.app, r.range) : [];
   const notes = [...r.notes, ...stores.map((s) => STORE_NOTES[s])];
   for (const s of perStore)
@@ -256,6 +281,12 @@ export async function appPerformance(ctx: OpsContext, p: AppPerformanceParams) {
     notes.push(
       `Store changes: ${changes.length} change(s) to versions, listings or app info in this range are attached to the series days they were first seen (see app_changes for the values before and after).`,
     );
+  if (pageLevel)
+    notes.push(
+      pageLevel === 'title'
+        ? 'Pages (App Store only): per page type and title from the Detailed reports (custom product pages, in-app events, "Default Product Page"); Apple adds small noise and leaves out rows with fewer than five people, so they need not add up to the totals. Downloads are first-time downloads by the page they came from; page conversion is downloads ÷ unique page views of the same page. Product page optimization treatments are in no report Apple offers.'
+        : 'Pages (App Store only): impressions, page views and first-time downloads per page type (product page, no page = list views, store sheet, in-app event, ...), from the Standard reports. Group by page_title for custom product pages. Product page optimization treatments are in no report Apple offers.',
+    );
   if (referrers !== undefined)
     notes.push(
       'Referrers: App Store web and app referrers come from the Detailed reports (small numbers are left out or noised by Apple); Google Play lists UTM sources of third-party referrals.',
@@ -268,6 +299,7 @@ export async function appPerformance(ctx: OpsContext, p: AppPerformanceParams) {
     stores: perStore,
     ...(rows.length || groupBy.length ? { rows } : {}),
     ...(referrers ? { referrers } : {}),
+    ...(pages ? { pages } : {}),
     ...(charts.length ? { charts } : {}),
     notes,
   };

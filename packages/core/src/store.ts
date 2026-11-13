@@ -26,6 +26,9 @@ import type {
   AppStoreRow,
   AppStoreWrite,
   AppSubscriptionInput,
+  AppPageLevel,
+  AppPageRow,
+  AppPageWrite,
   AppChangeQuery,
   AppChangeRow,
   AppListingValue,
@@ -213,6 +216,8 @@ export interface Store {
   writeAppSubscriptionMetrics(appId: string, w: AppSubscriptionMetricWrite): Promise<number>;
   /** Replaces the App Store purchases per product (Analytics Reports) on the days in `dates`. */
   writeAppProducts(appId: string, dates: IsoDate[], rows: AppProductInput[]): Promise<number>;
+  /** Sets `w.metrics` of the App Store funnel per page; for the days in `w.dates`, pages not mentioned get 0. */
+  writeAppPages(appId: string, w: AppPageWrite): Promise<number>;
   /**
    * Compares today's snapshot of a store's fields (only entities starting with one of `scopes`)
    * with the stored one, records a change per field that differs (added, changed or removed) on
@@ -245,6 +250,8 @@ export interface Store {
   queryAppSubscriptionMetrics(q: AppSubscriptionMetricQuery): Promise<AppSubscriptionMetricRow[]>;
   /** Purchases per product summed over the range. */
   queryAppProducts(q: AppProductQuery): Promise<AppProductRow[]>;
+  /** The App Store funnel per page type (or page type and title) summed over the range. */
+  queryAppPages(q: { appId: string; range: DateRange; level: AppPageLevel; limit?: number }): Promise<AppPageRow[]>;
   /** Store changes in the range, newest first. */
   queryAppChanges(q: AppChangeQuery): Promise<AppChangeRow[]>;
   /** Sales and Trends rows summed over the range. */

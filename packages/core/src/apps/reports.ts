@@ -22,6 +22,10 @@ import {
   type AppSubscriptionMetricInput,
   type AppProductInput,
   type AppSalesInput,
+  type AppPageInput,
+  type AppPageLevel,
+  type AppPageMetric,
+  type AppPageMetrics,
   type AppSubscriptionMetricKind,
   type AppVitalsInput,
   type IsoDate,
@@ -175,7 +179,7 @@ const appleKeys = (row: DelimitedRow, col: ReturnType<typeof columns>) => ({
 });
 
 /** App Store Discovery and Engagement (Standard): impressions and product page views. */
-export function engagementCollector(): ReportCollector {
+function engagementFunnel(): ReportCollector {
   return new FunnelCollector(
     'apple',
     'cross',
@@ -193,7 +197,7 @@ export function engagementCollector(): ReportCollector {
 }
 
 /** App Downloads (Standard): first-time downloads and redownloads. */
-export function downloadsCollector(): ReportCollector {
+function downloadsFunnel(): ReportCollector {
   return new FunnelCollector(
     'apple',
     'cross',
@@ -524,8 +528,69 @@ class ReferrerCollector implements ReportCollector {
   }
 }
 
-export const engagementReferrersCollector = (): ReportCollector => new ReferrerCollector('pageViews');
-export const downloadReferrersCollector = (): ReportCollector => new ReferrerCollector('downloads');
+export const engagementReferrersCollector = (): ReportCollector =>
+  both(new ReferrerCollector('pageViews'), new PageCollector('title', 'engagement'));
+export const downloadReferrersCollector = (): ReportCollector =>
+  both(new ReferrerCollector('downloads'), new PageCollector('title', 'downloads'));
+
+/** App Store Discovery and Engagement (Standard): impressions and product page views, and the same per page type. */
+export function engagementCollector(): ReportCollector {
+  return both(engagementFunnel(), new PageCollector('type', 'engagement'));
+}
+
+/** App Downloads (Standard): first-time downloads and redownloads, and first-time downloads per page type. */
+export function downloadsCollector(): ReportCollector {
+  return both(downloadsFunnel(), new PageCollector('type', 'downloads'));
+}
+
+/**
+ * The App Store funnel per page: per page type from the Standard reports, per page type and title
+ * (custom product pages, in-app events) from the Detailed ones. Impressions and page views come from
+ * Discovery and Engagement, first-time downloads from App Downloads.
+ */
+class PageCollector implements ReportCollector {
+  private readonly rows = new Map<string, AppPageInput>();
+  private readonly days = new Set<IsoDate>();
+  private readonly col = columns();
+
+  constructor(
+    private readonly level: AppPageLevel,
+    private readonly report: 'engagement' | 'downloads',
+  ) {}
+
+  add(row: DelimitedRow): void {
+    const date = cellDate(this.col(row, 'date'));
+    if (!date) return;
+    this.days.add(date);
+    const counts = num(this.col(row, 'counts'));
+    const unique = num(this.col(row, 'unique counts', 'unique devices'));
+    let values: Partial<AppPageMetrics>;
+    if (this.report === 'engagement') {
+      const event = lower(this.col(row, 'event'));
+      if (event === 'impression') values = { impressions: counts, impressionsUnique: unique };
+      else if (event === 'page view') values = { pageViews: counts, pageViewsUnique: unique };
+      else return;
+    } else {
+      if (lower(this.col(row, 'download type')) !== 'first-time download') return;
+      values = { downloads: counts };
+    }
+    const pageType = slug(this.col(row, 'page type')) || 'unavailable';
+    const pageTitle = this.level === 'title' ? this.col(row, 'page title').trim().slice(0, 120) || '-' : '';
+    const key = `${date}|${pageType}|${pageTitle}`;
+    const e = this.rows.get(key) ?? { date, pageType, pageTitle };
+    for (const [m, v] of Object.entries(values) as Array<[AppPageMetric, number]>) e[m] = (e[m] ?? 0) + v;
+    this.rows.set(key, e);
+  }
+
+  async write(store: Store, appId: string, before?: IsoDate | null): Promise<WriteResult> {
+    const dates = coveredDays(this.days, before);
+    if (dates.length === 0) return { written: 0, oldest: null };
+    const metrics: AppPageMetric[] =
+      this.report === 'engagement' ? ['impressions', 'impressionsUnique', 'pageViews', 'pageViewsUnique'] : ['downloads'];
+    const written = await store.writeAppPages(appId, { level: this.level, metrics, dates, rows: keep(this.rows.values(), before) });
+    return { written, oldest: dates[0]! };
+  }
+}
 
 /** App Crashes: crashes and crashing devices per day and app version (and for all versions). */
 export function crashesCollector(): ReportCollector {

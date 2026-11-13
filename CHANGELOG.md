@@ -26,6 +26,13 @@ Because users sync `main` at any time, the `Unreleased` section is always accura
 
 ### Added
 
+- App Store funnel per product page. The Discovery and Engagement and App Downloads reports are now
+  also kept per page type (Standard: product page, list views, store sheet, in-app event, ...) and
+  per page title (Detailed: custom product pages, in-app events, "Default Product Page"). New
+  `app_performance` `groupBy` values `page_type` and `page_title` return `pages` with impressions,
+  page views, first-time downloads and page conversion. Product page optimization treatments are in
+  no report Apple offers. Nothing to set up; the next snapshot fills history.
+
 - Store change timeline. Once a day the sync snapshots each app's App Store presence with the
   existing key (the version on sale and the one in the works with state, release type and phased
   release; the on-sale version's description, keywords, promotional text and release notes per

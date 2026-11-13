@@ -61,6 +61,9 @@ import {
   type WebAnalyticsInput,
   type WebVitalsInput,
   type AppSubscriptionInput,
+  type AppPageLevel,
+  type AppPageRow,
+  type AppPageWrite,
   type AppChangeQuery,
   type AppChangeRow,
   type AppListingValue,
@@ -2245,6 +2248,83 @@ export class D1Store implements Store {
       }
       return out;
     });
+  }
+
+  async writeAppPages(appId: string, w: AppPageWrite): Promise<number> {
+    const level = allow([w.level], ['type', 'title'] as const, 'page level')[0]!;
+    const all = ['impressions', 'impressionsUnique', 'pageViews', 'pageViewsUnique', 'downloads'] as const;
+    const column = {
+      impressions: 'impressions',
+      impressionsUnique: 'impressions_unique',
+      pageViews: 'page_views',
+      pageViewsUnique: 'page_views_unique',
+      downloads: 'downloads',
+    } as const;
+    const metrics = allow([...new Set(w.metrics)], all, 'metric');
+    if (metrics.length === 0) return 0;
+    const cols = metrics.map((m) => column[m]);
+    const agg = new Map<string, Record<string, string | number>>();
+    for (const r of w.rows) {
+      const title = level === 'type' ? '' : r.pageTitle;
+      const key = `${r.date}|${r.pageType}|${title}`;
+      const e = agg.get(key) ?? { d: r.date, p: r.pageType, t: title, k: key };
+      metrics.forEach((m, i) => {
+        e[`m${i}`] = (Number(e[`m${i}`]) || 0) + Math.round(r[m] ?? 0);
+      });
+      agg.set(key, e);
+    }
+    const items = [...agg.values()];
+    let changes = await this.batch(
+      chunks(items).map((group) =>
+        this.db
+          .prepare(
+            `INSERT INTO app_store_pages_daily (app_id, date, level, page_type, page_title, ${cols.join(', ')})
+             SELECT ?1, j.value->>'d', ?2, j.value->>'p', j.value->>'t', ${cols.map((_c, i) => `COALESCE(j.value->>'m${i}', 0)`).join(', ')}
+             FROM json_each(?3) j WHERE true
+             ON CONFLICT (app_id, date, level, page_type, page_title) DO UPDATE SET ${cols.map((c) => `${c} = excluded.${c}`).join(', ')}`,
+          )
+          .bind(appId, level, JSON.stringify(group)),
+      ),
+    );
+    if (w.dates.length) {
+      const res = await this.db
+        .prepare(
+          `UPDATE app_store_pages_daily SET ${cols.map((c) => `${c} = 0`).join(', ')}
+           WHERE app_id = ?1 AND level = ?2 AND date IN (SELECT value FROM json_each(?3))
+             AND (${cols.map((c) => `${c} != 0`).join(' OR ')})
+             AND (date || '|' || page_type || '|' || page_title) NOT IN (SELECT value FROM json_each(?4))`,
+        )
+        .bind(appId, level, JSON.stringify([...new Set(w.dates)]), JSON.stringify(items.map((x) => x.k)))
+        .run();
+      changes += res.meta?.changes ?? 0;
+    }
+    return changes;
+  }
+
+  async queryAppPages(q: { appId: string; range: DateRange; level: AppPageLevel; limit?: number }): Promise<AppPageRow[]> {
+    const level = allow([q.level], ['type', 'title'] as const, 'page level')[0]!;
+    const rows = await this.all<Record<string, string | number>>(
+      `SELECT page_type AS pageType, page_title AS pageTitle, SUM(impressions) AS impressions, SUM(impressions_unique) AS impressionsUnique,
+              SUM(page_views) AS pageViews, SUM(page_views_unique) AS pageViewsUnique, SUM(downloads) AS downloads
+       FROM app_store_pages_daily WHERE app_id = ?1 AND level = ?2 AND date >= ?3 AND date <= ?4
+       GROUP BY page_type, page_title
+       HAVING SUM(impressions) + SUM(page_views) + SUM(downloads) > 0
+       ORDER BY pageViewsUnique DESC, downloads DESC, page_type, page_title
+       LIMIT ${Math.max(1, Math.min(1000, Math.floor(q.limit ?? 100)))}`,
+      q.appId,
+      level,
+      q.range.start,
+      q.range.end,
+    );
+    return rows.map((r) => ({
+      pageType: String(r.pageType),
+      pageTitle: String(r.pageTitle),
+      impressions: Number(r.impressions) || 0,
+      impressionsUnique: Number(r.impressionsUnique) || 0,
+      pageViews: Number(r.pageViews) || 0,
+      pageViewsUnique: Number(r.pageViewsUnique) || 0,
+      downloads: Number(r.downloads) || 0,
+    }));
   }
 
   async snapshotAppListing(appId: string, store: AppStore, date: IsoDate, scopes: string[], values: AppListingValue[]): Promise<number> {

@@ -443,15 +443,17 @@ export function createSearchkeepMcpServer(deps: McpDeps): McpServer {
     {
       title: 'App store performance',
       description:
-        "An app's store funnel per store: impressions (App Store), page views (App Store product page views, Google Play store listing visitors), downloads (first-time downloads, store listing acquisitions), redownloads, installs, deletions, active devices and conversion rates, plus App Store revenue (purchases, proceeds and sales in USD, paying users, proceeds per download) and sessions (sessions, average length, sessions per device), compared with the previous period. groupBy adds rows by date, week, month, store, territory, source (search, browse, app_referrer, web_referrer, referral, ...) or referrer (websites, apps and UTM sources that sent people to the store page; ownSite marks the owner's own site). Institutional purchases (App Store licenses bought in bulk through Apple Business Manager or Apple School Manager) are left out of the totals and trends and listed only by source. Includes the App Store chart position when the opt-in public feeds are on.",
+        "An app's store funnel per store: impressions (App Store), page views (App Store product page views, Google Play store listing visitors), downloads (first-time downloads, store listing acquisitions), redownloads, installs, deletions, active devices and conversion rates, plus App Store revenue (purchases, proceeds and sales in USD, paying users, proceeds per download) and sessions (sessions, average length, sessions per device), compared with the previous period. groupBy adds rows by date, week, month, store, territory, source (search, browse, app_referrer, web_referrer, referral, ...) or referrer (websites, apps and UTM sources that sent people to the store page; ownSite marks the owner's own site), and App Store pages by page_type or page_title (custom product pages, in-app events). Institutional purchases (App Store licenses bought in bulk through Apple Business Manager or Apple School Manager) are left out of the totals and trends and listed only by source. Includes the App Store chart position when the opt-in public feeds are on.",
       inputSchema: {
         ...appCommon,
         store: appStore,
         groupBy: z
-          .array(z.enum(['date', 'week', 'month', 'store', 'territory', 'source', 'referrer']))
+          .array(z.enum(['date', 'week', 'month', 'store', 'territory', 'source', 'referrer', 'page_type', 'page_title']))
           .max(2)
           .optional()
-          .describe('Default: totals per store only.'),
+          .describe(
+            'Default: totals per store only. page_type / page_title list the App Store funnel per product page type, or per custom product page and in-app event (pages).',
+          ),
         territory: z.string().optional().describe('Only this territory, as the store reports it (e.g. US).'),
         source: z
           .string()

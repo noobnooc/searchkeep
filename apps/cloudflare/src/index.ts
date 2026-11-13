@@ -704,10 +704,11 @@ app.get(
       opsContext(c),
       x.strip({
         ...common,
-        groupBy: x.list<AppDimension | 'referrer'>('groupBy'),
+        groupBy: x.list<AppDimension | 'referrer' | 'page_type' | 'page_title'>('groupBy'),
         territory: x.get('territory'),
         source: x.get('source'),
         referrerKind: x.get('referrerKind') as AppReferrerKind | undefined,
+        ...(x.get('includeChanges') === 'false' ? { includeChanges: false } : {}),
       }),
     );
   }),

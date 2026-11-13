@@ -1007,6 +1007,38 @@ export interface AppChangeQuery {
   limit?: number;
 }
 
+/** App Store funnel per product page: by page type (Standard reports) or by page title (Detailed reports, noised). */
+export type AppPageLevel = 'type' | 'title';
+export interface AppPageMetrics {
+  impressions: number;
+  impressionsUnique: number;
+  pageViews: number;
+  pageViewsUnique: number;
+  downloads: number;
+}
+export type AppPageMetric = keyof AppPageMetrics;
+
+export interface AppPageInput extends Partial<AppPageMetrics> {
+  date: IsoDate;
+  /** Page type slug: `product_page`, `no_page`, `in_app_event`, `store_sheet`, ... */
+  pageType: string;
+  /** Page title (custom product page or in-app event name, `Default Product Page`); empty at level `type`. */
+  pageTitle: string;
+}
+
+export interface AppPageWrite {
+  level: AppPageLevel;
+  /** Metrics set by this write; for the days in `dates`, pages it does not mention get them zeroed. */
+  metrics: AppPageMetric[];
+  dates: IsoDate[];
+  rows: AppPageInput[];
+}
+
+export interface AppPageRow extends AppPageMetrics {
+  pageType: string;
+  pageTitle: string;
+}
+
 export interface AppDataCoverage {
   appId: string;
   store: AppStore;

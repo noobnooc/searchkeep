@@ -388,7 +388,7 @@ export const TOOLS: Tool[] = [
     name: 'app_performance',
     summary: 'The store funnel, revenue and sessions of an app, per store, against the previous period.',
     description:
-      'Impressions (App Store), page views (App Store product page views, Google Play store listing visitors), downloads (first-time downloads, store listing acquisitions), redownloads, installs, deletions, active devices and conversion rates per store, plus App Store revenue (purchases, proceeds and sales in USD, paying users, proceeds per download) and sessions (sessions, average length, sessions per device), compared with the previous period of the same length. `groupBy` adds rows by date, week, month, store, territory, source (search, browse, app_referrer, web_referrer, referral, ...) or referrer: the websites, apps and UTM sources that sent people to the store page, with your own site marked. Institutional purchases (App Store licenses bought in bulk through Apple Business Manager or Apple School Manager) are left out of the totals and trends and listed only by source. With the opt-in public feeds, it also returns your app’s App Store chart positions.',
+      'Impressions (App Store), page views (App Store product page views, Google Play store listing visitors), downloads (first-time downloads, store listing acquisitions), redownloads, installs, deletions, active devices and conversion rates per store, plus App Store revenue (purchases, proceeds and sales in USD, paying users, proceeds per download) and sessions (sessions, average length, sessions per device), compared with the previous period of the same length. `groupBy` adds rows by date, week, month, store, territory, source (search, browse, app_referrer, web_referrer, referral, ...) or referrer: the websites, apps and UTM sources that sent people to the store page, with your own site marked; `page_type` and `page_title` list the App Store funnel per product page type, custom product page and in-app event. Institutional purchases (App Store licenses bought in bulk through Apple Business Manager or Apple School Manager) are left out of the totals and trends and listed only by source. With the opt-in public feeds, it also returns your app’s App Store chart positions.',
     readOnly: true,
     params: [
       app,
@@ -399,7 +399,8 @@ export const TOOLS: Tool[] = [
       {
         name: 'groupBy',
         type: 'string[]',
-        description: 'Up to two of `date`, `week`, `month`, `store`, `territory`, `source`, `referrer`. Default: totals per store only.',
+        description:
+          'Up to two of `date`, `week`, `month`, `store`, `territory`, `source`, `referrer`, `page_type`, `page_title`. Default: totals per store only.',
       },
       { name: 'territory', type: 'string', description: 'Only this territory, as the store reports it (e.g. `US`).' },
       {
@@ -408,6 +409,11 @@ export const TOOLS: Tool[] = [
         description: 'Only this source: `search`, `browse`, `app_referrer`, `web_referrer`, `referral`, ...',
       },
       { name: 'referrerKind', type: '"web" | "app" | "utm"', description: 'With `groupBy` referrer: only websites, apps or UTM sources.' },
+      {
+        name: 'includeChanges',
+        type: 'boolean',
+        description: 'List each day’s store changes in the series (see app_changes). Default `true`.',
+      },
       limit(50),
     ],
     example: 'How did App Store search conversion change this month, by territory?',
