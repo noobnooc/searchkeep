@@ -26,6 +26,8 @@ import type {
   AppStoreRow,
   AppStoreWrite,
   AppSubscriptionInput,
+  AppFrameworkInput,
+  AppFrameworkRow,
   AppOptInInput,
   AppPageLevel,
   AppPageRow,
@@ -217,6 +219,10 @@ export interface Store {
   writeAppSubscriptionMetrics(appId: string, w: AppSubscriptionMetricWrite): Promise<number>;
   /** Replaces the App Store purchases per product (Analytics Reports) on the days in `dates`. */
   writeAppProducts(appId: string, dates: IsoDate[], rows: AppProductInput[]): Promise<number>;
+  /** Replaces a Framework Usage report's rows (report: its slug) on the days in `dates`. */
+  writeAppFramework(appId: string, report: string, dates: IsoDate[], rows: AppFrameworkInput[]): Promise<number>;
+  /** A Framework Usage report's rows in the range, oldest first. */
+  queryAppFramework(appId: string, report: string, range: DateRange, limit?: number): Promise<AppFrameworkRow[]>;
   /** Replaces the App Store opt-in counts of the days in `dates`. */
   writeAppOptIn(appId: string, dates: IsoDate[], rows: AppOptInInput[]): Promise<number>;
   /** First-time downloaders and those sharing analytics, summed over the range (with the days that had data). */

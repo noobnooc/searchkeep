@@ -795,6 +795,11 @@ one of your sites (referrals from it are marked as your own).
    read-only permission for the reviews API; Searchkeep replies only through `reply_review`, which
    needs `ENABLE_WRITES`). **Verify:** `probe.play_reviews` is `ok`.
 
+   Framework Usage reports (optional, per app): in **Settings** → **Apps** → the app → **App Store
+   framework reports**, list report names from Apple's Analytics Reports catalog (for example
+   `Notification Summary Engagement, App Added to Focus`), or set `frameworkReports` in `APPS`.
+   They come with the report requests already started; read them with `app_framework_report`.
+
 3. **Start App Store reports, once per app.** **[Human]** Apple generates analytics reports only
    after a request made with an **Admin** key, and Searchkeep never stores one. Generate a second,
    temporary Team Key with the **Admin** role. In the dashboard: **Settings** → **Apps** → **Start

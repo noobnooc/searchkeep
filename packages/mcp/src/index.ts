@@ -15,6 +15,7 @@ import {
   appBreakdown,
   appRevenue,
   appChanges,
+  appFrameworkReport,
   replyReview,
   appStability,
   appSubscriptions,
@@ -135,6 +136,7 @@ export const TOOL_NAMES = [
   'app_breakdown',
   'app_revenue',
   'app_changes',
+  'app_framework_report',
   'reply_review',
 ] as const;
 
@@ -607,6 +609,27 @@ export function createSearchkeepMcpServer(deps: McpDeps): McpServer {
       annotations: READ_ONLY,
     },
     async (args) => run(() => appChanges(ctx, clean(args))),
+  );
+
+  server.registerTool(
+    'app_framework_report',
+    {
+      title: 'App framework report',
+      description:
+        "One of the app's chosen Framework Usage reports from App Store Connect Analytics (e.g. Notification Summary Engagement, App Added to Focus, Mode Activity Notifications, Call Services and Call Performance), grouped by any of its dimensions or by date, with its metrics summed. Reports are chosen per app in Settings → Apps (frameworkReports); the answer lists the report's dimensions and metrics.",
+      inputSchema: {
+        ...appCommon,
+        report: z.string().min(1).describe('The report name as chosen for the app.'),
+        groupBy: z
+          .array(z.string())
+          .max(3)
+          .optional()
+          .describe('Dimension columns as the report names them (lower case), and/or date. Default: totals.'),
+        filters: z.record(z.string(), z.string()).optional().describe('Only rows whose dimension (column name) has this value.'),
+      },
+      annotations: READ_ONLY,
+    },
+    async (args) => run(() => appFrameworkReport(ctx, clean(args))),
   );
 
   if (ctx.config.enableWrites) {

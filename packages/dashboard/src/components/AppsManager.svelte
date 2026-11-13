@@ -23,8 +23,17 @@
 
   let discovery = $state.raw<AppDiscoverResponse | null>(null);
   let discovering = $state(false);
-  type Form = { mode: 'create' | 'edit'; id: string; name: string; appleId: string; playPackage: string; siteId: string; territories: string };
-  const empty = (): Form => ({ mode: 'create', id: '', name: '', appleId: '', playPackage: '', siteId: '', territories: '' });
+  type Form = {
+    mode: 'create' | 'edit';
+    id: string;
+    name: string;
+    appleId: string;
+    playPackage: string;
+    siteId: string;
+    territories: string;
+    frameworkReports: string;
+  };
+  const empty = (): Form => ({ mode: 'create', id: '', name: '', appleId: '', playPackage: '', siteId: '', territories: '', frameworkReports: '' });
   let form = $state<Form | null>(null);
   let saving = $state(false);
   let error = $state.raw<unknown>(null);
@@ -68,6 +77,7 @@
       playPackage: a.playPackage ?? '',
       siteId: a.siteId ?? '',
       territories: (a.territories ?? []).join(', '),
+      frameworkReports: (a.frameworkReports ?? []).join(', '),
     };
     error = null;
     notice = null;
@@ -82,7 +92,7 @@
     try {
       const body: Record<string, string> = { mode: form.mode, name: form.name };
       if (form.mode === 'edit') body.id = form.id;
-      for (const k of ['appleId', 'playPackage', 'siteId', 'territories'] as const) if (form[k].trim()) body[k] = form[k].trim();
+      for (const k of ['appleId', 'playPackage', 'siteId', 'territories', 'frameworkReports'] as const) if (form[k].trim()) body[k] = form[k].trim();
       const res = await request<{ app: { id: string; name: string }; created: boolean }>('/api/app-configs', {
         method: 'POST',
         body: JSON.stringify(body),
@@ -198,6 +208,11 @@
         <label for="af-terr">Storefronts for public feeds</label>
         <input id="af-terr" class="input mono" placeholder="us, gb" bind:value={f.territories} autocomplete="off" spellcheck="false" />
         <p class="hint">Optional, up to 5, most important first. Empty: the app's biggest App Store storefronts, then the largest ones. Used only when the opt-in public App Store feeds are on (APP_STORE_PUBLIC_DATA).</p>
+      </div>
+      <div class="row">
+        <label for="af-fw">App Store framework reports</label>
+        <input id="af-fw" class="input" placeholder="Notification Summary Engagement, App Added to Focus" bind:value={f.frameworkReports} autocomplete="off" spellcheck="false" />
+        <p class="hint">Optional, up to 10 Framework Usage report names from App Store Connect Analytics, comma-separated. Read with the app_framework_report MCP tool.</p>
       </div>
     </div>
     <div class="form-actions">

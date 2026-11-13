@@ -27,7 +27,7 @@ import {
 } from '../types.js';
 import { clampLimit, round } from '../analysis/common.js';
 import { APP_STORE_GENRES } from './genres.js';
-import { BREAKDOWN_VALUES_PER_DAY, playCurrencyKey } from './reports.js';
+import { BREAKDOWN_VALUES_PER_DAY, playCurrencyKey, slug } from './reports.js';
 import { appStorefronts, byStorefront } from './storefronts.js';
 import { appStoresOf, type OpsContext } from '../analysis/ops.js';
 
@@ -1436,6 +1436,87 @@ export async function replyReview(ctx: OpsContext, p: ReplyReviewParams) {
   };
 }
 
+export interface AppFrameworkParams extends Omit<AppParams, 'store'> {
+  /** The report's name as configured for the app, e.g. `Notification Summary Engagement`. */
+  report: string;
+  /** Dimension columns (as the report names them) and/or `date` to group by; none gives the totals. */
+  groupBy?: string[];
+  /** Only rows whose dimension has this value, by column name. */
+  filters?: Record<string, string>;
+}
+
+/**
+ * One of the app's chosen Framework Usage reports (App Store Connect Analytics), grouped by any of
+ * its dimensions: one tool for every such report instead of one per report.
+ */
+export async function appFrameworkReport(ctx: OpsContext, p: AppFrameworkParams) {
+  const r = await resolveApp(ctx, { ...p, store: 'apple' }, { days: 28, limit: 50 });
+  const chosen = r.app.frameworkReports ?? [];
+  const name = chosen.find((n) => slug(n) === slug(p.report ?? ''));
+  if (!name)
+    throw new SearchkeepError(
+      'bad_request',
+      chosen.length
+        ? `${r.app.name} keeps these Framework Usage reports: ${chosen.join(', ')}. Add others in Settings → Apps (frameworkReports).`
+        : `${r.app.name} keeps no Framework Usage reports. Add their names in Settings → Apps (frameworkReports), e.g. "Notification Summary Engagement"; they come with the App Store reports already started.`,
+    );
+  const rows = await ctx.store.queryAppFramework(r.app.id, slug(name), r.range);
+  const dims = [...new Set(rows.flatMap((x) => Object.keys(x.dims)))].sort();
+  const metrics = [...new Set(rows.flatMap((x) => Object.keys(x.metrics)))].sort();
+  const pick = (want: string) => (want.trim().toLowerCase() === 'date' ? 'date' : dims.find((d) => d === want.trim().toLowerCase()));
+  const groupBy = (p.groupBy ?? []).map((g) => {
+    const d = pick(g);
+    if (!d)
+      throw new SearchkeepError(
+        'bad_request',
+        `groupBy "${g.slice(0, 40)}" is not a dimension of ${name}: ${['date', ...dims].join(', ')}.`,
+      );
+    return d;
+  });
+  const filters = Object.entries(p.filters ?? {}).map(([k, v]) => {
+    const d = pick(k);
+    if (!d || d === 'date')
+      throw new SearchkeepError('bad_request', `filter "${k.slice(0, 40)}" is not a dimension of ${name}: ${dims.join(', ')}.`);
+    return [d, String(v).trim().toLowerCase()] as const;
+  });
+  const agg = new Map<string, { key: Record<string, string>; metrics: Record<string, number> }>();
+  for (const x of rows) {
+    if (filters.some(([d, v]) => (x.dims[d] ?? '').toLowerCase() !== v)) continue;
+    const key = Object.fromEntries(groupBy.map((g) => [g, g === 'date' ? x.date : (x.dims[g] ?? '')]));
+    const id = JSON.stringify(key);
+    const e = agg.get(id) ?? { key, metrics: {} };
+    for (const [m, v] of Object.entries(x.metrics)) e.metrics[m] = (e.metrics[m] ?? 0) + v;
+    agg.set(id, e);
+  }
+  const first = metrics[0];
+  const out = [...agg.values()]
+    .map((x) => ({ ...x.key, ...Object.fromEntries(Object.entries(x.metrics).map(([m, v]) => [m, round(v, 4)])) }))
+    .sort((a, b) =>
+      groupBy.includes('date')
+        ? String(a.date).localeCompare(String(b.date))
+        : first
+          ? Number((b as Record<string, unknown>)[first] ?? 0) - Number((a as Record<string, unknown>)[first] ?? 0)
+          : 0,
+    );
+  const notes = [
+    `${name}: Apple's Framework Usage report, from people who share analytics with developers; rows with fewer than five devices are left out, and device counts are summed across rows (an upper bound). Dimensions: ${dims.join(', ') || 'none yet'}. Metrics: ${metrics.join(', ') || 'none yet'}.`,
+  ];
+  if (rows.length === 0)
+    notes.push(
+      "No rows in this range. A report added to the app is picked up with the next listing of the App Store reports (within a week), history through the monthly snapshot; small apps often stay below Apple's five-device threshold.",
+    );
+  return {
+    app: r.app.id,
+    report: name,
+    range: r.range,
+    dimensions: dims,
+    metrics,
+    groupBy,
+    rows: out.slice(0, groupBy.includes('date') ? 1000 : r.limit),
+    notes,
+  };
+}
+
 /** Configured apps, which stores are connected, App Store report status and stored data. */
 export async function listApps(ctx: OpsContext) {
   const coverage = await ctx.store.appCoverage();
@@ -1449,6 +1530,7 @@ export async function listApps(ctx: OpsContext) {
         ...(app.playPackage ? { playPackage: app.playPackage } : {}),
         ...(app.siteId ? { siteId: app.siteId } : {}),
         ...(app.territories ? { territories: app.territories } : {}),
+        ...(app.frameworkReports ? { frameworkReports: app.frameworkReports } : {}),
         origin: app.origin ?? 'secret',
         stores: appStoresOf(ctx, app),
         ...(app.appleId

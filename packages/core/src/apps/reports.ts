@@ -22,6 +22,8 @@ import {
   type AppSubscriptionMetricInput,
   type AppProductInput,
   type AppSalesInput,
+  type AppConfig,
+  type AppFrameworkInput,
   type AppOptInInput,
   type AppPageInput,
   type AppPageLevel,
@@ -800,6 +802,86 @@ export function optInCollector(): ReportCollector {
   };
 }
 
+/** Framework report columns that hold numbers to sum; every other column (but the date and the app) is a dimension. */
+const FRAMEWORK_METRIC = /\b(counts?|devices|duration|seconds|minutes|hours|sum|total|number|sessions|events)\b/i;
+const FRAMEWORK_SKIP = new Set(['date', 'app name', 'app apple identifier']);
+/** Combinations of dimension values kept per day; the rest are summed into one `Other` row. */
+export const FRAMEWORK_VALUES_PER_DAY = 200;
+
+/**
+ * A Framework Usage report, whatever its columns: per day and combination of dimension values,
+ * its metric columns summed. Apple leaves out rows below its five-device threshold.
+ */
+export function frameworkCollector(report: string): ReportCollector {
+  const rows = new Map<string, AppFrameworkInput>();
+  const days = new Set<IsoDate>();
+  const col = columns();
+  let metricNames: string[] | null = null;
+  let dimNames: string[] = [];
+  return {
+    add(row) {
+      const date = cellDate(col(row, 'date', 'event date'));
+      if (!date) return;
+      days.add(date);
+      if (!metricNames) {
+        const keys = Object.keys(row).filter((k) => !FRAMEWORK_SKIP.has(k) && k !== 'event date');
+        metricNames = keys.filter((k) => FRAMEWORK_METRIC.test(k));
+        dimNames = keys.filter((k) => !FRAMEWORK_METRIC.test(k)).slice(0, 12);
+      }
+      const dims: Record<string, string> = {};
+      for (const d of dimNames) dims[d] = (row[d] ?? '').trim().slice(0, 80);
+      const key = `${date}|${JSON.stringify(dims)}`;
+      const e = rows.get(key) ?? { date, dims, metrics: {} };
+      for (const m of metricNames) {
+        const v = cellNumber(row[m] ?? '');
+        if (v !== null) e.metrics[m] = (e.metrics[m] ?? 0) + v;
+      }
+      rows.set(key, e);
+    },
+    async write(store, appId, before) {
+      const dates = coveredDays(days, before);
+      if (dates.length === 0) return { written: 0, oldest: null };
+      const weight = (r: AppFrameworkInput) => Object.values(r.metrics)[0] ?? 0;
+      const out: AppFrameworkInput[] = [];
+      for (const date of dates) {
+        const list = keep(rows.values(), before)
+          .filter((r) => r.date === date)
+          .sort((a, b) => weight(b) - weight(a));
+        out.push(...list.slice(0, FRAMEWORK_VALUES_PER_DAY));
+        const rest = list.slice(FRAMEWORK_VALUES_PER_DAY);
+        if (rest.length) {
+          const other: AppFrameworkInput = { date, dims: Object.fromEntries(dimNames.map((d) => [d, 'Other'])), metrics: {} };
+          for (const r of rest) for (const [m, v] of Object.entries(r.metrics)) other.metrics[m] = (other.metrics[m] ?? 0) + v;
+          out.push(other);
+        }
+      }
+      return { written: await store.writeAppFramework(appId, report, dates, out), oldest: dates[0]! };
+    },
+  };
+}
+
+/** The report specs of an app: the standard ones and the Framework Usage reports it asked for. */
+export function ascReportsFor(app: AppConfig): AscReportSpec[] {
+  return [
+    ...ASC_REPORTS,
+    ...(app.frameworkReports ?? []).map((name): AscReportSpec => {
+      const key = `fw_${slug(name)}`;
+      const want = slug(name);
+      return {
+        key,
+        label: name,
+        task: 'asc.framework',
+        // Apple names the report, sometimes with "Standard" or "Detailed" after it: the Standard one, or the plain name.
+        match: (n) => {
+          const s = slug(n);
+          return s === want || s === `${want}_standard`;
+        },
+        collector: () => frameworkCollector(slug(name)),
+      };
+    }),
+  ];
+}
+
 // ------------------------------------------------------------------ Google Play
 
 /** Store performance by country: store listing visitors and acquisitions per territory. */
@@ -1018,6 +1100,8 @@ export function ascReviewInput(r: {
 export interface AscReportSpec {
   key: string;
   label: string;
+  /** Task name for progress and errors (default `asc.<key>`). */
+  task?: string;
   match: (name: string) => boolean;
   collector: () => ReportCollector;
 }

@@ -12,6 +12,9 @@ import {
   cellDate,
   playInstallsCollector,
   subscriptionMetricsCollector,
+  frameworkCollector,
+  ascReportsFor,
+  type AppFrameworkInput,
   salesSummaryCollector,
   productsCollector,
   type AppSalesInput,
@@ -509,6 +512,78 @@ describe('App Store revenue per product', () => {
         proceedsCents: 2500,
         refundProceedsCents: 0,
         salesCents: 3599,
+      },
+    ]);
+  });
+});
+
+describe('Framework Usage reports', () => {
+  it("validates the report names chosen for an app and matches Apple's report names", () => {
+    const ok = validateApp({
+      name: 'Echobell',
+      appleId: '6400000000',
+      frameworkReports: 'Mode Activity Notifications, App Added to Focus, mode activity notifications',
+    });
+    expect(ok).toEqual({
+      app: {
+        id: 'echobell',
+        name: 'Echobell',
+        appleId: '6400000000',
+        frameworkReports: ['Mode Activity Notifications', 'App Added to Focus'],
+      },
+    });
+    expect(validateApp({ name: 'X', appleId: '6400000000', frameworkReports: ['<script>'] })).toHaveProperty('error');
+    const specs = ascReportsFor((ok as { app: Parameters<typeof ascReportsFor>[0] }).app);
+    const match = (n: string) => specs.filter((s) => s.match(n)).map((s) => s.key);
+    expect(match('Mode Activity Notifications')).toEqual(['fw_mode_activity_notifications']);
+    expect(match('App Added to Focus Standard')).toEqual(['fw_app_added_to_focus']);
+    expect(match('App Added to Focus Detailed')).toEqual([]);
+    expect(specs.find((s) => s.key === 'fw_app_added_to_focus')!.task).toBe('asc.framework');
+  });
+
+  it("keeps any report's dimensions and sums its metric columns per day", async () => {
+    // Mode Activity Notifications, as Apple documents its columns.
+    const tsv = [
+      'Count\tTerritory\tDate\tPlatform\tDevice\tBuild\tUnique Devices\tRelease Type\tResolution Type',
+      '12\tUS\t2026-11-08\tiOS 26.1\tiPhone\t23B85\t9\tProduction\tTapped',
+      '8\tUS\t2026-11-08\tiOS 26.1\tiPhone\t23B85\t6\tProduction\tTapped',
+      '30\tDE\t2026-11-08\tiOS 26.0\tiPad\t23A341\t20\tProduction\tCleared',
+    ].join('\n');
+    const writes: Array<{ report: string; dates: string[]; rows: AppFrameworkInput[] }> = [];
+    const store = {
+      writeAppFramework: async (_a: string, report: string, dates: string[], rows: AppFrameworkInput[]) => (
+        writes.push({ report, dates, rows }),
+        rows.length
+      ),
+    } as unknown as Store;
+    const c = frameworkCollector('mode_activity_notifications');
+    await readDelimited(stream(new TextEncoder().encode(tsv)), (r) => c.add(r));
+    await c.write(store, 'echobell');
+    expect(writes[0]!.report).toBe('mode_activity_notifications');
+    expect(writes[0]!.rows).toEqual([
+      {
+        date: '2026-11-08',
+        dims: {
+          territory: 'DE',
+          platform: 'iOS 26.0',
+          device: 'iPad',
+          build: '23A341',
+          'release type': 'Production',
+          'resolution type': 'Cleared',
+        },
+        metrics: { count: 30, 'unique devices': 20 },
+      },
+      {
+        date: '2026-11-08',
+        dims: {
+          territory: 'US',
+          platform: 'iOS 26.1',
+          device: 'iPhone',
+          build: '23B85',
+          'release type': 'Production',
+          'resolution type': 'Tapped',
+        },
+        metrics: { count: 20, 'unique devices': 15 },
       },
     ]);
   });

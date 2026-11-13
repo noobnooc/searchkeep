@@ -61,6 +61,8 @@ import {
   type WebAnalyticsInput,
   type WebVitalsInput,
   type AppSubscriptionInput,
+  type AppFrameworkInput,
+  type AppFrameworkRow,
   type AppOptInInput,
   type AppPageLevel,
   type AppPageRow,
@@ -1285,6 +1287,14 @@ export class D1Store implements Store {
       if (r.playPackage) app.playPackage = r.playPackage;
       if (r.siteId) app.siteId = r.siteId;
       if (r.territories) app.territories = r.territories.split(',').filter(Boolean);
+      if (r.frameworkReports) {
+        try {
+          const list = JSON.parse(r.frameworkReports) as unknown;
+          if (Array.isArray(list) && list.length) app.frameworkReports = list.map(String);
+        } catch {
+          // ignore a malformed value
+        }
+      }
       return app;
     });
   }
@@ -1296,6 +1306,7 @@ export class D1Store implements Store {
       playPackage: app.playPackage ?? null,
       siteId: app.siteId ?? null,
       territories: app.territories?.length ? app.territories.join(',') : null,
+      frameworkReports: app.frameworkReports?.length ? JSON.stringify(app.frameworkReports) : null,
     };
     await this.orm
       .insert(schema.appConfigs)
@@ -2396,6 +2407,57 @@ export class D1Store implements Store {
       range.end,
     );
     return { downloadingUsers: Number(r?.u) || 0, optingInUsers: Number(r?.o) || 0, days: Number(r?.n) || 0 };
+  }
+
+  async writeAppFramework(appId: string, report: string, dates: IsoDate[], rows: AppFrameworkInput[]): Promise<number> {
+    const canon = (o: Record<string, string>) =>
+      JSON.stringify(Object.fromEntries(Object.entries(o).sort(([a], [b]) => a.localeCompare(b))));
+    const agg = new Map<string, { d: string; k: string; m: Record<string, number> }>();
+    for (const r of rows) {
+      const k = canon(r.dims);
+      const key = `${r.date}|${k}`;
+      const e = agg.get(key) ?? { d: r.date, k, m: {} };
+      for (const [name, v] of Object.entries(r.metrics)) e.m[name] = (e.m[name] ?? 0) + v;
+      agg.set(key, e);
+    }
+    const days = [...new Set([...dates, ...[...agg.values()].map((x) => x.d)])];
+    if (days.length === 0) return 0;
+    const list = [...agg.values()].map((x) => ({ d: x.d, k: x.k, m: JSON.stringify(x.m) }));
+    await this.batch([
+      ...chunks(days).map((group) =>
+        this.db
+          .prepare('DELETE FROM app_framework_daily WHERE app_id = ?1 AND report = ?2 AND date IN (SELECT value FROM json_each(?3))')
+          .bind(appId, report, JSON.stringify(group)),
+      ),
+      ...chunks(list, 200).map((group) =>
+        this.db
+          .prepare(
+            `INSERT INTO app_framework_daily (app_id, report, date, dims, metrics)
+             SELECT ?1, ?2, j.value->>'d', j.value->>'k', j.value->>'m' FROM json_each(?3) j WHERE true`,
+          )
+          .bind(appId, report, JSON.stringify(group)),
+      ),
+    ]);
+    return list.length;
+  }
+
+  async queryAppFramework(appId: string, report: string, range: DateRange, limit = 20000): Promise<AppFrameworkRow[]> {
+    const rows = await this.all<{ date: string; dims: string; metrics: string }>(
+      `SELECT date, dims, metrics FROM app_framework_daily WHERE app_id = ?1 AND report = ?2 AND date >= ?3 AND date <= ?4
+       ORDER BY date ASC LIMIT ${Math.max(1, Math.min(50000, Math.floor(limit)))}`,
+      appId,
+      report,
+      range.start,
+      range.end,
+    );
+    const parse = <T>(s: string, fallback: T): T => {
+      try {
+        return JSON.parse(s) as T;
+      } catch {
+        return fallback;
+      }
+    };
+    return rows.map((r) => ({ date: r.date, dims: parse(r.dims, {}), metrics: parse(r.metrics, {}) }));
   }
 
   async snapshotAppListing(appId: string, store: AppStore, date: IsoDate, scopes: string[], values: AppListingValue[]): Promise<number> {

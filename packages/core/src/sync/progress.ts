@@ -112,6 +112,8 @@ const TASKS: Record<SyncDataset, string[]> = {
     'asc.reviews',
     'asc.sales',
     'asc.listing',
+    'asc.framework',
+    'asc.framework_history',
     'asc.sales_history',
     ...ASC_REPORTS.flatMap((r) => [`asc.${r.key}`, `asc.${r.key}_history`]),
   ],

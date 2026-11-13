@@ -360,6 +360,24 @@ export const TOOLS: Tool[] = [
     params: [site, { name: 'live', type: 'boolean', description: '`true` refreshes the list from the Search Console API first.' }],
   },
   {
+    name: 'app_framework_report',
+    summary: 'One of the app’s chosen App Store Framework Usage reports, grouped by any of its dimensions.',
+    description:
+      'Framework Usage reports from App Store Connect Analytics (for example Notification Summary Engagement, App Added to Focus, Mode Activity Notifications, Call Services and Call Performance) chosen per app in Settings → Apps. Their metric columns are summed by date and by any of the report’s dimensions; the answer lists both. Apple leaves out rows below five devices.',
+    readOnly: true,
+    params: [
+      app,
+      { name: 'report', type: 'string', description: 'Required. The report name as chosen for the app.' },
+      start,
+      end,
+      days(28),
+      { name: 'groupBy', type: 'string[]', description: 'Dimension columns of the report and/or `date`. Default: totals.' },
+      { name: 'filters', type: 'Record<string, string>', description: 'Only rows whose dimension has this value.' },
+      limit(50),
+    ],
+    example: 'How often do people tap our notifications in the notification summary?',
+  },
+  {
     name: 'reply_review',
     summary: 'Replies to an App Store or Google Play review, after a preview. Off by default.',
     description:

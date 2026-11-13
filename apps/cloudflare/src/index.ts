@@ -18,6 +18,7 @@ import {
   appSubscriptions,
   appRevenue,
   appChanges,
+  appFrameworkReport,
   listApps,
   startAppStoreReports,
   validateApp,
@@ -758,6 +759,14 @@ app.get(
   handle((c) => {
     const { x, common } = appParams(c);
     return appStability(opsContext(c), x.strip({ ...common, groupBy: x.get('groupBy') as 'date' | 'version' | undefined }));
+  }),
+);
+app.get(
+  '/api/app-framework-report',
+  handle((c) => {
+    const { x, common } = appParams(c);
+    const { store: _store, ...rest } = common;
+    return appFrameworkReport(opsContext(c), x.strip({ ...rest, report: x.get('report') ?? '', groupBy: x.list<string>('groupBy') }));
   }),
 );
 app.get(

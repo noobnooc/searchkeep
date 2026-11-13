@@ -309,6 +309,8 @@ export const appConfigs = sqliteTable('app_configs', {
   siteId: text('site_id'),
   /** Storefronts for the opt-in public feeds, comma-separated. */
   territories: text('territories'),
+  /** Framework Usage report names, JSON array. */
+  frameworkReports: text('framework_reports'),
   createdAt: text('created_at').notNull().default(now),
   updatedAt: text('updated_at').notNull().default(now),
 });
@@ -579,6 +581,22 @@ export const appOptInDaily = sqliteTable(
     optingInUsers: integer('opting_in_users').notNull().default(0),
   },
   (t) => [primaryKey({ columns: [t.appId, t.date] })],
+);
+
+/**
+ * Framework Usage reports chosen per app: per report, day and combination of dimension values (a
+ * canonical JSON object), the summed metrics (JSON object). At most 200 combinations a day.
+ */
+export const appFrameworkDaily = sqliteTable(
+  'app_framework_daily',
+  {
+    appId: text('app_id').notNull(),
+    report: text('report').notNull(),
+    date: text('date').notNull(),
+    dims: text('dims').notNull(),
+    metrics: text('metrics').notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.appId, t.report, t.date, t.dims] }), index('app_framework_daily_date').on(t.appId, t.report, t.date)],
 );
 
 /** The latest snapshot of an app's store fields (versions, listings, app info, tracks), one row per field. */

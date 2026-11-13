@@ -12,6 +12,7 @@ import {
   appSubscriptions,
   appRevenue,
   appChanges,
+  appFrameworkReport,
   replyReview,
   listApps,
   startAppStoreReports,
@@ -72,6 +73,8 @@ function fakeAsc(
     listing?: AppListingValue[] | 'forbidden';
     /** Installs reports: the snapshot's daily instance is not there yet, there, or there only as monthly instances. */
     installs?: 'waiting' | 'ready' | 'monthly';
+    /** Lists the Mode Activity Notifications Framework Usage report with one instance. */
+    framework?: boolean;
   } = {},
 ) {
   const calls: string[] = [];
@@ -89,6 +92,7 @@ function fakeAsc(
     subev: [{ id: 'subev-2026-10-19', processingDate: '2026-10-19' }],
     'snap-eng': [{ id: 'snap-eng-1', processingDate: '2026-10-19' }],
     inst: [{ id: 'inst-2026-10-19', processingDate: '2026-10-19' }],
+    fw: [{ id: 'fw-2026-10-19', processingDate: '2026-10-19' }],
     ...(opts.installs === 'ready' ? { 'snap-inst': [{ id: 'snap-inst-1', processingDate: '2026-10-21' }] } : {}),
   };
   const rowsFor = (instanceId: string): DelimitedRow[] => {
@@ -107,6 +111,24 @@ function fakeAsc(
       territory: 'US',
       counts: String(counts),
     });
+    if (instanceId === 'fw-2026-10-19') {
+      const row = (date: string, territory: string, resolution: string, count: number, devices: number): DelimitedRow => ({
+        count: String(count),
+        territory,
+        date,
+        platform: 'iOS 26.1',
+        device: 'iPhone',
+        build: '23B85',
+        'unique devices': String(devices),
+        'release type': 'Production',
+        'resolution type': resolution,
+      });
+      return [
+        row('2026-10-17', 'US', 'Tapped', 10, 7),
+        row('2026-10-18', 'US', 'Tapped', 12, 9),
+        row('2026-10-18', 'DE', 'Cleared', 30, 20),
+      ];
+    }
     // Ongoing installs: Oct 17 and 18. History: every day from Oct 1 to Oct 18 (overlapping).
     if (instanceId === 'inst-2026-10-19') return [ins('2026-10-17', 5), ins('2026-10-18', 6)];
     if (instanceId === 'snap-inst-1') {
@@ -340,6 +362,7 @@ function fakeAsc(
         ? [{ id: 'snap-eng', name: 'App Store Discovery and Engagement Standard', category: 'APP_STORE_ENGAGEMENT' }, ...installs]
         : [
             ...installs,
+            ...(opts.framework ? [{ id: 'fw', name: 'Mode Activity Notifications', category: 'FRAMEWORK_USAGE' }] : []),
             { id: 'eng', name: 'App Store Discovery and Engagement Standard', category: 'APP_STORE_ENGAGEMENT' },
             { id: 'dl', name: 'App Downloads Standard', category: 'APP_STORE_COMMERCE' },
             { id: 'crash', name: 'App Crashes', category: 'APP_USAGE' },
@@ -2095,6 +2118,48 @@ export function appContract(name: string, makeStore: () => Promise<Store>): void
         await expect(replyReview(pctx, { app: APP.id, store: 'play', reviewId: 'nope', text: 'Hi' })).rejects.toMatchObject({
           code: 'not_found',
         });
+      });
+
+      it('reads the Framework Usage reports chosen for an app and groups them by any dimension', async () => {
+        const app = { ...APP, frameworkReports: ['Mode Activity Notifications'] };
+        const cfg = config({ APP_STORE_PUBLIC_DATA: 'false', APPS: JSON.stringify([app]) });
+        expect(cfg.apps[0]!.frameworkReports).toEqual(['Mode Activity Notifications']);
+        const asc = fakeAsc({ framework: true });
+        await runSync({ store, config: cfg, clients: { asc: asc.client }, trigger: 'manual', now: NOW, pacing: {} });
+        expect(asc.calls).toContain('listInstances:fw');
+        const ctx = { store, config: cfg, clients: {}, now: () => NOW };
+        const p = { app: APP.id, report: 'mode activity notifications', start: '2026-10-12', end: '2026-10-18' };
+        const totals = await appFrameworkReport(ctx, p);
+        expect(totals.report).toBe('Mode Activity Notifications');
+        expect(totals.dimensions).toEqual(['build', 'device', 'platform', 'release type', 'resolution type', 'territory']);
+        expect(totals.metrics).toEqual(['count', 'unique devices']);
+        expect(totals.rows).toEqual([{ count: 52, 'unique devices': 36 }]);
+        const byResolution = await appFrameworkReport(ctx, { ...p, groupBy: ['Resolution Type'] });
+        expect(byResolution.rows).toEqual([
+          { 'resolution type': 'Cleared', count: 30, 'unique devices': 20 },
+          { 'resolution type': 'Tapped', count: 22, 'unique devices': 16 },
+        ]);
+        const usByDay = await appFrameworkReport(ctx, { ...p, groupBy: ['date'], filters: { territory: 'us' } });
+        expect(usByDay.rows).toEqual([
+          { date: '2026-10-17', count: 10, 'unique devices': 7 },
+          { date: '2026-10-18', count: 12, 'unique devices': 9 },
+        ]);
+        await expect(appFrameworkReport(ctx, { ...p, groupBy: ['color'] })).rejects.toMatchObject({ code: 'bad_request' });
+        await expect(appFrameworkReport(ctx, { ...p, report: 'App Added to Focus' })).rejects.toMatchObject({ code: 'bad_request' });
+        // An app without the report does not read it.
+        const plain = fakeAsc({ framework: true });
+        await runSync({
+          store,
+          config: config({ APP_STORE_PUBLIC_DATA: 'false' }),
+          clients: { asc: plain.client },
+          trigger: 'manual',
+          now: new Date('2026-10-28T04:00:00Z'),
+          pacing: {},
+        });
+        expect(plain.calls).not.toContain('listInstances:fw');
+        // Dashboard-managed apps keep the choice.
+        await store.saveAppConfig({ id: 'other', name: 'Other', appleId: '7654321', frameworkReports: ['App Added to Focus'] });
+        expect((await store.listAppConfigs()).find((a) => a.id === 'other')!.frameworkReports).toEqual(['App Added to Focus']);
       });
 
       it('looks for report kinds added since the last listing right away', async () => {

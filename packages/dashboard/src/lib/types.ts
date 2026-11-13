@@ -554,6 +554,7 @@ export interface AppInfo {
   playPackage?: string;
   siteId?: string;
   territories?: string[];
+  frameworkReports?: string[];
   origin: 'secret' | 'dashboard';
   stores: AppStores;
   appStoreReports?: { started: boolean; stopped: boolean; snapshot: boolean; snapshotRequestedOn?: string; problem?: string };

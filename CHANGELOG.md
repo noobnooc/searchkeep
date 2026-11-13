@@ -26,6 +26,13 @@ Because users sync `main` at any time, the `Unreleased` section is always accura
 
 ### Added
 
+- App Store Framework Usage reports per app. An app can name up to 10 Framework Usage reports of
+  App Store Connect Analytics (`frameworkReports` in `APPS` or **Settings** → **Apps**), for example
+  Notification Summary Engagement or App Added to Focus. The sync reads them from the existing
+  report requests and keeps, per day, each combination of their dimensions with the metric columns
+  summed (at most 200 a day, the rest as "Other"). New read-only MCP tool and API
+  `app_framework_report` groups any of them by date or any dimension. Nothing else to set up.
+
 - Fresher reviews and review replies. App Store reviews are read every 4 hours (and marked replied
   when they have a developer response). With the opt-in `PLAY_REVIEWS_API=true`, Google Play reviews
   of the last week are read every 4 hours through the Android Publisher API, ahead of the monthly

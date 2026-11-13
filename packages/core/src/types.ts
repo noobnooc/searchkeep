@@ -397,6 +397,11 @@ export interface AppConfig {
    * first. Default: the app's biggest App Store storefronts by downloads, then the largest ones.
    */
   territories?: string[];
+  /**
+   * Framework Usage reports of App Store Connect Analytics to keep for this app, by name (e.g.
+   * `Notification Summary Engagement`, `App Added to Focus`), read with `app_framework_report`.
+   */
+  frameworkReports?: string[];
   /** Where the app is defined: the APPS secret (read-only) or the dashboard. */
   origin?: 'secret' | 'dashboard';
 }
@@ -1053,6 +1058,19 @@ export interface AppOptInInput {
   date: IsoDate;
   downloadingUsers: number;
   optingInUsers: number;
+}
+
+/** One row of a Framework Usage report: dimension values (by column name) and summed metrics. */
+export interface AppFrameworkInput {
+  date: IsoDate;
+  dims: Record<string, string>;
+  metrics: Record<string, number>;
+}
+
+export interface AppFrameworkRow {
+  date: IsoDate;
+  dims: Record<string, string>;
+  metrics: Record<string, number>;
 }
 
 export interface AppDataCoverage {

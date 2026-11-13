@@ -227,6 +227,7 @@ AGENTS.md              Instructions for AI agents working on this repository
 | `app_changes`          | What changed on the store page and when: versions, names, keywords, texts, tracks, before/after.        |
 | `app_revenue`          | App Store revenue per product: USD estimate, or exact per currency with Sales and Trends; refunds.      |
 
+| `app_framework_report` | An app's chosen App Store Framework Usage report (notifications, Focus, calls, ...), by any dimension. |
 | `reply_review` | Replies to an App Store or Google Play review, preview first. **Only with `ENABLE_WRITES=true`**. |
 
 All tools are read-only except `submit_sitemap` and `reply_review`. Common parameters: `site`, `start` and `end`

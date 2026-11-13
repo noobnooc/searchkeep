@@ -31,7 +31,7 @@ import {
 import type { Budget, Unit } from '../sync/unit.js';
 import {
   ascReviewInput,
-  ASC_REPORTS,
+  ascReportsFor,
   classifyPlayFile,
   PLAY_COLLECTORS,
   PLAY_FINANCIAL_KINDS,
@@ -278,6 +278,7 @@ function planAppStore(args: AppPlanArgs, app: AppConfig, asc: AscClient, place: 
   const appleId = app.appleId!;
   const siteId = appTaskId(app.id);
   const state = parseJson<AscRequestState>(get(syncKeys.ascRequests(app.id))) ?? {};
+  const specs = ascReportsFor(app);
 
   const afterRequests = (st: AscRequestState, to: Place) => {
     if (st.ongoing) planReports(st, 'ongoing', st.ongoing, to);
@@ -368,10 +369,10 @@ function planAppStore(args: AppPlanArgs, app: AppConfig, asc: AscClient, place: 
     const fresh =
       ids &&
       ids.requestId === requestId &&
-      ASC_REPORTS.every((s) => looked.has(s.key)) &&
+      specs.every((s) => looked.has(s.key)) &&
       (ids.checkedOn === today || (found > 0 && daysBetween(ids.checkedOn, today) < ASC_REPORT_IDS_DAYS));
     if (fresh) {
-      for (const spec of ASC_REPORTS) if (ids.reports[spec.key]) planInstances(st, kind, spec, ids.reports[spec.key]!, to);
+      for (const spec of specs) if (ids.reports[spec.key]) planInstances(st, kind, spec, ids.reports[spec.key]!, to);
       return;
     }
     to({
@@ -385,13 +386,13 @@ function planAppStore(args: AppPlanArgs, app: AppConfig, asc: AscClient, place: 
       run: async () => {
         const reports = await asc.listReports(requestId);
         const map: Record<string, string> = {};
-        for (const spec of ASC_REPORTS) {
+        for (const spec of specs) {
           const hit = reports.find((r) => spec.match(r.name));
           if (hit) map[spec.key] = hit.id;
         }
-        const saved: AscReportIds = { requestId, checkedOn: today, reports: map, looked: ASC_REPORTS.map((s) => s.key) };
+        const saved: AscReportIds = { requestId, checkedOn: today, reports: map, looked: specs.map((s) => s.key) };
         await store.setMeta(syncKeys.ascReports(app.id, kind), JSON.stringify(saved));
-        for (const spec of ASC_REPORTS) if (map[spec.key]) planInstances(st, kind, spec, map[spec.key]!, enqueue);
+        for (const spec of specs) if (map[spec.key]) planInstances(st, kind, spec, map[spec.key]!, enqueue);
         return 0;
       },
       skip: async () => undefined,
@@ -402,7 +403,7 @@ function planAppStore(args: AppPlanArgs, app: AppConfig, asc: AscClient, place: 
   function planInstances(st: AscRequestState, kind: AscRequestKind, spec: AscReportSpec, reportId: string, to: Place) {
     const pendingKey = syncKeys.ascPending(app.id, kind, spec.key);
     const pending = parseJson<AscPending>(get(pendingKey));
-    const task = `asc.${spec.key}${kind === 'snapshot' ? '_history' : ''}`;
+    const task = `${spec.task ?? `asc.${spec.key}`}${kind === 'snapshot' ? '_history' : ''}`;
     if (pending && pending.listedOn === today) {
       for (const inst of pending.instances) to(instanceUnit(kind, spec, task, inst));
       return;
