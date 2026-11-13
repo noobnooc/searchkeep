@@ -7,28 +7,29 @@ listed under "Later" needs a maintainer decision (and usually an ADR) before wor
 
 ### In scope
 
-| Area           | v0.1                                                                                                                                                  |
-| -------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Runtime        | Cloudflare Workers: one Worker (`apps/cloudflare`) serving dashboard, API, MCP and cron                                                               |
-| Database       | Cloudflare D1 via Drizzle (`packages/store-d1`), behind the Store interface                                                                           |
-| Data sources   | Google Search Console, Bing Webmaster Tools, Cloudflare (AI crawler requests, Web Analytics, Web Vitals); Bing AI Performance citations by CSV import |
-| Apps           | App Store Connect (Analytics Reports, customer reviews), Google Play (Console bulk reports, Developer Reporting API); opt-in Apple public feeds       |
-| Entrances      | MCP (Streamable HTTP, stateless, 19 read-only tools plus opt-in `submit_sitemap`) and the dashboard (Svelte + Vite SPA)                               |
-| Authentication | Cloudflare Access self-hosted application with Managed OAuth; JWT re-verified in the Worker                                                           |
-| Deployment     | Fork plus Workers Builds; upgrade with "Sync fork"                                                                                                    |
-| Sync           | Cron every 15 minutes in small, budgeted batches; daily increments (GSC re-pulls the last 4 days, Bing in full) before a 16-month GSC backfill        |
-| Analysis       | Quick wins, cannibalization, CTR anomalies, content decay, period comparison, GEO funnel, AI crawlers, brand vs. non-brand                            |
-| App analysis   | Store funnel (impressions, page views, downloads) by store, source and territory; Play search terms; referrers; ratings and reviews; crash rates      |
-| Live calls     | GSC URL inspection, sitemap listing; sitemap submission (off by default)                                                                              |
-| Operations     | `setup_status`, readiness lock, the maintain skill, CI guardrails                                                                                     |
+| Area           | v0.1                                                                                                                                                                                                                                                                        |
+| -------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Runtime        | Cloudflare Workers: one Worker (`apps/cloudflare`) serving dashboard, API, MCP and cron                                                                                                                                                                                     |
+| Database       | Cloudflare D1 via Drizzle (`packages/store-d1`), behind the Store interface                                                                                                                                                                                                 |
+| Data sources   | Google Search Console, Bing Webmaster Tools, Cloudflare (AI crawler requests, Web Analytics, Web Vitals); Bing AI Performance citations by CSV import                                                                                                                       |
+| Apps           | App Store Connect (Analytics Reports, customer reviews, Sales and Trends, app metadata), Google Play (Console bulk reports, Developer Reporting API; opt-in Android Publisher listings and reviews); optional Apple Ads Platform API; opt-in Apple public feeds             |
+| Entrances      | MCP (Streamable HTTP, stateless, 25 read-only tools plus opt-in `submit_sitemap` and `reply_review`) and the dashboard (Svelte + Vite SPA)                                                                                                                                  |
+| Authentication | Cloudflare Access self-hosted application with Managed OAuth; JWT re-verified in the Worker                                                                                                                                                                                 |
+| Deployment     | Fork plus Workers Builds; upgrade with "Sync fork"                                                                                                                                                                                                                          |
+| Sync           | Cron every 15 minutes in small, budgeted batches; daily increments (GSC re-pulls the last 4 days, Bing in full) before a 16-month GSC backfill                                                                                                                              |
+| Analysis       | Quick wins, cannibalization, CTR anomalies, content decay, period comparison, GEO funnel, AI crawlers, brand vs. non-brand                                                                                                                                                  |
+| App analysis   | Store funnel (impressions, page views, downloads) by store, source and territory; Play search terms; referrers; ratings and reviews; crash rates; subscriptions, revenue per product, store change timeline, product pages, Framework Usage reports, Apple Ads search terms |
+| Live calls     | GSC URL inspection, sitemap listing; sitemap submission (off by default)                                                                                                                                                                                                    |
+| Operations     | `setup_status`, readiness lock, the maintain skill, CI guardrails                                                                                                                                                                                                           |
 
 ### Out of scope for v0.1
 
 - Runtimes other than Cloudflare Workers; databases other than D1.
 - Authentication other than Cloudflare Access.
 - Data sources other than the ones above.
-- App store keyword rankings, Google Play public data (there is no official source), app revenue
-  (Sales and Trends, Play earnings) and Apple Ads search terms.
+- App store keyword rankings and Google Play public data (there is no official source). App revenue
+  (Sales and Trends, Play earnings) and Apple Ads search terms are in scope since
+  [ADR 0011](adr/0011-app-store-data-gaps.md).
 - Backlinks, competitor data, rank tracking, SERP or AI-answer scraping (never in the core; see the
   [charter](charter.md)).
 - Durable Objects and KV ([ADR 0002](adr/0002-no-durable-objects.md)).
@@ -61,8 +62,6 @@ Listed for direction only; none of these is committed.
   authorization server for MCP OAuth.
 - **More first-party data sources**, for example other webmaster tools or analytics the site owner
   controls.
-- **App revenue and Apple Ads**: App Store Sales and Trends, Google Play earnings, and search terms
-  from the user's own Apple Ads campaigns.
 - **Optional plugins**, off by default and outside the core, for competitor monitoring and AI answer
   monitoring.
 - **Optional read-only SQL tools** `describe_schema` and `run_query`: a single `SELECT` only, row
