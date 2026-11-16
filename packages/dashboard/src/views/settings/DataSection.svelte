@@ -99,10 +99,7 @@
 
 <Card title="Import AI citations" subtitle="Bing Webmaster Tools → AI Performance → Export (CSV)" id="settings-import">
   <form class="import" onsubmit={doImport}>
-    <ol class="howto">
-      <li>In Bing Webmaster Tools, open <strong>AI Performance</strong> for your site and select <strong>Export</strong>.</li>
-      <li>Choose the CSV below. Columns are detected by name (URL, citations, optional date).</li>
-    </ol>
+    <p class="howto">Optional. Adds the “Cited” step to the GEO funnel.</p>
     <div class="fields">
       {#if many}
         <label class="field">
@@ -188,14 +185,9 @@
   }
   .howto {
     margin: 0;
-    padding-left: 18px;
     color: var(--text-2);
     font-size: 13px;
     line-height: 1.7;
-  }
-  .howto strong {
-    color: var(--text);
-    font-weight: 600;
   }
   .fields {
     display: flex;

@@ -1,11 +1,5 @@
 <script lang="ts">
   import Callout from '#lib/components/Callout.svelte';
-  import CodeBlock from '#lib/components/CodeBlock.svelte';
-
-  const importCsv = `# From a machine with cloudflared; it opens a browser to sign in through Access.
-cloudflared access curl "https://searchkeep.example.com/api/import/ai-citations?site=acme&date=2026-11-01" \\
-  -X POST --data-binary @ai-performance.csv
-# {"site":"acme","imported":42,"skipped":0,"rowsWritten":42,"columns":{"page":"URL","citations":"Citations","date":null}}`;
 </script>
 
 <h2 id="overview">Overview</h2>
@@ -329,23 +323,9 @@ cloudflared access curl "https://searchkeep.example.com/api/import/ai-citations?
 
 <h2 id="ai-citations">Importing AI citations</h2>
 <p>
-  The <em>Cited</em> step of the GEO funnel comes from Bing Webmaster Tools’ <strong>AI Performance</strong> report.
-  Because it has no API, you export it as CSV in Bing Webmaster Tools and import the file into Searchkeep:
-</p>
-<ul>
-  <li>
-    In the dashboard: <strong>Settings → Stored data → Import AI citations</strong>.
-  </li>
-  <li>
-    Or from a terminal: <code>POST /api/import/ai-citations?site=&lt;id&gt;&amp;date=&lt;YYYY-MM-DD&gt;</code> with the CSV
-    as the request body.
-  </li>
-</ul>
-<CodeBlock lang="bash" code={importCsv} />
-<p>
-  Columns are detected by name: a URL or page column, a citations column, and an optional date column. Without a date
-  column, every row gets the <code>date</code> parameter (today by default). Rows without a URL or a number are skipped
-  and counted. Re-importing the same file overwrites the same rows, so it is safe. The CSV can be up to 5 MB.
+  The optional <em>Cited</em> step of the GEO funnel comes from Bing Webmaster Tools’ <strong>AI Performance</strong>
+  report, which has no API. Export it as CSV and upload it in <strong>Settings → Import AI citations</strong>. The step
+  stays hidden until citations exist. Re-importing a file is safe.
 </p>
 
 <h2 id="geo-funnel">How the GEO funnel is built</h2>

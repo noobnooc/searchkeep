@@ -19,12 +19,20 @@ export function geoFunnelUrl(site: string, range: Params, opts: { sortBy?: GeoSo
 }
 
 /**
+ * The steps to show. "Cited" only comes from an optional CSV import, so it is
+ * hidden until there are citations in the range.
+ */
+export function visibleSteps(d: GeoFunnelResponse | null | undefined): typeof GEO_STEPS {
+  return GEO_STEPS.filter((s) => s.key !== 'cited' || (d?.totals.cited ?? 0) > 0);
+}
+
+/**
  * Follows pages through the steps: a page counts at a step only if it also
  * reached every earlier step. Steps without any data pass pages through.
  */
 export function buildFunnel(d: GeoFunnelResponse): { stages: FunnelStage[]; base: number } {
   let set: GeoPage[] = d.pages;
-  const stages: FunnelStage[] = GEO_STEPS.map((s) => {
+  const stages: FunnelStage[] = visibleSteps(d).map((s) => {
     const known = d.totals[s.key] > 0;
     if (known) set = set.filter((p) => p[s.key] > 0);
     return { key: s.key, label: s.label, unit: s.unit, total: d.totals[s.key], pages: known ? set.length : null, color: s.color };

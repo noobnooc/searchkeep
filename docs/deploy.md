@@ -142,7 +142,7 @@ You need:
 - **Google Search Console** access to your properties, as an **Owner** (only owners can add users).
 - **Bing Webmaster Tools** with your sites verified (optional but recommended; its AI Performance
   CSV export provides the "Cited" stage of the GEO funnel, see
-  [Troubleshooting](#the-cited-step-of-the-geo-funnel-is-empty)).
+  [Troubleshooting](#the-geo-funnel-has-no-cited-step)).
 - Optional, for agents or command-line use: `git`, Node.js 22.12+, pnpm (the version in the root
   `package.json` `packageManager` field), the GitHub CLI `gh` or a GitHub MCP server, `curl`, `jq`,
   and `gcloud` for step 12. An agent working with Cloudflare needs either the Cloudflare MCP server
@@ -1144,20 +1144,11 @@ default.
   90 days. Accounts with the EU data boundary enabled cannot query Web Analytics (RUM) data through
   the API.
 
-### The "Cited" step of the GEO funnel is empty
+### The GEO funnel has no "Cited" step
 
-Bing AI Performance (citations in Copilot and Bing AI answers) has no API; Microsoft says one is on
-its backlog. Export the report as CSV in Bing Webmaster Tools and import it: dashboard →
-**Settings** → **Stored data** → **Import AI citations**, or
-
-```sh
-cloudflared access curl "https://<your-domain>/api/import/ai-citations?site=<id>&date=<YYYY-MM-DD>" \
-  -X POST --data-binary @<export>.csv
-```
-
-Columns are detected by name: a URL or page column, a citations column, and an optional date column
-(without one, every row gets `date`, today by default). The response reports how many rows were
-imported and skipped.
+The step is hidden until citations are imported. Bing AI Performance has no API, so export its CSV
+in Bing Webmaster Tools and upload it in **Settings** → **Import AI citations** (or `POST` it to
+`/api/import/ai-citations?site=<id>`).
 
 ### Index coverage stays empty
 
