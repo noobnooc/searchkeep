@@ -933,7 +933,7 @@ export const FAQS: Faq[] = [
   },
   {
     q: 'What is the GEO funnel?',
-    a: 'It follows each page through three steps of AI visibility: Crawled (AI crawlers fetched it, from Cloudflare), Cited (an AI answer referenced it, from the Bing AI Performance report, which has no API yet, so you import its CSV export from the dashboard) and Clicked (people arrived from an AI assistant, from Web Analytics referrers, alongside classic GSC and Bing clicks). Gaps between steps tell you what to fix.',
+    a: 'It follows each page through three steps of AI visibility: Crawled (AI crawlers fetched it, from Cloudflare), Cited (an AI answer referenced it, from the Bing AI Performance report, which has no API yet, so you import its CSV export from the dashboard) and Clicked (people arrived from an AI assistant, from Web Analytics referrers, then search clicks from GSC and Bing). Each step counts only the pages that reached every earlier step, so the funnel narrows, and gaps between steps tell you what to fix.',
   },
   {
     q: 'How far back does the history go?',

@@ -27,14 +27,18 @@ Website: <https://searchkeep.dev>
 Search is no longer just ten blue links. Searchkeep follows each page through the whole path from
 AI crawler to visitor:
 
-| Stage       | Question                             | Data source                                                          |
-| ----------- | ------------------------------------ | -------------------------------------------------------------------- |
-| **Crawled** | Do AI crawlers fetch this page?      | Cloudflare AI crawler requests (by crawler, path and status)         |
-| **Cited**   | Do AI answers cite this page?        | Bing AI Performance (imported from its CSV export; it has no API)    |
-| **Clicked** | Do people arrive from AI and search? | Web Analytics referrers from AI assistants, plus GSC and Bing clicks |
+| Stage         | Question                        | Data source                                                       |
+| ------------- | ------------------------------- | ----------------------------------------------------------------- |
+| **Crawled**   | Do AI crawlers fetch this page? | Cloudflare AI crawler requests (by crawler, path and status)      |
+| **Cited**     | Do AI answers cite this page?   | Bing AI Performance (imported from its CSV export; it has no API) |
+| **AI visits** | Do people arrive from AI?       | Web Analytics page loads referred by AI assistants                |
+| **Clicks**    | Do people arrive from search?   | Search Console and Bing clicks                                    |
 
-The `geo_funnel` tool and the dashboard show all three stages per page, next to classic search
-performance.
+The `geo_funnel` tool and the dashboard show every stage per page, next to classic search
+performance. The funnel narrows: each stage counts only the pages that reached every earlier stage,
+so Clicks are the search clicks of pages that AI crawled, cited and sent visitors to. A stage with
+no data yet (such as Cited before an import) is skipped. Each stage counts its own unit, so a later
+total can still be larger than an earlier one; the page counts always shrink.
 
 ![The Searchkeep dashboard: overview](docs/assets/dashboard-overview.png)
 
@@ -209,7 +213,7 @@ AGENTS.md              Instructions for AI agents working on this repository
 | `find_cannibalization` | Queries where several of your pages compete for the same ranking.                                       |
 | `find_ctr_anomalies`   | Queries whose CTR is clearly below what their position predicts.                                        |
 | `find_content_decay`   | Pages whose clicks keep declining.                                                                      |
-| `geo_funnel`           | Per page: AI crawler requests, imported Bing AI citations, AI referral visits and clicks.               |
+| `geo_funnel`           | Per page: AI crawler requests, imported Bing AI citations, AI referral visits and clicks; as a funnel.  |
 | `ai_crawlers`          | AI crawler requests by crawler, operator, purpose, path, status or date.                                |
 | `search_crawlers`      | Search engine crawler requests (Googlebot, Bingbot, ...): Search Console's Crawl stats, kept.           |
 | `index_coverage`       | Indexed and not-indexed sitemap URLs by coverage state, rich result issues and recent changes.          |
