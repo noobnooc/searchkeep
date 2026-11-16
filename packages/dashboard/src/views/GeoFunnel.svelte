@@ -13,7 +13,7 @@
   import PathText from '../components/PathText.svelte';
   import { debounced } from '../lib/debounce.svelte';
   import { compact, int, rangeLabel } from '../lib/format';
-  import { buildFunnel, GEO_STEPS as STEPS, geoFunnelUrl, type GeoSortKey } from '../lib/geo';
+  import { buildFunnel, GEO_STEPS as STEPS, geoFunnelUrl, visibleSteps, type GeoSortKey } from '../lib/geo';
   import { resource } from '../lib/resource.svelte';
   import { href } from '../lib/router.svelte';
   import { ui } from '../lib/state.svelte';
@@ -42,11 +42,10 @@
     impressions: Math.max(1, ...(d?.pages.map((p) => p.impressions) ?? [])),
   });
   const allEmpty = $derived(Boolean(d && STEPS.every((s) => d.totals[s.key] === 0)));
-  const citedMissing = $derived(Boolean(d && d.totals.cited === 0 && d.totals.crawled + d.totals.aiVisits + d.totals.clicks > 0));
 
   const columns: Column<GeoPage>[] = $derived([
     { key: 'page', label: 'Page', grow: true, render: pageCell },
-    ...STEPS.map(
+    ...visibleSteps(d).map(
       (s): Column<GeoPage> => ({
         key: s.key,
         label: s.label,
@@ -89,7 +88,7 @@
         <Skeleton height={210} />
       {:else if allEmpty && !pageContains.value}
         <EmptyState title="The funnel is empty for this range" icon="funnel">
-          <p>Each step comes from a different source: AI crawler requests from Cloudflare (<code>cloudflareZoneId</code>), citations from the Bing AI Performance CSV import, AI visits from Cloudflare Web Analytics (<code>webAnalyticsSiteTag</code>) and clicks from Search Console and Bing.</p>
+          <p>Each step comes from a different source: AI crawler requests from Cloudflare (<code>cloudflareZoneId</code>), AI visits from Cloudflare Web Analytics (<code>webAnalyticsSiteTag</code>) and clicks from Search Console and Bing.</p>
           {#snippet actions()}
             <a class="btn" href={href('settings', 'checks')}>Check setup</a>
             <a class="btn primary" href={href('settings', 'sync')}><Icon name="sync" size={14} /> Sync now</a>
@@ -98,7 +97,8 @@
       {:else}
         <Funnel stages={funnel.stages} base={funnel.base} />
         <p class="legend-note">
-          Totals per step. The band follows pages through every step.
+          Totals per step. The band follows pages through every step.{#if d.totals.cited === 0}
+            Add a Cited step by <a href={href('settings', 'import')}>importing Bing AI Performance</a>.{/if}
         </p>
       {/if}
       {#snippet footer()}
@@ -106,21 +106,6 @@
       {/snippet}
     </Card>
 
-    {#if d && citedMissing}
-      <div class="callout">
-        <div class="callout-icon"><Icon name="upload" size={16} /></div>
-        <div class="callout-body">
-          <h3>Fill the “Cited” step with Bing AI Performance</h3>
-          <p>The Bing Webmaster API does not expose AI citations yet, so they come from a CSV export:</p>
-          <ol>
-            <li>Open Bing Webmaster Tools → <strong>AI Performance</strong> for {ui.site?.domain}.</li>
-            <li>Choose the date range and select <strong>Export</strong>.</li>
-            <li>Upload the CSV in Settings → Import AI citations.</li>
-          </ol>
-        </div>
-        <a class="btn primary" href={href('settings', 'import')}>Import CSV <Icon name="arrowRight" size={13} /></a>
-      </div>
-    {/if}
 
     {#if neverCited.length}
       <Card title="Crawled but never cited" subtitle="Make their answer easy to quote.">
@@ -155,50 +140,6 @@
     margin-top: 10px;
     font-size: 12px;
     color: var(--text-3);
-  }
-  .callout {
-    display: flex;
-    gap: 14px;
-    align-items: flex-start;
-    padding: 16px;
-    border-radius: var(--radius);
-    border: 1px solid var(--accent-line);
-    background: var(--surface);
-    flex-wrap: wrap;
-  }
-  .callout-icon {
-    width: 32px;
-    height: 32px;
-    flex: none;
-    border-radius: 8px;
-    display: grid;
-    place-items: center;
-    color: var(--text-2);
-    background: var(--surface-3);
-  }
-  .callout-body {
-    flex: 1 1 280px;
-    min-width: 0;
-  }
-  .callout h3 {
-    font-size: 14px;
-    font-weight: 600;
-  }
-  .callout p {
-    margin-top: 3px;
-    color: var(--text-2);
-    font-size: 13px;
-  }
-  .callout ol {
-    margin: 8px 0 0;
-    padding-left: 18px;
-    color: var(--text-2);
-    font-size: 13px;
-    line-height: 1.7;
-  }
-  .callout strong {
-    color: var(--text);
-    font-weight: 600;
   }
   .filter {
     position: relative;

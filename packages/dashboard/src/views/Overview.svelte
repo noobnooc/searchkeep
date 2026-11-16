@@ -174,11 +174,7 @@
           <Skeleton height={190} />
         {:else}
           <Funnel stages={funnel.stages} base={funnel.base} />
-          {#if geo.data.totals.cited === 0}
-            <p class="hint">
-              <Icon name="info" size={13} /> No citations yet. <a href={href('settings', 'import')}>Import the Bing AI Performance CSV</a> to fill the “Cited” step.
-            </p>
-          {:else if geo.data.insights.crawledButNeverCited.length}
+          {#if geo.data.totals.cited > 0 && geo.data.insights.crawledButNeverCited.length}
             <p class="hint">
               <Icon name="sparkle" size={13} />
               {geo.data.insights.crawledButNeverCited.length} heavily crawled {geo.data.insights.crawledButNeverCited.length === 1 ? 'page has' : 'pages have'} never been cited.

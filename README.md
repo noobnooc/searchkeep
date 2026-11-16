@@ -240,9 +240,8 @@ so they stay small in your context window. The app tools take `app` instead of `
 optional `store` (`apple` or `play`). The full parameter reference is at
 <https://searchkeep.dev/docs/mcp>.
 
-The "Cited" step comes from Bing AI Performance, which has no API: export its CSV in Bing
-Webmaster Tools and import it in the dashboard (**Settings** → **Stored data** → **Import AI citations**) or with
-`POST /api/import/ai-citations?site=<id>&date=<YYYY-MM-DD>`.
+The optional "Cited" step comes from Bing AI Performance, which has no API: export its CSV and
+import it in **Settings** → **Import AI citations**. The step stays hidden until you do.
 
 ## Principles
 

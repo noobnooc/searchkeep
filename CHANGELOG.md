@@ -284,6 +284,8 @@ Because users sync `main` at any time, the `Unreleased` section is always accura
 
 ### Changed
 
+- The GEO funnel hides the "Cited" step (and its column in the pages table) until AI citations
+  have been imported, and the guidance for importing the Bing AI Performance CSV is shorter.
 - Website SEO: every page now carries a `WebPage` node (`TechArticle` for docs) linked to the
   site's `WebSite` and `Organization` nodes in its JSON-LD, and a robots meta that allows large
   image previews and full snippets. The 404 page no longer declares a canonical next to its
