@@ -355,6 +355,33 @@ describe('geoFunnel', () => {
   it('rejects an unknown sort key', async () => {
     await expect(geoFunnel(ctx, { ...range, sortBy: 'position' as 'crawled' })).rejects.toBeInstanceOf(SearchkeepError);
   });
+
+  it('counts each funnel step only over pages that reached every earlier step', async () => {
+    const funnelStore = {
+      ...store,
+      queryReferrals: async () => [
+        { path: '/a', visits: 4 },
+        { path: '/c', visits: 3 },
+        { path: '/d', visits: 50 }, // never crawled: not in the funnel past Crawled
+      ],
+      queryPerformance: async (q: { source: string }) =>
+        q.source === 'gsc'
+          ? [
+              { page: '/a', clicks: 1, impressions: 50 },
+              { page: '/b', clicks: 2, impressions: 900 }, // crawled, but no AI visits
+              { page: '/d', clicks: 100, impressions: 1000 },
+            ]
+          : [{ page: '/c', clicks: 5, impressions: 10 }],
+    } as unknown as Store;
+    const r = await geoFunnel({ ...ctx, store: funnelStore }, range);
+    expect(r.totals).toEqual({ crawled: 60, cited: 0, aiVisits: 57, clicks: 108 });
+    expect(r.funnel).toEqual([
+      { step: 'crawled', total: 60, pages: 3 },
+      { step: 'cited', total: 0, pages: null }, // no data: passes pages through
+      { step: 'aiVisits', total: 7, pages: 2 },
+      { step: 'clicks', total: 6, pages: 2 },
+    ]);
+  });
 });
 
 describe('site icon', () => {

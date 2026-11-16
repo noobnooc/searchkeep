@@ -133,10 +133,20 @@ export interface GeoTotals {
   clicks: number;
 }
 
+/** A funnel step counted only over pages that reached every earlier step with data. */
+export interface GeoFunnelStep {
+  step: keyof GeoTotals;
+  total: number;
+  /** null when the step has no data. */
+  pages: number | null;
+}
+
 export interface GeoFunnelResponse {
   site: string;
   range: DateRange;
+  /** Each step summed over all pages. */
   totals: GeoTotals;
+  funnel: GeoFunnelStep[];
   pages: GeoPage[];
   insights: { crawledButNeverCited: string[] };
   notes: string[];

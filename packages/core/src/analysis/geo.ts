@@ -7,6 +7,19 @@ import { clampLimit, resolve, type AnalysisContext, type CommonParams } from './
 export const GEO_SORT_KEYS = ['crawled', 'cited', 'aiVisits', 'clicks', 'impressions'] as const;
 export type GeoSortKey = (typeof GEO_SORT_KEYS)[number];
 
+/** The funnel's steps, in order. */
+export const GEO_STEPS = ['crawled', 'cited', 'aiVisits', 'clicks'] as const;
+export type GeoStep = (typeof GEO_STEPS)[number];
+
+/** One funnel step, counted only over pages that also reached every earlier step with data. */
+export interface GeoFunnelStep {
+  step: GeoStep;
+  /** The step's measure summed over those pages. */
+  total: number;
+  /** How many of those pages reached this step; null when the step has no data (it passes pages through). */
+  pages: number | null;
+}
+
 export interface GeoFunnelParams extends CommonParams {
   pageContains?: string;
   sortBy?: GeoSortKey;
@@ -18,7 +31,8 @@ const CRAWLER_GROUPS: CrawlerQuery['groupBy'] = ['crawler', 'operator', 'purpose
 /**
  * Per page: crawled by AI bots → cited by AI answers → visited from AI
  * assistants → clicked from search. The steps come from different sources and
- * are joined on the normalized page path.
+ * are joined on the normalized page path. `totals` sums each step over all
+ * pages; `funnel` follows pages through the steps.
  */
 export async function geoFunnel(ctx: AnalysisContext, p: GeoFunnelParams) {
   const sortBy = p.sortBy ?? 'crawled';
@@ -88,6 +102,14 @@ export async function geoFunnel(ctx: AnalysisContext, p: GeoFunnelParams) {
     }),
     { crawled: 0, cited: 0, aiVisits: 0, clicks: 0 },
   );
+  // Follow pages through the steps, so each step's total only counts pages that reached every
+  // earlier step. Steps without any data pass pages through instead of emptying the funnel.
+  let reached = all;
+  const funnel: GeoFunnelStep[] = GEO_STEPS.map((step) => {
+    if (totals[step] === 0) return { step, total: 0, pages: null };
+    reached = reached.filter((x) => x[step] > 0);
+    return { step, total: reached.reduce((n, x) => n + x[step], 0), pages: reached.length };
+  });
   const notes: string[] = [];
   if (totals.crawled === 0)
     notes.push(
@@ -110,6 +132,7 @@ export async function geoFunnel(ctx: AnalysisContext, p: GeoFunnelParams) {
     site: siteId,
     range,
     totals,
+    funnel,
     pages: all.sort((a, b) => b[sortBy] - a[sortBy] || b.clicks - a.clicks).slice(0, r.limit),
     insights: { crawledButNeverCited: totals.cited > 0 ? crawledNotCited : [] },
     notes,

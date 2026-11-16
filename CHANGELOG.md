@@ -24,6 +24,14 @@ Because users sync `main` at any time, the `Unreleased` section is always accura
 
 ## [Unreleased]
 
+### Changed
+
+- The GEO funnel now narrows like a funnel: each step's total counts only the pages that reached
+  every earlier step (for example, Clicks counts search clicks of pages that were crawled and got AI
+  visits), instead of summing the step over all pages. `geo_funnel` and `/api/geo-funnel` return
+  this as a new `funnel` array; `totals` still sums each step over all pages, and the dashboard
+  shows it on hover.
+
 ### Added
 
 - Apple Ads search terms (optional). With the credentials of an Apple Ads API user

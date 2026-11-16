@@ -268,7 +268,7 @@ export const TOOLS: Tool[] = [
     name: 'geo_funnel',
     summary: 'Crawled → Cited → Clicked, per page.',
     description:
-      'Joins, for each page, AI crawler requests (Cloudflare), citations in AI answers (imported from Bing AI Performance CSV exports), visits referred by AI assistants (Web Analytics) and search clicks and impressions (GSC plus Bing). Returns totals, the pages, and the most-crawled pages that were never cited (once citation data exists). Notes say which step has no data and why.',
+      'Joins, for each page, AI crawler requests (Cloudflare), citations in AI answers (imported from Bing AI Performance CSV exports), visits referred by AI assistants (Web Analytics) and search clicks and impressions (GSC plus Bing). Returns totals over all pages, the funnel (each step counted only over pages that reached every earlier step), the pages, and the most-crawled pages that were never cited (once citation data exists). Notes say which step has no data and why.',
     readOnly: true,
     params: [
       site,
