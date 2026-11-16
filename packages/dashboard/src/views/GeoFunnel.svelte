@@ -97,7 +97,7 @@
       {:else}
         <Funnel stages={funnel.stages} base={funnel.base} />
         <p class="legend-note">
-          Totals per step. The band follows pages through every step.{#if d.totals.cited === 0}
+          Each step counts only pages that reached every earlier step. Hover a total to see it across all pages.{#if d.totals.cited === 0}
             Add a Cited step by <a href={href('settings', 'import')}>importing Bing AI Performance</a>.{/if}
         </p>
       {/if}

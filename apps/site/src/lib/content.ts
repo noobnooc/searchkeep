@@ -268,7 +268,7 @@ export const TOOLS: Tool[] = [
     name: 'geo_funnel',
     summary: 'Crawled → Cited → Clicked, per page.',
     description:
-      'Joins, for each page, AI crawler requests (Cloudflare), citations in AI answers (imported from Bing AI Performance CSV exports), visits referred by AI assistants (Web Analytics) and search clicks and impressions (GSC plus Bing). Returns totals, the pages, and the most-crawled pages that were never cited (once citation data exists). Notes say which step has no data and why.',
+      'Joins, for each page, AI crawler requests (Cloudflare), citations in AI answers (imported from Bing AI Performance CSV exports), visits referred by AI assistants (Web Analytics) and search clicks and impressions (GSC plus Bing). Returns totals over all pages, the funnel (each step counted only over pages that reached every earlier step), the pages, and the most-crawled pages that were never cited (once citation data exists). Notes say which step has no data and why.',
     readOnly: true,
     params: [
       site,
@@ -933,7 +933,7 @@ export const FAQS: Faq[] = [
   },
   {
     q: 'What is the GEO funnel?',
-    a: 'It follows each page through three steps of AI visibility: Crawled (AI crawlers fetched it, from Cloudflare), Cited (an AI answer referenced it, from the Bing AI Performance report, which has no API yet, so you import its CSV export from the dashboard) and Clicked (people arrived from an AI assistant, from Web Analytics referrers, alongside classic GSC and Bing clicks). Gaps between steps tell you what to fix.',
+    a: 'It follows each page through three steps of AI visibility: Crawled (AI crawlers fetched it, from Cloudflare), Cited (an AI answer referenced it, from the Bing AI Performance report, which has no API yet, so you import its CSV export from the dashboard) and Clicked (people arrived from an AI assistant, from Web Analytics referrers, then search clicks from GSC and Bing). Each step counts only the pages that reached every earlier step, so the funnel narrows, and gaps between steps tell you what to fix.',
   },
   {
     q: 'How far back does the history go?',

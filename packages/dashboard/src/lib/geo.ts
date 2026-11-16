@@ -27,17 +27,23 @@ export function visibleSteps(d: GeoFunnelResponse | null | undefined): typeof GE
 }
 
 /**
- * Follows pages through the steps: a page counts at a step only if it also
- * reached every earlier step. Steps without any data pass pages through.
+ * The funnel as the server follows it: a page counts at a step only if it also
+ * reached every earlier step, so each step's total covers only those pages.
+ * Steps without any data pass pages through.
  */
 export function buildFunnel(d: GeoFunnelResponse): { stages: FunnelStage[]; base: number } {
-  let set: GeoPage[] = d.pages;
   const stages: FunnelStage[] = visibleSteps(d).map((s) => {
-    const known = d.totals[s.key] > 0;
-    if (known) set = set.filter((p) => p[s.key] > 0);
-    return { key: s.key, label: s.label, unit: s.unit, total: d.totals[s.key], pages: known ? set.length : null, color: s.color };
+    const f = d.funnel.find((x) => x.step === s.key);
+    return {
+      key: s.key,
+      label: s.label,
+      unit: s.unit,
+      total: f?.total ?? 0,
+      overall: d.totals[s.key],
+      pages: f?.pages ?? null,
+      color: s.color,
+    };
   });
-  const first = GEO_STEPS.find((s) => d.totals[s.key] > 0);
-  const base = first ? d.pages.filter((p) => p[first.key] > 0).length : d.pages.length;
-  return { stages, base };
+  const first = d.funnel.find((x) => x.pages !== null);
+  return { stages, base: first?.pages ?? d.pages.length };
 }

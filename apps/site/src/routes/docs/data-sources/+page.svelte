@@ -336,10 +336,19 @@
     <tbody>
       <tr><td>Crawled</td><td>Requests from AI crawlers</td><td>Cloudflare zone analytics</td></tr>
       <tr><td>Cited</td><td>Citations in AI answers</td><td>Imported Bing AI Performance CSV</td></tr>
-      <tr><td>Clicked</td><td>Visits referred by AI assistants, plus GSC and Bing clicks for context</td><td>Web Analytics, GSC, Bing</td></tr>
+      <tr><td>AI visits</td><td>Page loads referred by AI assistants</td><td>Cloudflare Web Analytics</td></tr>
+      <tr><td>Clicks</td><td>Clicks from search results</td><td>Google Search Console, Bing Webmaster Tools</td></tr>
     </tbody>
   </table>
 </div>
+<p>
+  The funnel narrows: each step counts only the pages that reached every earlier step, so <em>Clicks</em> are the search
+  clicks of pages that AI crawled, cited and sent visitors to. A step with no data yet (such as <em>Cited</em> before an
+  import) is skipped rather than emptying the funnel. The result’s <code>funnel</code> holds these narrowed totals and page
+  counts; <code>totals</code> sums each step over all pages, which the dashboard shows when you hover a step. Each step
+  counts its own unit (requests, citations, visits, clicks), so a later total can still be larger than an earlier one;
+  the page counts always shrink.
+</p>
 <p>
   The interesting rows are the gaps: pages that are <strong>crawled but not cited</strong> (AI reads them and moves
   on) and pages that are <strong>cited but not clicked</strong> (AI answers the question without sending anyone). Sort

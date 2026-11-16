@@ -75,7 +75,7 @@ Searchkeep is open-source SEO and GEO (generative engine optimization) analytics
 
 Core features:
 
-- The GEO funnel, per page: Crawled (Cloudflare AI crawler requests) → Cited (Bing AI Performance citations, imported from its CSV export because it has no API) → Clicked (Web Analytics referrals from AI assistants, alongside GSC and Bing clicks).
+- The GEO funnel, per page: Crawled (Cloudflare AI crawler requests) → Cited (Bing AI Performance citations, imported from its CSV export because it has no API) → AI visits (Web Analytics referrals from AI assistants) → Clicks (GSC and Bing). Each step counts only the pages that reached every earlier step.
 - Long-term history: after deploying, Searchkeep backfills the 16 months Search Console keeps, up to 30 days per request (hours for a small site, days for sites with a lot of data on the free D1 write quota); data is never deleted.
 - Read-only by default; the only write (\`submit_sitemap\`) requires \`ENABLE_WRITES=true\` and Full GSC permission.
 - Secure by default: Cloudflare Access in front, Managed OAuth for MCP clients, Access JWT re-verified on every request, locked until ready.

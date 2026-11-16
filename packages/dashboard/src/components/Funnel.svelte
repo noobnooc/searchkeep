@@ -2,8 +2,10 @@
   export interface FunnelStage {
     key: string;
     label: string;
-    /** Total of the step's own measure (requests, citations, visits, clicks). */
+    /** The step's own measure (requests, citations, visits, clicks), over the pages that reached it. */
     total: number;
+    /** The same measure over all pages, when it differs from `total`. */
+    overall?: number;
     unit: string;
     /** Pages that reached this step (and every earlier step with data); null when the step has no data. */
     pages: number | null;
@@ -101,7 +103,7 @@
       {@const conv = conversion(i)}
       <li class:nodata={s.pages === null && s.total === 0}>
         <div class="step"><span class="n" style:background={s.color}></span>{s.label}</div>
-        <div class="total" title="{int(s.total)} {s.unit}">{big(s.total)}</div>
+        <div class="total" title="{int(s.total)} {s.unit}{s.overall !== undefined && s.overall !== s.total ? ` from these pages, of ${int(s.overall)} in total` : ''}">{big(s.total)}</div>
         <div class="unit">{s.unit}</div>
         <div class="pages num">
           {#if s.pages === null}

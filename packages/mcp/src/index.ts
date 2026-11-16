@@ -310,7 +310,7 @@ export function createSearchkeepMcpServer(deps: McpDeps): McpServer {
     {
       title: 'GEO funnel per page',
       description:
-        'Per page: requests from AI crawlers (Cloudflare) → citations in AI answers (Bing AI Performance import) → visits referred by AI assistants (Web Analytics) → search clicks (GSC + Bing). Use it to find pages AI reads but never cites or sends traffic to.',
+        'Per page: requests from AI crawlers (Cloudflare) → citations in AI answers (Bing AI Performance import) → visits referred by AI assistants (Web Analytics) → search clicks (GSC + Bing). `totals` sums each step over all pages; `funnel` counts each step only over pages that reached every earlier step. Use it to find pages AI reads but never cites or sends traffic to.',
       inputSchema: {
         site: common.site,
         start: common.start,
