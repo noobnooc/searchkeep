@@ -1,8 +1,12 @@
 {
+  "id": "/",
   "name": "Searchkeep",
   "short_name": "Searchkeep",
   "description": "SEO & GEO analytics that lives in your Cloudflare account.",
+  "lang": "en",
+  "dir": "ltr",
   "start_url": "/",
+  "scope": "/",
   "display": "browser",
   "background_color": "#0b0c0e",
   "theme_color": "#0b0c0e",

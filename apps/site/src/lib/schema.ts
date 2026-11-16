@@ -1,5 +1,5 @@
 import { SITE, absolute } from './site';
-import type { Faq } from './content';
+import { READ_ONLY_TOOLS, TOOLS, type Faq } from './content';
 
 type Json = Record<string, unknown>;
 
@@ -44,11 +44,37 @@ export const softwareApplication: Json = {
   featureList: [
     'GEO funnel per page: crawled by AI, cited by AI, clicked from AI',
     'Unlimited history beyond the 16 months kept by Google Search Console',
-    'MCP server with 14 read-only analysis tools and one opt-in write',
+    `MCP server with ${READ_ONLY_TOOLS.length} read-only analysis tools and ${TOOLS.length - READ_ONLY_TOOLS.length} opt-in writes`,
     'Dashboard for Google Search Console, Bing Webmaster Tools and Cloudflare data',
+    'App store analytics for your own iOS and Android apps (App Store Connect, Google Play Console)',
     'Self-hosted in your own Cloudflare account, protected by Cloudflare Access',
   ],
 };
+
+/**
+ * The page itself: a WebPage (or a TechArticle for docs), tied to the WebSite node so search engines
+ * see one connected graph. Added to every page by the Seo component.
+ */
+export function webPage(page: { path: string; title: string; description: string; image: string; type: 'website' | 'article' }): Json {
+  const url = absolute(page.path);
+  const node: Json = {
+    '@type': page.type === 'article' ? ['WebPage', 'TechArticle'] : 'WebPage',
+    '@id': `${url}#webpage`,
+    url,
+    name: page.title,
+    description: page.description,
+    inLanguage: 'en',
+    isPartOf: { '@id': `${SITE.origin}/#website` },
+    primaryImageOfPage: { '@type': 'ImageObject', url: page.image, width: 1200, height: 630 },
+    dateModified: SITE.lastUpdated,
+  };
+  if (page.type === 'article') {
+    node.headline = page.title;
+    node.author = { '@id': `${SITE.origin}/#organization` };
+    node.publisher = { '@id': `${SITE.origin}/#organization` };
+  }
+  return node;
+}
 
 export function faqPage(faqs: Faq[], path: string): Json {
   return {

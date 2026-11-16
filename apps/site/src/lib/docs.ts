@@ -65,7 +65,7 @@ export const DOCS: DocSection[] = [
         path: '/docs/configuration',
         title: 'Configuration',
         description:
-          'Every Worker Secret Searchkeep reads, the SITES JSON format, brand regex, write access, sync budgets, how to set secrets with wrangler or the dashboard, and local development.',
+          'Every Worker Secret Searchkeep reads, the SITES JSON format, brand regex, write access, sync budgets, and how to set secrets with wrangler or the dashboard.',
         toc: [
           { id: 'where-config-lives', title: 'Where configuration lives' },
           { id: 'secrets', title: 'Secrets reference' },
@@ -105,7 +105,7 @@ export const DOCS: DocSection[] = [
         path: '/docs/data-sources',
         title: 'Data sources',
         description:
-          'What Searchkeep pulls from Google Search Console, Bing Webmaster Tools and Cloudflare, the credentials each needs, how syncing works, how AI citations are imported and every known limitation.',
+          'What Searchkeep pulls from Google Search Console, Bing, Cloudflare and the app stores, the credentials each needs, how syncing works and every known limitation.',
         toc: [
           { id: 'overview', title: 'Overview' },
           { id: 'sync', title: 'How syncing works' },
