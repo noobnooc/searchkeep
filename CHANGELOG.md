@@ -284,6 +284,12 @@ Because users sync `main` at any time, the `Unreleased` section is always accura
 
 ### Changed
 
+- Website SEO: every page now carries a `WebPage` node (`TechArticle` for docs) linked to the
+  site's `WebSite` and `Organization` nodes in its JSON-LD, and a robots meta that allows large
+  image previews and full snippets. The 404 page no longer declares a canonical next to its
+  `noindex`. The home, Configuration and Data sources descriptions fit in 160 characters (their
+  Open Graph cards are re-rendered), the structured data counts MCP tools from the tool list
+  instead of a stale "14", and the web manifest has an `id`, `scope` and `lang`.
 - An app's **Territories** table shows installs instead of conversion when Google Play is in view,
   with the full country name on hover. Google groups the store listing visitors and acquisitions of
   countries with few users into **Other (grouped)**; the card says so, and installs by country

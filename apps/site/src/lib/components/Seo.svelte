@@ -1,6 +1,6 @@
 <script lang="ts">
   import { SITE, absolute } from '../site';
-  import { graph } from '../schema';
+  import { graph, organization, website, webPage } from '../schema';
   import { ogImagePath } from '../og';
 
   let {
@@ -24,13 +24,31 @@
   // Every indexable page has its own OG card (static/og/, rendered by scripts/render-assets.mjs).
   const image = $derived(`${SITE.origin}${ogImagePath(path)}`);
   const imageAlt = $derived(title === SITE.name ? `${SITE.name}: ${SITE.tagline}` : `${title} · ${SITE.name}`);
+  // Every indexable page carries its own WebPage node, linked to the WebSite and Organization
+  // nodes (added here when the page did not include them, so the @id references resolve).
+  const nodes = $derived.by(() => {
+    if (noindex) return jsonld;
+    const ids = new Set(jsonld.map((n) => n['@id']));
+    return [
+      ...(ids.has(organization['@id']) ? [] : [organization]),
+      ...(ids.has(website['@id']) ? [] : [website]),
+      webPage({ path, title: fullTitle, description, image, type }),
+      ...jsonld,
+    ];
+  });
 </script>
 
 <svelte:head>
   <title>{fullTitle}</title>
   <meta name="description" content={description} />
-  <link rel="canonical" href={url} />
-  {#if noindex}<meta name="robots" content="noindex" />{/if}
+  {#if noindex}
+    <!-- A noindex page has no canonical: the two signals would contradict each other. -->
+    <meta name="robots" content="noindex, follow" />
+  {:else}
+    <link rel="canonical" href={url} />
+    <!-- Allow large image previews and full snippets in search results and Discover. -->
+    <meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1" />
+  {/if}
 
   <meta property="og:type" content={type} />
   <meta property="og:site_name" content={SITE.name} />
@@ -50,7 +68,7 @@
   <meta name="twitter:image" content={image} />
   <meta name="twitter:image:alt" content={imageAlt} />
 
-  {#if jsonld.length}
-    {@html `<script type="application/ld+json">${graph(jsonld)}</` + 'script>'}
+  {#if nodes.length}
+    {@html `<script type="application/ld+json">${graph(nodes)}</` + 'script>'}
   {/if}
 </svelte:head>

@@ -74,7 +74,7 @@
 
 <Seo
   title={SITE.name}
-  description="Self-hosted SEO & GEO analytics in your own Cloudflare account. See which pages AI crawlers read, cite and send clicks to, keep your search history forever, and ask about it over MCP."
+  description="Self-hosted SEO & GEO analytics in your Cloudflare account. See which pages AI crawlers read, cite and send clicks to, keep your history forever, ask over MCP."
   path="/"
   {jsonld}
 />
