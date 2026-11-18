@@ -31,6 +31,9 @@ Because users sync `main` at any time, the `Unreleased` section is always accura
   visits), instead of summing the step over all pages. `geo_funnel` and `/api/geo-funnel` return
   this as a new `funnel` array; `totals` still sums each step over all pages, and the dashboard
   shows it on hover.
+- `@cloudflare/puppeteer` (the Browser Run client behind the Bing and App Store fallback fetches)
+  is updated to 2.x. It needs Node.js compatibility, which the Worker already enables; nothing to
+  do by hand.
 
 ### Added
 
