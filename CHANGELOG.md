@@ -34,6 +34,11 @@ Because users sync `main` at any time, the `Unreleased` section is always accura
 
 ### Added
 
+- Google Search Console's new `webMultimodal` search type (Google Lens, Circle to Search and image
+  uploads, added to the Search Analytics API in November 2026). It is opt-in: add `webMultimodal`
+  to `GSC_SEARCH_TYPES` to sync it. Like Discover and Google News it is synced by page only,
+  because Search Console shows it without queries. `searchType: "webMultimodal"` works in the MCP
+  search tools, the API and the dashboard's Performance view.
 - Apple Ads search terms (optional). With the credentials of an Apple Ads API user
   (`APPLE_ADS_CLIENT_ID`, `APPLE_ADS_TEAM_ID`, `APPLE_ADS_KEY_ID`, `APPLE_ADS_PRIVATE_KEY`; optional
   `APPLE_ADS_ACCOUNT_ID`), the sync reads once a day, through the Apple Ads Platform API, the search

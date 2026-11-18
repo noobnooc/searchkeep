@@ -132,7 +132,7 @@
       <tr><td><code>start</code>, <code>end</code></td><td><code>YYYY-MM-DD</code></td><td>Inclusive UTC date range. <code>end</code> defaults to the latest day with data, <code>start</code> to <code>end</code> minus <code>days</code> plus one.</td></tr>
       <tr><td><code>days</code></td><td><code>number</code></td><td>Window length when <code>start</code> is omitted. Defaults to 28 (7 for <code>ai_crawlers</code> and <code>search_crawlers</code>).</td></tr>
       <tr><td><code>source</code></td><td><code>"gsc" | "bing"</code></td><td>Search engine for search-performance tools. Defaults to <code>gsc</code>. Bing data is weekly, so Bing ranges are aligned to whole weeks.</td></tr>
-      <tr><td><code>searchType</code></td><td><code>"web" | "image" | "video" | "news" | "discover" | "googleNews"</code></td><td>Search Console search type for search-performance tools. Defaults to <code>web</code>. Discover and Google News report pages only.</td></tr>
+      <tr><td><code>searchType</code></td><td><code>"web" | "image" | "video" | "news" | "discover" | "googleNews" | "webMultimodal"</code></td><td>Search Console search type for search-performance tools. Defaults to <code>web</code>. Discover, Google News and multimodal search report pages only.</td></tr>
       <tr><td><code>brand</code></td><td><code>"all" | "brand" | "non_brand"</code></td><td>Brand split using the configured brand regex. Defaults to <code>all</code>.</td></tr>
       <tr><td><code>limit</code></td><td><code>number</code></td><td>Maximum rows returned (at most 500). Results are aggregated on the server and capped.</td></tr>
     </tbody>

@@ -5,7 +5,7 @@
  */
 import type { SearchkeepConfig } from '../config.js';
 import type { Store } from '../store.js';
-import type { IsoDate, SourceId } from '../types.js';
+import type { GscSearchType, IsoDate, SourceId } from '../types.js';
 
 /** How many days the Cloudflare GraphQL datasets keep data we backfill from. */
 export const CF_CRAWLER_LOOKBACK_DAYS = 30;
@@ -32,7 +32,7 @@ export const CHUNK_DAYS = { gsc: 30, cfCrawlers: 30, cfRum: 90 } as const;
  * Search Console datasets besides web search, each with its own cursors (so
  * they backfill on their own when a deployment starts syncing them).
  */
-export type GscExtraDataset = 'image' | 'video' | 'news' | 'discover' | 'googleNews' | 'appearance' | 'segments';
+export type GscExtraDataset = Exclude<GscSearchType, 'web'> | 'appearance' | 'segments';
 
 /** A range is cut to a third when it has to be split: 30 → 10 → 3 → 1 day. */
 export const shrinkChunk = (days: number) => Math.max(1, Math.floor(days / 3));

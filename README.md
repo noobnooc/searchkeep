@@ -237,7 +237,7 @@ AGENTS.md              Instructions for AI agents working on this repository
 
 All tools are read-only except `submit_sitemap` and `reply_review`. Common parameters: `site`, `start` and `end`
 (`YYYY-MM-DD`), `days` (default 28), `source` (`gsc` or `bing`, default `gsc`), `searchType` (`web`,
-`image`, `video`, `news`, `discover` or `googleNews`, default `web`), `brand` (`all`, `brand` or
+`image`, `video`, `news`, `discover`, `googleNews` or `webMultimodal`, default `web`), `brand` (`all`, `brand` or
 `non_brand`) and `limit` (at most 500). `query_performance` also groups by search `appearance`, and
 by country or device together with query or page for sites in `GSC_SEGMENT_SITES`. Results are aggregated on the server and capped,
 so they stay small in your context window. The app tools take `app` instead of `site`, and an

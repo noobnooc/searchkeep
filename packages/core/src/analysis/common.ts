@@ -29,7 +29,7 @@ export interface CommonParams {
   /** Window length when start is omitted. Default 28. */
   days?: number;
   source?: SearchSource;
-  /** Search Console search type (web, image, video, news, discover, googleNews). Default web. */
+  /** Search Console search type (web, image, video, news, discover, googleNews, webMultimodal). Default web. */
   searchType?: GscSearchType;
   brand?: BrandFilter;
   limit?: number;

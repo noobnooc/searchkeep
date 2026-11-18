@@ -50,7 +50,7 @@ export const queries = sqliteTable(
  * are 0 when the row has no such dimension. Positions are impression-weighted
  * sums: avg = position_sum / impressions. `source` is `gsc` (web search),
  * `bing`, or `gsc:<type>` for the other Search Console search types
- * (`gsc:image`, `gsc:video`, `gsc:news`, `gsc:discover`, `gsc:googleNews`).
+ * (`gsc:image`, `gsc:video`, `gsc:news`, `gsc:discover`, `gsc:googleNews`, `gsc:webMultimodal`).
  */
 export const searchFacts = sqliteTable(
   'search_facts',

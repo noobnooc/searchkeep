@@ -85,44 +85,44 @@ are never shown, which is expected.
 
 ### Configuration reference
 
-| Secret                    | Required | Set in step | What                                                                                                                   |
-| ------------------------- | -------- | ----------- | ---------------------------------------------------------------------------------------------------------------------- |
-| `ACCESS_TEAM_DOMAIN`      | yes      | 9           | Your Access team domain, for example `myteam.cloudflareaccess.com`                                                     |
-| `ACCESS_AUD`              | yes      | 9           | Application Audience (AUD) tag of the Access application                                                               |
-| `CLOUDFLARE_ACCOUNT_ID`   | yes      | 10          | Your Cloudflare account ID                                                                                             |
-| `CLOUDFLARE_API_TOKEN`    | yes      | 10          | Read-only API token (Account Analytics, Zone Analytics, Access: Apps and Policies); needed for the Access check        |
-| `SITES`                   | no       | 11          | JSON array describing your sites; optional, sites can be added in the dashboard instead                                |
-| `GSC_CLIENT_EMAIL`        | for GSC  | 12          | `client_email` from the service account key JSON                                                                       |
-| `GSC_PRIVATE_KEY`         | for GSC  | 12          | `private_key` from the service account key JSON (real line breaks or literal `\n`)                                     |
-| `BING_API_KEY`            | for Bing | 13          | Bing Webmaster Tools API key (treat it as a password)                                                                  |
-| `BRAND_REGEX`             | optional | 14          | Default brand regex, matched case-insensitively, for example `acme\|acme\s?corp`                                       |
-| `ENABLE_WRITES`           | optional | 14          | `true` to enable `submit_sitemap` (GSC **Full** permission) and `reply_review` (a reply key or Play permission)        |
-| `GSC_ROWS_PER_DAY`        | optional | 14          | Max query × page rows stored per day from GSC, 100–100000. Default `2500`                                              |
-| `GSC_BACKFILL_MONTHS`     | optional | 14          | Months of GSC history to backfill, 0–16. Default `16`                                                                  |
-| `SYNC_DAILY_WRITE_BUDGET` | optional | 14          | Max rows history (GSC backfill, Cloudflare lookback) writes per UTC day. Default `80000` (D1 Free allows 100000)       |
-| `SYNC_MAX_CALLS_PER_RUN`  | optional | 14          | Max outbound API calls per sync pass, 5–900. Default `35` (Workers Free allows 50); on Workers Paid use `100` or more  |
-| `GSC_SEARCH_TYPES`        | optional | 14          | Search Console search types synced besides web search. Default `image,video,news,discover,googleNews`; `none` for none |
-| `GSC_SEARCH_APPEARANCE`   | optional | 14          | `false` to stop syncing search appearance (rich results, videos, ...). Default `true`                                  |
-| `GSC_SEGMENT_SITES`       | optional | 14          | Site ids (comma-separated) or `all` whose queries and pages are also synced per country and device. Default none       |
-| `GSC_INSPECTIONS_PER_DAY` | optional | 14          | URL inspections per site and day for index coverage, 0–2000. Default `200`; `0` turns index coverage off               |
-| `APPS`                    | no       | 14a         | JSON array describing your apps; optional, apps can be added in the dashboard instead                                  |
-| `ASC_KEY_ID`              | for apps | 14a         | Key ID of an App Store Connect API key with the **Sales and Reports** role (never an Admin key)                        |
-| `ASC_ISSUER_ID`           | for apps | 14a         | Issuer ID shown above the App Store Connect API keys                                                                   |
-| `ASC_PRIVATE_KEY`         | for apps | 14a         | Contents of that key's `AuthKey_<KEY ID>.p8` file                                                                      |
-| `ASC_VENDOR_NUMBER`       | optional | 14a         | Vendor number from Payments and Financial Reports: exact App Store revenue per product (Sales and Trends)              |
-| `PLAY_REPORTS_BUCKET`     | for apps | 14a         | Cloud Storage bucket of your Play Console reports, `pubsite_prod_rev_…` (the full `gs://` URI is accepted)             |
-| `PLAY_CLIENT_EMAIL`       | optional | 14a         | Service account for Google Play, when it is not the Search Console one (`GSC_CLIENT_EMAIL`)                            |
-| `PLAY_PRIVATE_KEY`        | optional | 14a         | Its private key, when `PLAY_CLIENT_EMAIL` is set                                                                       |
-| `PLAY_METADATA`           | optional | 14a         | `true` to snapshot Google Play store listings and tracks daily for `app_changes` (Android Publisher API, opt-in)       |
-| `PLAY_REVIEWS_API`        | optional | 14a         | `true` to read Google Play reviews of the last week every 4 hours (needs "Reply to reviews")                           |
-| `ASC_REPLY_KEY_ID`        | optional | 14a         | Key ID of a second App Store Connect key with the **Customer Support** role, only for `reply_review`                   |
-| `ASC_REPLY_PRIVATE_KEY`   | optional | 14a         | That key's `.p8` file contents                                                                                         |
-| `APPLE_ADS_CLIENT_ID`     | optional | 14a         | Apple Ads API user's `clientId` (Account Settings → API in ads.apple.com)                                              |
-| `APPLE_ADS_TEAM_ID`       | optional | 14a         | Its `teamId`                                                                                                           |
-| `APPLE_ADS_KEY_ID`        | optional | 14a         | Its `keyId`                                                                                                            |
-| `APPLE_ADS_PRIVATE_KEY`   | optional | 14a         | The `private-key.pem` whose public key was uploaded                                                                    |
-| `APPLE_ADS_ACCOUNT_ID`    | optional | 14a         | Read only this ad account; default every account the API user sees                                                     |
-| `APP_STORE_PUBLIC_DATA`   | optional | 14a         | `true` to turn on the opt-in plugin that reads Apple's public App Store feeds (your app's rating and chart position)   |
+| Secret                    | Required | Set in step | What                                                                                                                                                                             |
+| ------------------------- | -------- | ----------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ACCESS_TEAM_DOMAIN`      | yes      | 9           | Your Access team domain, for example `myteam.cloudflareaccess.com`                                                                                                               |
+| `ACCESS_AUD`              | yes      | 9           | Application Audience (AUD) tag of the Access application                                                                                                                         |
+| `CLOUDFLARE_ACCOUNT_ID`   | yes      | 10          | Your Cloudflare account ID                                                                                                                                                       |
+| `CLOUDFLARE_API_TOKEN`    | yes      | 10          | Read-only API token (Account Analytics, Zone Analytics, Access: Apps and Policies); needed for the Access check                                                                  |
+| `SITES`                   | no       | 11          | JSON array describing your sites; optional, sites can be added in the dashboard instead                                                                                          |
+| `GSC_CLIENT_EMAIL`        | for GSC  | 12          | `client_email` from the service account key JSON                                                                                                                                 |
+| `GSC_PRIVATE_KEY`         | for GSC  | 12          | `private_key` from the service account key JSON (real line breaks or literal `\n`)                                                                                               |
+| `BING_API_KEY`            | for Bing | 13          | Bing Webmaster Tools API key (treat it as a password)                                                                                                                            |
+| `BRAND_REGEX`             | optional | 14          | Default brand regex, matched case-insensitively, for example `acme\|acme\s?corp`                                                                                                 |
+| `ENABLE_WRITES`           | optional | 14          | `true` to enable `submit_sitemap` (GSC **Full** permission) and `reply_review` (a reply key or Play permission)                                                                  |
+| `GSC_ROWS_PER_DAY`        | optional | 14          | Max query × page rows stored per day from GSC, 100–100000. Default `2500`                                                                                                        |
+| `GSC_BACKFILL_MONTHS`     | optional | 14          | Months of GSC history to backfill, 0–16. Default `16`                                                                                                                            |
+| `SYNC_DAILY_WRITE_BUDGET` | optional | 14          | Max rows history (GSC backfill, Cloudflare lookback) writes per UTC day. Default `80000` (D1 Free allows 100000)                                                                 |
+| `SYNC_MAX_CALLS_PER_RUN`  | optional | 14          | Max outbound API calls per sync pass, 5–900. Default `35` (Workers Free allows 50); on Workers Paid use `100` or more                                                            |
+| `GSC_SEARCH_TYPES`        | optional | 14          | Search Console search types synced besides web search. Default `image,video,news,discover,googleNews`; add `webMultimodal` for Google Lens and Circle to Search; `none` for none |
+| `GSC_SEARCH_APPEARANCE`   | optional | 14          | `false` to stop syncing search appearance (rich results, videos, ...). Default `true`                                                                                            |
+| `GSC_SEGMENT_SITES`       | optional | 14          | Site ids (comma-separated) or `all` whose queries and pages are also synced per country and device. Default none                                                                 |
+| `GSC_INSPECTIONS_PER_DAY` | optional | 14          | URL inspections per site and day for index coverage, 0–2000. Default `200`; `0` turns index coverage off                                                                         |
+| `APPS`                    | no       | 14a         | JSON array describing your apps; optional, apps can be added in the dashboard instead                                                                                            |
+| `ASC_KEY_ID`              | for apps | 14a         | Key ID of an App Store Connect API key with the **Sales and Reports** role (never an Admin key)                                                                                  |
+| `ASC_ISSUER_ID`           | for apps | 14a         | Issuer ID shown above the App Store Connect API keys                                                                                                                             |
+| `ASC_PRIVATE_KEY`         | for apps | 14a         | Contents of that key's `AuthKey_<KEY ID>.p8` file                                                                                                                                |
+| `ASC_VENDOR_NUMBER`       | optional | 14a         | Vendor number from Payments and Financial Reports: exact App Store revenue per product (Sales and Trends)                                                                        |
+| `PLAY_REPORTS_BUCKET`     | for apps | 14a         | Cloud Storage bucket of your Play Console reports, `pubsite_prod_rev_…` (the full `gs://` URI is accepted)                                                                       |
+| `PLAY_CLIENT_EMAIL`       | optional | 14a         | Service account for Google Play, when it is not the Search Console one (`GSC_CLIENT_EMAIL`)                                                                                      |
+| `PLAY_PRIVATE_KEY`        | optional | 14a         | Its private key, when `PLAY_CLIENT_EMAIL` is set                                                                                                                                 |
+| `PLAY_METADATA`           | optional | 14a         | `true` to snapshot Google Play store listings and tracks daily for `app_changes` (Android Publisher API, opt-in)                                                                 |
+| `PLAY_REVIEWS_API`        | optional | 14a         | `true` to read Google Play reviews of the last week every 4 hours (needs "Reply to reviews")                                                                                     |
+| `ASC_REPLY_KEY_ID`        | optional | 14a         | Key ID of a second App Store Connect key with the **Customer Support** role, only for `reply_review`                                                                             |
+| `ASC_REPLY_PRIVATE_KEY`   | optional | 14a         | That key's `.p8` file contents                                                                                                                                                   |
+| `APPLE_ADS_CLIENT_ID`     | optional | 14a         | Apple Ads API user's `clientId` (Account Settings → API in ads.apple.com)                                                                                                        |
+| `APPLE_ADS_TEAM_ID`       | optional | 14a         | Its `teamId`                                                                                                                                                                     |
+| `APPLE_ADS_KEY_ID`        | optional | 14a         | Its `keyId`                                                                                                                                                                      |
+| `APPLE_ADS_PRIVATE_KEY`   | optional | 14a         | The `private-key.pem` whose public key was uploaded                                                                                                                              |
+| `APPLE_ADS_ACCOUNT_ID`    | optional | 14a         | Read only this ad account; default every account the API user sees                                                                                                               |
+| `APP_STORE_PUBLIC_DATA`   | optional | 14a         | `true` to turn on the opt-in plugin that reads Apple's public App Store feeds (your app's rating and chart position)                                                             |
 
 `CLOUDFLARE_ACCOUNT_ID` and `CLOUDFLARE_API_TOKEN` are required even if you use no Cloudflare data:
 they are how Searchkeep checks your Access setup. Values that do not parse (invalid JSON in `SITES`,
@@ -738,8 +738,8 @@ The output lists your sites, including each `bingSiteUrl` from `SITES`.
   `GSC_ROWS_PER_DAY` when sync units keep being skipped (see
   [Troubleshooting](#sync-is-slow-or-units-are-skipped)).
 - **More Search Console data**: `GSC_SEARCH_TYPES` (default all five: `image`, `video`, `news` for
-  the News tab, `discover`, `googleNews`) and `GSC_SEARCH_APPEARANCE` (default `true`) need nothing
-  else; a search type without traffic costs one call per 30 days. `GSC_SEGMENT_SITES` (default off)
+  the News tab, `discover`, `googleNews`; `webMultimodal` for Google Lens, Circle to Search and image
+  uploads is opt-in) and `GSC_SEARCH_APPEARANCE` (default `true`) need nothing else; a search type without traffic costs one call per 30 days. `GSC_SEGMENT_SITES` (default off)
   also syncs each site's top 1,000 queries and pages per day by country and device, for the last 3
   months, so `query_performance` can answer "top queries in the US" or "top pages on mobile". It
   writes the most rows of these options: set it only for the sites you need it for.

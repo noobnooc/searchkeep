@@ -67,10 +67,10 @@ const source = z
   .optional()
   .describe('gsc = Google Search Console (daily), bing = Bing Webmaster Tools (weekly). Default gsc.');
 const searchType = z
-  .enum(['web', 'image', 'video', 'news', 'discover', 'googleNews'])
+  .enum(['web', 'image', 'video', 'news', 'discover', 'googleNews', 'webMultimodal'])
   .optional()
   .describe(
-    'Search Console search type: web (default), image, video, news (the News tab), discover, googleNews. discover and googleNews have pages only (no queries or positions).',
+    'Search Console search type: web (default), image, video, news (the News tab), discover, googleNews, webMultimodal (Google Lens, Circle to Search, image uploads; only if synced). discover, googleNews and webMultimodal have pages only (no queries or positions).',
   );
 const crawlerInput = {
   site: common.site,

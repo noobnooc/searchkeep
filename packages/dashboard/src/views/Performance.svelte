@@ -29,9 +29,10 @@
     { value: 'news', label: 'News tab' },
     { value: 'discover', label: 'Discover' },
     { value: 'googleNews', label: 'Google News' },
+    { value: 'webMultimodal', label: 'Multimodal (Lens)' },
   ];
-  /** Discover and Google News report pages only: no queries and no positions. */
-  const PAGE_ONLY: SearchType[] = ['discover', 'googleNews'];
+  /** Discover, Google News and multimodal search report pages only: no queries and no positions. */
+  const PAGE_ONLY: SearchType[] = ['discover', 'googleNews', 'webMultimodal'];
 
   let dim = $state<Dimension>('query');
   let searchType = $state<SearchType>('web');
