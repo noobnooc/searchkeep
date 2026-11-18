@@ -58,9 +58,9 @@ const source: ToolParam = {
 };
 const searchType: ToolParam = {
   name: 'searchType',
-  type: '"web" | "image" | "video" | "news" | "discover" | "googleNews"',
+  type: '"web" | "image" | "video" | "news" | "discover" | "googleNews" | "webMultimodal"',
   description:
-    'Search Console search type: `web` (default), `image`, `video`, `news` (the News tab in Search), `discover` or `googleNews`. Discover and Google News report pages only, without queries or positions. GSC only.',
+    'Search Console search type: `web` (default), `image`, `video`, `news` (the News tab in Search), `discover`, `googleNews` or `webMultimodal` (Google Lens, Circle to Search and image uploads). Discover, Google News and multimodal search report pages only, without queries or positions. GSC only.',
 };
 const crawlerParams = (example: string): ToolParam[] => [
   site,
@@ -708,7 +708,7 @@ export const SECRETS: Secret[] = [
     name: 'GSC_SEARCH_TYPES',
     required: 'optional',
     description:
-      'Search Console search types synced besides web search, comma-separated: `image`, `video`, `news` (the News tab), `discover`, `googleNews`. Defaults to all five; `none` for none. A search type without traffic costs one call per 30 days.',
+      'Search Console search types synced besides web search, comma-separated: `image`, `video`, `news` (the News tab), `discover`, `googleNews`, `webMultimodal` (Google Lens, Circle to Search and image uploads). Defaults to the first five; `webMultimodal` is opt-in; `none` for none. A search type without traffic costs one call per 30 days.',
     example: 'image,video,discover',
   },
   {

@@ -169,6 +169,8 @@ describe('search console options', () => {
     expect(set.errors).toEqual([expect.stringContaining('GSC_SEARCH_TYPES: unknown search type "bogus"')]);
     expect(segmentsEnabled(set, 'beta')).toBe(true);
     expect(loadConfig({ GSC_SEARCH_TYPES: 'none' }).gsc.searchTypes).toEqual([]);
+    // Multimodal search is opt-in (not in the defaults) and matched case-insensitively.
+    expect(loadConfig({ GSC_SEARCH_TYPES: 'image,WebMultimodal' }).gsc.searchTypes).toEqual(['image', 'webMultimodal']);
     expect(segmentsEnabled(loadConfig({ GSC_SEGMENT_SITES: 'ALL' }), 'any')).toBe(true);
   });
 });

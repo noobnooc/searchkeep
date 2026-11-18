@@ -142,8 +142,9 @@
     impressions, CTR and position.
   </li>
   <li>
-    The other search types (<code>GSC_SEARCH_TYPES</code>, all by default): image and video search and the News tab
-    (totals and query × page), Discover and Google News (totals and pages; they have no queries or positions).
+    The other search types (<code>GSC_SEARCH_TYPES</code>, all but <code>webMultimodal</code> by default): image and
+    video search and the News tab (totals and query × page), Discover, Google News and, opt-in, multimodal search
+    (Google Lens, Circle to Search, image uploads) (totals and pages; they have no queries or positions).
   </li>
   <li>Search appearance per day (rich results, videos, AMP, ...), unless <code>GSC_SEARCH_APPEARANCE</code> is <code>false</code>.</li>
   <li>

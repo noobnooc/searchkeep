@@ -700,8 +700,8 @@ async function planUnits(ctx: SyncContext, today: IsoDate, nowMs: number, budget
         chunk: syncKeys.gscExtraChunk(d, site.id),
       });
 
-      // Other search types (image, video, News tab, Discover, Google News): totals per day and
-      // query × page (Discover and Google News: page only; they have no queries and no position).
+      // Other search types (image, video, News tab, Discover, Google News, multimodal): totals per
+      // day and query × page (Discover, Google News and multimodal: page only, without position).
       for (const type of config.gsc.searchTypes) {
         const pageOnly = PAGE_ONLY_SEARCH_TYPES.includes(type);
         const reserved = 2;

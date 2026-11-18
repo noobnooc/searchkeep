@@ -82,7 +82,10 @@ export interface SearchkeepConfig {
 
 const SITE_ID_RE = /^[a-z0-9][a-z0-9-]{0,62}$/;
 
-/** Search types synced besides web search when GSC_SEARCH_TYPES is not set. */
+/**
+ * Search types synced besides web search when GSC_SEARCH_TYPES is not set. `webMultimodal` is
+ * opt-in: Google has not documented which dimensions it supports or how far back it goes.
+ */
 export const DEFAULT_EXTRA_SEARCH_TYPES: GscSearchType[] = ['image', 'video', 'news', 'discover', 'googleNews'];
 
 /** `image,video` → those types; `none` (or empty) → none; unknown names are reported. */

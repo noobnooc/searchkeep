@@ -777,15 +777,17 @@ export function storeContract(name: string, makeStore: () => Promise<Store>): vo
           async searchAnalytics(req) {
             const days = daysOf(req.startDate, req.endDate);
             const type = req.type ?? 'web';
-            // Image search has data like web search, Discover has pages without positions, the others nothing.
-            if (type !== 'web' && type !== 'image' && type !== 'discover') return [];
+            // Image search has data like web search, Discover and multimodal search have pages without
+            // positions, the others nothing.
+            const pageOnly = type === 'discover' || type === 'webMultimodal';
+            if (type !== 'web' && type !== 'image' && !pageOnly) return [];
             const dims = req.dimensions;
             const row = (keys: string[], clicks: number, impressions: number, position: number) => ({
               keys,
               clicks,
               impressions,
               ctr: clicks / impressions,
-              position: type === 'discover' ? 0 : position,
+              position: pageOnly ? 0 : position,
             });
             const rows =
               dims[0] === 'searchAppearance'
@@ -1345,7 +1347,7 @@ export function storeContract(name: string, makeStore: () => Promise<Store>): vo
           {
             SYNC_MAX_CALLS_PER_RUN: '900',
             GSC_BACKFILL_MONTHS: '1',
-            GSC_SEARCH_TYPES: 'image,video,discover',
+            GSC_SEARCH_TYPES: 'image,video,discover,webMultimodal',
             GSC_SEARCH_APPEARANCE: 'true',
             GSC_SEGMENT_SITES: 'acme',
           },
@@ -1373,6 +1375,13 @@ export function storeContract(name: string, makeStore: () => Promise<Store>): vo
           /pages, not queries/,
         );
         await expect(findQuickWins(ctx, { site: 'acme', ...range, searchType: 'discover' })).rejects.toThrow(/pages only/);
+        // Multimodal search (Lens, Circle to Search) is requested by date and page only, never by query.
+        expect(new Set(calls.filter((x) => x.startsWith('webMultimodal:')))).toEqual(
+          new Set(['webMultimodal:date', 'webMultimodal:date+page']),
+        );
+        const multimodal = await queryPerformance(ctx, { site: 'acme', ...range, searchType: 'webMultimodal', dimensions: ['page'] });
+        expect(multimodal.rows).toEqual([{ page: '/widgets', clicks: 57, impressions: 570, ctr: 0.1, position: null }]);
+        await expect(findQuickWins(ctx, { site: 'acme', ...range, searchType: 'webMultimodal' })).rejects.toThrow(/pages only/);
         // Video search had no data: one call per range, nothing stored.
         expect((await queryPerformance(ctx, { site: 'acme', ...range, searchType: 'video' })).rows).toEqual([]);
         // News is not synced.
@@ -1399,7 +1408,7 @@ export function storeContract(name: string, makeStore: () => Promise<Store>): vo
         );
         // Each dataset backfills on its own cursor (segments are capped at 3 months; 1 here).
         const cursors = await store.listMeta('gsc:');
-        for (const d of ['image', 'video', 'discover', 'appearance', 'segments']) {
+        for (const d of ['image', 'video', 'discover', 'webMultimodal', 'appearance', 'segments']) {
           expect(cursors[`gsc:${d}:backfill:acme`]).toBe('2026-09-20');
         }
         expect(cursors['gsc:backfill:acme']).toBe('2026-09-20');

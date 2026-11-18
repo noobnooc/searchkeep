@@ -8,8 +8,8 @@ export type Source = 'gsc' | 'bing';
 export type Brand = 'all' | 'brand' | 'non_brand';
 export type ReadinessState = 'no_access' | 'oauth_disabled' | 'policy_too_broad' | 'ready';
 export type Dimension = 'date' | 'week' | 'month' | 'query' | 'page' | 'country' | 'device' | 'appearance';
-/** Search Console search types; discover and googleNews have pages only (no queries or positions). */
-export type SearchType = 'web' | 'image' | 'video' | 'news' | 'discover' | 'googleNews';
+/** Search Console search types; discover, googleNews and webMultimodal have pages only (no queries or positions). */
+export type SearchType = 'web' | 'image' | 'video' | 'news' | 'discover' | 'googleNews' | 'webMultimodal';
 /** AI crawlers: training, search, user, other. Search engine crawlers: search, media, ads, other. */
 export type CrawlerPurpose = 'training' | 'search' | 'user' | 'media' | 'ads' | 'other';
 export type CrawlerGroup = 'crawler' | 'operator' | 'purpose' | 'path' | 'status' | 'date';

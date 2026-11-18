@@ -15,13 +15,16 @@ export type SourceId = SearchSource | 'cloudflare' | AppSourceId;
 
 /**
  * Search Console search types. `web` is the default everywhere; the others are
- * synced as separate datasets (GSC_SEARCH_TYPES). Discover and Google News
- * have no queries and no positions.
+ * synced as separate datasets (GSC_SEARCH_TYPES). Discover, Google News and
+ * multimodal search have no queries and no positions. `webMultimodal` (Google
+ * Lens, Circle to Search and image uploads) was added to the Search Analytics
+ * API in November 2026; Search Console shows it without queries, so it is
+ * synced by page only.
  */
-export type GscSearchType = 'web' | 'image' | 'video' | 'news' | 'discover' | 'googleNews';
-export const GSC_SEARCH_TYPES: readonly GscSearchType[] = ['web', 'image', 'video', 'news', 'discover', 'googleNews'];
+export type GscSearchType = 'web' | 'image' | 'video' | 'news' | 'discover' | 'googleNews' | 'webMultimodal';
+export const GSC_SEARCH_TYPES: readonly GscSearchType[] = ['web', 'image', 'video', 'news', 'discover', 'googleNews', 'webMultimodal'];
 /** Search types that report pages only: no query dimension and no average position. */
-export const PAGE_ONLY_SEARCH_TYPES: readonly GscSearchType[] = ['discover', 'googleNews'];
+export const PAGE_ONLY_SEARCH_TYPES: readonly GscSearchType[] = ['discover', 'googleNews', 'webMultimodal'];
 
 export interface SiteConfig {
   /** Short stable identifier, e.g. `acme`. Lowercase letters, digits, dashes. */

@@ -28,9 +28,10 @@ const SEARCH_TYPE_NAMES: Record<GscSearchType, string> = {
   news: "Search's News tab",
   discover: 'Discover',
   googleNews: 'Google News',
+  webMultimodal: 'Multimodal search (Lens, Circle to Search)',
 };
 
-/** Discover and Google News have no queries (and no positions): tools that need queries refuse them. */
+/** Discover, Google News and multimodal search have no queries (and no positions): tools that need queries refuse them. */
 function requireQueries(r: Resolved, what: string): void {
   if (PAGE_ONLY_SEARCH_TYPES.includes(r.searchType)) {
     throw new SearchkeepError(
