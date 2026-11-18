@@ -14,7 +14,7 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@cloudflare/puppeteer": "^1.4.0",
+    "@cloudflare/puppeteer": "^2.0.0",
     "@searchkeep/core": "workspace:*",
     "@searchkeep/mcp": "workspace:*",
     "@searchkeep/source-app-store-connect": "workspace:*",
