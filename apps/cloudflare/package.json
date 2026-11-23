@@ -28,12 +28,12 @@
     "hono": "^4.13.18"
   },
   "devDependencies": {
-    "@cloudflare/workers-types": "^5.20261113.1",
+    "@cloudflare/workers-types": "^5.20261120.1",
     "@searchkeep/dashboard": "workspace:*",
     "@types/node": "^22.19.0",
     "miniflare": "^4.20260730.0",
     "typescript": "^5.9.3",
-    "vitest": "^5.1.0",
+    "vitest": "^5.1.1",
     "wrangler": "^4.161.0"
   }
 }
